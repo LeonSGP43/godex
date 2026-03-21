@@ -2,8 +2,11 @@ use super::*;
 use crate::AuthManager;
 use crate::CodexAuth;
 use crate::ThreadManager;
+use crate::agent::backend::ClaudeCodeCommand;
 use crate::built_in_model_providers;
 use crate::codex::make_session_and_context;
+use crate::config::CONFIG_TOML_FILE;
+use crate::config::ConfigBuilder;
 use crate::config::DEFAULT_AGENT_MAX_DEPTH;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::function_tool::FunctionCallError;
@@ -31,8 +34,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
+
+struct ClaudeCodeCommandOverrideReset;
+
+impl Drop for ClaudeCodeCommandOverrideReset {
+    fn drop(&mut self) {
+        crate::agent::backend::set_default_claude_code_command_for_test(None);
+    }
+}
 
 fn invocation(
     session: Arc<crate::codex::Session>,
@@ -227,6 +239,698 @@ async fn spawn_agent_errors_when_manager_dropped() {
     assert_eq!(
         err,
         FunctionCallError::RespondToModel("collab manager unavailable".to_string())
+    );
+}
+
+#[tokio::test]
+async fn spawn_agent_accepts_model_override_for_claude_code_backend() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "printf '%s' '[{\"type\":\"result\",\"result\":\"model override ok\",\"session_id\":\"claude-model-session\"}]'".to_string(),
+            ],
+        ),
+    ));
+
+    let (mut session, turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+    let invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "hello",
+            "backend": "claude_code",
+            "model": "claude-sonnet-4-6"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(invocation)
+        .await
+        .expect("model override should be accepted");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent id");
+    let snapshot = agent_control
+        .get_agent_config_snapshot(agent_id)
+        .await
+        .expect("snapshot should exist");
+    assert_eq!(snapshot.model, "claude-sonnet-4-6");
+    assert_eq!(snapshot.model_provider_id, "claude_code");
+}
+
+#[tokio::test]
+async fn send_input_continues_claude_code_backend_after_completion() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "input=$(cat); case \"$input\" in \
+                    *\"review this architecture\"*) result='spawn one' ;; \
+                    *\"follow up\"*) result='follow up done' ;; \
+                    *) result='unknown' ;; \
+                esac; printf '[{\"type\":\"result\",\"result\":\"%s\",\"session_id\":\"claude-multi-turn\",\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}]' \"$result\"".to_string(),
+            ],
+        ),
+    ));
+
+    let (mut session, turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "review this architecture",
+            "backend": "claude_code"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent id");
+
+    let (mut wait_session, wait_turn) = make_session_and_context().await;
+    wait_session.services.agent_control = agent_control.clone();
+    let wait_once = invocation(
+        Arc::new(wait_session),
+        Arc::new(wait_turn),
+        "wait_agent",
+        function_payload(json!({"ids": [agent_id.to_string()], "timeout_ms": 1000})),
+    );
+    WaitAgentHandler
+        .handle(wait_once)
+        .await
+        .expect("initial wait should succeed");
+
+    let (mut send_session, send_turn) = make_session_and_context().await;
+    send_session.services.agent_control = agent_control.clone();
+    let send_invocation = invocation(
+        Arc::new(send_session),
+        Arc::new(send_turn),
+        "send_input",
+        function_payload(json!({"id": agent_id.to_string(), "message": "follow up"})),
+    );
+    let output = SendInputHandler
+        .handle(send_invocation)
+        .await
+        .expect("send_input should succeed");
+    let (content, success) = expect_text_output(output);
+    let result: serde_json::Value =
+        serde_json::from_str(&content).expect("send_input result should be json");
+    assert!(
+        result
+            .get("submission_id")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(success, Some(true));
+
+    let (mut wait_session, wait_turn) = make_session_and_context().await;
+    wait_session.services.agent_control = agent_control.clone();
+    let wait_again = invocation(
+        Arc::new(wait_session),
+        Arc::new(wait_turn),
+        "wait_agent",
+        function_payload(json!({"ids": [agent_id.to_string()], "timeout_ms": 1000})),
+    );
+    let output = WaitAgentHandler
+        .handle(wait_again)
+        .await
+        .expect("wait after send_input should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: wait::WaitAgentResult =
+        serde_json::from_str(&content).expect("wait result should be json");
+    assert_eq!(
+        result.status.get(&agent_id),
+        Some(&AgentStatus::Completed(Some("follow up done".to_string())))
+    );
+}
+
+#[tokio::test]
+async fn spawn_agent_uses_claude_style_role_and_preserves_runtime_provider() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+        nickname: Option<String>,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    session.services.agent_control = manager.agent_control();
+    let mut config = (*turn.config).clone();
+    let provider = built_in_model_providers(/* openai_base_url */ None)["ollama"].clone();
+    config.model_provider_id = "ollama".to_string();
+    config.model_provider = provider.clone();
+    turn.provider = provider;
+    turn.config = Arc::new(config);
+
+    let invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "review this architecture",
+            "agent_type": "claude-style"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent_id should be valid");
+    assert!(
+        result
+            .nickname
+            .as_deref()
+            .is_some_and(|nickname| !nickname.is_empty())
+    );
+
+    let snapshot = manager
+        .agent_control()
+        .get_agent_config_snapshot(agent_id)
+        .await
+        .expect("spawned agent snapshot should exist");
+    let (_, role) = manager
+        .agent_control()
+        .get_agent_nickname_and_role(agent_id)
+        .await
+        .expect("spawned agent metadata should exist");
+    assert_eq!(role.as_deref(), Some("claude-style"));
+    assert_eq!(snapshot.model_provider_id, "ollama");
+    assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::High));
+}
+
+#[tokio::test]
+async fn spawn_agent_loads_user_defined_role_from_config_and_uses_native_backend() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+        nickname: Option<String>,
+    }
+
+    let codex_home = TempDir::new().expect("create temp codex home");
+    std::fs::create_dir_all(codex_home.path().join("agents")).expect("create agents dir");
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"
+[agents.reviewer]
+description = "Review role"
+config_file = "./agents/reviewer.toml"
+nickname_candidates = ["Atlas"]
+"#,
+    )
+    .expect("write config.toml");
+    std::fs::write(
+        codex_home.path().join("agents/reviewer.toml"),
+        r#"
+model_reasoning_effort = "high"
+"#,
+    )
+    .expect("write role file");
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect("load config");
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    session.services.agent_control = manager.agent_control();
+    turn.config = Arc::new(config);
+
+    let invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "review this architecture",
+            "agent_type": "reviewer"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent_id should be valid");
+
+    assert_eq!(result.nickname.as_deref(), Some("Atlas"));
+    manager
+        .get_thread(agent_id)
+        .await
+        .expect("native spawned thread should exist");
+
+    let snapshot = manager
+        .agent_control()
+        .get_agent_config_snapshot(agent_id)
+        .await
+        .expect("spawned agent snapshot should exist");
+    let (_, role) = manager
+        .agent_control()
+        .get_agent_nickname_and_role(agent_id)
+        .await
+        .expect("spawned agent metadata should exist");
+
+    assert_eq!(role.as_deref(), Some("reviewer"));
+    assert_eq!(snapshot.model_provider_id, "openai");
+    assert_ne!(snapshot.model_provider_id, "claude_code");
+    assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::High));
+}
+
+#[tokio::test]
+async fn spawn_agent_uses_claude_code_backend_and_wait_agent_observes_completion() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+        nickname: Option<String>,
+    }
+
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "printf '%s' '[{\"type\":\"result\",\"result\":\"Claude backend done\",\"usage\":{\"inputTokens\":4,\"outputTokens\":2,\"cacheReadInputTokens\":1}}]'".to_string(),
+            ],
+        ),
+    ));
+
+    let (mut session, turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "review this architecture",
+            "backend": "claude_code"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent_id should be valid");
+    assert!(
+        result
+            .nickname
+            .as_deref()
+            .is_some_and(|nickname| !nickname.is_empty())
+    );
+
+    let snapshot = agent_control
+        .get_agent_config_snapshot(agent_id)
+        .await
+        .expect("spawned agent snapshot should exist");
+    assert_eq!(snapshot.model, "claude-code");
+    assert_eq!(snapshot.model_provider_id, "claude_code");
+
+    let (mut wait_session, wait_turn) = make_session_and_context().await;
+    wait_session.services.agent_control = agent_control.clone();
+    let wait_invocation = invocation(
+        Arc::new(wait_session),
+        Arc::new(wait_turn),
+        "wait_agent",
+        function_payload(json!({
+            "ids": [agent_id.to_string()],
+            "timeout_ms": 1000
+        })),
+    );
+    let output = WaitAgentHandler
+        .handle(wait_invocation)
+        .await
+        .expect("wait_agent should succeed");
+    let (content, success) = expect_text_output(output);
+    let result: wait::WaitAgentResult =
+        serde_json::from_str(&content).expect("wait_agent result should be json");
+    assert_eq!(
+        result,
+        wait::WaitAgentResult {
+            status: HashMap::from([(
+                agent_id,
+                AgentStatus::Completed(Some("Claude backend done".to_string()))
+            )]),
+            timed_out: false,
+        }
+    );
+    assert_eq!(success, None);
+
+    let usage = agent_control
+        .get_total_token_usage(agent_id)
+        .await
+        .expect("token usage should exist");
+    assert_eq!(usage.input_tokens, 4);
+    assert_eq!(usage.cached_input_tokens, 1);
+    assert_eq!(usage.output_tokens, 2);
+}
+
+#[tokio::test]
+async fn close_agent_shuts_down_running_claude_code_backend() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "sleep 30; printf '%s' '[{\"type\":\"result\",\"result\":\"late\"}]'".to_string(),
+            ],
+        ),
+    ));
+
+    let (mut session, turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "do a long external review",
+            "backend": "claude_code"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent_id should be valid");
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if agent_control.get_status(agent_id).await == AgentStatus::Running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("external backend should enter running state");
+
+    let (mut close_session, close_turn) = make_session_and_context().await;
+    close_session.services.agent_control = agent_control.clone();
+    let close_invocation = invocation(
+        Arc::new(close_session),
+        Arc::new(close_turn),
+        "close_agent",
+        function_payload(json!({"id": agent_id.to_string()})),
+    );
+    let output = CloseAgentHandler
+        .handle(close_invocation)
+        .await
+        .expect("close_agent should succeed");
+    let (content, success) = expect_text_output(output);
+    let result: serde_json::Value =
+        serde_json::from_str(&content).expect("close_agent result should be json");
+    assert_eq!(result.get("previous_status"), Some(&json!("running")));
+    assert_eq!(success, Some(true));
+
+    assert_eq!(
+        agent_control.get_status(agent_id).await,
+        AgentStatus::NotFound
+    );
+    assert!(
+        manager
+            .captured_ops()
+            .into_iter()
+            .all(|(thread_id, _)| thread_id != agent_id)
+    );
+}
+
+#[tokio::test]
+async fn send_input_interrupt_restarts_running_claude_code_backend() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "input=$(cat); case \"$input\" in \
+                    *\"long task\"*) sleep 30; result='late' ;; \
+                    *\"after interrupt\"*) result='after interrupt' ;; \
+                    *) result='unknown' ;; \
+                esac; printf '[{\"type\":\"result\",\"result\":\"%s\",\"session_id\":\"claude-interrupt-session\"}]' \"$result\"".to_string(),
+            ],
+        ),
+    ));
+
+    let (mut session, turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "long task",
+            "backend": "claude_code"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent id");
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if agent_control.get_status(agent_id).await == AgentStatus::Running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("external backend should enter running state");
+
+    let (mut send_session, send_turn) = make_session_and_context().await;
+    send_session.services.agent_control = agent_control.clone();
+    let send_invocation = invocation(
+        Arc::new(send_session),
+        Arc::new(send_turn),
+        "send_input",
+        function_payload(json!({
+            "id": agent_id.to_string(),
+            "message": "after interrupt",
+            "interrupt": true
+        })),
+    );
+    SendInputHandler
+        .handle(send_invocation)
+        .await
+        .expect("interrupting send_input should succeed");
+
+    let (mut wait_session, wait_turn) = make_session_and_context().await;
+    wait_session.services.agent_control = agent_control.clone();
+    let wait_invocation = invocation(
+        Arc::new(wait_session),
+        Arc::new(wait_turn),
+        "wait_agent",
+        function_payload(json!({"ids": [agent_id.to_string()], "timeout_ms": 1000})),
+    );
+    let output = WaitAgentHandler
+        .handle(wait_invocation)
+        .await
+        .expect("wait_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: wait::WaitAgentResult =
+        serde_json::from_str(&content).expect("wait result should be json");
+    assert_eq!(
+        result.status.get(&agent_id),
+        Some(&AgentStatus::Completed(Some("after interrupt".to_string())))
+    );
+}
+
+#[tokio::test]
+async fn resume_agent_restores_closed_claude_code_backend_and_accepts_send_input() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "input=$(cat); case \"$input\" in \
+                    *\"initial external\"*) result='first done' ;; \
+                    *\"after resume\"*) result='after resume done' ;; \
+                    *) result='unknown' ;; \
+                esac; printf '[{\"type\":\"result\",\"result\":\"%s\",\"session_id\":\"claude-resume-session\"}]' \"$result\"".to_string(),
+            ],
+        ),
+    ));
+
+    let (mut session, turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "initial external",
+            "backend": "claude_code"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent id");
+
+    let (mut wait_session, wait_turn) = make_session_and_context().await;
+    wait_session.services.agent_control = agent_control.clone();
+    let wait_invocation = invocation(
+        Arc::new(wait_session),
+        Arc::new(wait_turn),
+        "wait_agent",
+        function_payload(json!({"ids": [agent_id.to_string()], "timeout_ms": 1000})),
+    );
+    WaitAgentHandler
+        .handle(wait_invocation)
+        .await
+        .expect("initial wait should succeed");
+
+    let (mut close_session, close_turn) = make_session_and_context().await;
+    close_session.services.agent_control = agent_control.clone();
+    let close_invocation = invocation(
+        Arc::new(close_session),
+        Arc::new(close_turn),
+        "close_agent",
+        function_payload(json!({"id": agent_id.to_string()})),
+    );
+    CloseAgentHandler
+        .handle(close_invocation)
+        .await
+        .expect("close_agent should succeed");
+    assert_eq!(
+        agent_control.get_status(agent_id).await,
+        AgentStatus::NotFound
+    );
+
+    let (mut resume_session, resume_turn) = make_session_and_context().await;
+    resume_session.services.agent_control = agent_control.clone();
+    let resume_invocation = invocation(
+        Arc::new(resume_session),
+        Arc::new(resume_turn),
+        "resume_agent",
+        function_payload(json!({"id": agent_id.to_string()})),
+    );
+    let output = ResumeAgentHandler
+        .handle(resume_invocation)
+        .await
+        .expect("resume_agent should succeed");
+    let (content, success) = expect_text_output(output);
+    let result: resume_agent::ResumeAgentResult =
+        serde_json::from_str(&content).expect("resume result should be json");
+    assert_ne!(result.status, AgentStatus::NotFound);
+    assert_eq!(success, Some(true));
+
+    let (mut send_session, send_turn) = make_session_and_context().await;
+    send_session.services.agent_control = agent_control.clone();
+    let send_invocation = invocation(
+        Arc::new(send_session),
+        Arc::new(send_turn),
+        "send_input",
+        function_payload(json!({"id": agent_id.to_string(), "message": "after resume"})),
+    );
+    SendInputHandler
+        .handle(send_invocation)
+        .await
+        .expect("send_input after resume should succeed");
+
+    let (mut wait_session, wait_turn) = make_session_and_context().await;
+    wait_session.services.agent_control = agent_control.clone();
+    let wait_invocation = invocation(
+        Arc::new(wait_session),
+        Arc::new(wait_turn),
+        "wait_agent",
+        function_payload(json!({"ids": [agent_id.to_string()], "timeout_ms": 1000})),
+    );
+    let output = WaitAgentHandler
+        .handle(wait_invocation)
+        .await
+        .expect("wait after resume should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: wait::WaitAgentResult =
+        serde_json::from_str(&content).expect("wait result should be json");
+    assert_eq!(
+        result.status.get(&agent_id),
+        Some(&AgentStatus::Completed(Some(
+            "after resume done".to_string()
+        )))
     );
 }
 

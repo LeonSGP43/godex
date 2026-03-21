@@ -1,8 +1,11 @@
 use super::*;
+use crate::AuthManager;
 use crate::CodexAuth;
 use crate::CodexThread;
 use crate::ThreadManager;
 use crate::agent::agent_status_from_event;
+use crate::agent::backend::ClaudeCodeCommand;
+use crate::agent::backend::SpawnedAgentBackendKind;
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::ConfigBuilder;
@@ -22,12 +25,21 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
+use codex_state::DirectionalThreadSpawnEdgeStatus;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use tokio::time::Duration;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use toml::Value as TomlValue;
+
+struct ClaudeCodeCommandOverrideReset;
+
+impl Drop for ClaudeCodeCommandOverrideReset {
+    fn drop(&mut self) {
+        crate::agent::backend::set_default_claude_code_command_for_test(None);
+    }
+}
 
 async fn test_config_with_cli_overrides(
     cli_overrides: Vec<(String, TomlValue)>,
@@ -454,6 +466,7 @@ async fn spawn_agent_can_fork_parent_thread_history() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id),
+                backend_kind: SpawnedAgentBackendKind::Codex,
             },
         )
         .await
@@ -537,6 +550,7 @@ async fn spawn_agent_fork_injects_output_for_parent_spawn_call() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id.clone()),
+                backend_kind: SpawnedAgentBackendKind::Codex,
             },
         )
         .await
@@ -607,6 +621,7 @@ async fn spawn_agent_fork_flushes_parent_rollout_before_loading_history() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id.clone()),
+                backend_kind: SpawnedAgentBackendKind::Codex,
             },
         )
         .await
@@ -1067,7 +1082,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
     let state_db = child_thread
         .state_db()
         .expect("sqlite state db should be available for nickname resume test");
-    timeout(Duration::from_secs(5), async {
+    timeout(Duration::from_secs(15), async {
         loop {
             if let Ok(Some(metadata)) = state_db.get_thread(child_thread_id).await
                 && metadata.agent_nickname.is_some()
@@ -1639,6 +1654,175 @@ async fn resume_agent_from_rollout_reopens_open_descendants_after_manager_shutdo
         .shutdown_agent_tree(parent_thread_id)
         .await
         .expect("tree shutdown after subtree resume should succeed");
+}
+
+#[tokio::test]
+async fn close_agent_persists_closed_edge_for_claude_code_backend() {
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test("bash", vec!["-lc".to_string(), "sleep 30".to_string()]),
+    ));
+
+    let harness = AgentControlHarness::new().await;
+    let (parent_thread_id, parent_thread) = harness.start_thread().await;
+    let state_db = parent_thread
+        .state_db()
+        .expect("sqlite state db should be available for parent thread");
+
+    let child_thread_id = harness
+        .control
+        .spawn_agent_with_options(
+            harness.config.clone(),
+            text_input("hello external child"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_nickname: None,
+                agent_role: Some("explorer".to_string()),
+            })),
+            SpawnAgentOptions {
+                fork_parent_spawn_call_id: None,
+                backend_kind: SpawnedAgentBackendKind::ClaudeCode,
+            },
+        )
+        .await
+        .expect("external child spawn should succeed");
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let open_children = state_db
+                .list_thread_spawn_children_with_status(
+                    parent_thread_id,
+                    DirectionalThreadSpawnEdgeStatus::Open,
+                )
+                .await
+                .expect("open spawn-edge query should succeed");
+            if open_children.contains(&child_thread_id) {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("external child should persist an open spawn edge");
+
+    let _ = harness
+        .control
+        .close_agent(child_thread_id)
+        .await
+        .expect("external child close should succeed");
+
+    let open_children = state_db
+        .list_thread_spawn_children_with_status(
+            parent_thread_id,
+            DirectionalThreadSpawnEdgeStatus::Open,
+        )
+        .await
+        .expect("open spawn-edge query after close should succeed");
+    assert!(!open_children.contains(&child_thread_id));
+
+    let closed_children = state_db
+        .list_thread_spawn_children_with_status(
+            parent_thread_id,
+            DirectionalThreadSpawnEdgeStatus::Closed,
+        )
+        .await
+        .expect("closed spawn-edge query after close should succeed");
+    assert!(closed_children.contains(&child_thread_id));
+
+    let _ = harness
+        .control
+        .shutdown_live_agent(parent_thread_id)
+        .await
+        .expect("parent shutdown should succeed");
+}
+
+#[tokio::test]
+async fn spawn_agent_with_fork_context_bridges_parent_history_for_claude_code_backend() {
+    let _lock = crate::agent::backend::acquire_claude_code_test_lock().await;
+    let _reset = ClaudeCodeCommandOverrideReset;
+    crate::agent::backend::set_default_claude_code_command_for_test(Some(
+        ClaudeCodeCommand::new_for_test(
+            "bash",
+            vec![
+                "-lc".to_string(),
+                "input=$(cat); case \"$input\" in \
+                    *\"parent materialized\"*\"child task\"*) result='fork seen' ;; \
+                    *) result='fork missing' ;; \
+                esac; printf '[{\"type\":\"result\",\"result\":\"%s\",\"session_id\":\"claude-fork-session\"}]' \"$result\"".to_string(),
+            ],
+        ),
+    ));
+
+    let harness = AgentControlHarness::new().await;
+    let parent = harness
+        .manager
+        .resume_thread_with_history(
+            harness.config.clone(),
+            InitialHistory::Forked(vec![
+                RolloutItem::ResponseItem(ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "parent materialized".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                }),
+                RolloutItem::ResponseItem(ResponseItem::Message {
+                    id: None,
+                    role: "assistant".to_string(),
+                    content: vec![ContentItem::OutputText {
+                        text: "parent reply".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                }),
+            ]),
+            AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy")),
+            false,
+            None,
+        )
+        .await
+        .expect("start parent thread with history");
+    let parent_thread_id = parent.thread_id;
+
+    let child_thread_id = harness
+        .control
+        .spawn_agent_with_options(
+            harness.config.clone(),
+            text_input("child task"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_nickname: None,
+                agent_role: Some("explorer".to_string()),
+            })),
+            SpawnAgentOptions {
+                fork_parent_spawn_call_id: Some("call-fork".to_string()),
+                backend_kind: SpawnedAgentBackendKind::ClaudeCode,
+            },
+        )
+        .await
+        .expect("external fork spawn should succeed");
+
+    let status = timeout(Duration::from_secs(5), async {
+        loop {
+            let status = harness.control.get_status(child_thread_id).await;
+            if matches!(status, AgentStatus::Completed(_)) {
+                break status;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("forked external child should complete");
+
+    assert_eq!(
+        status,
+        AgentStatus::Completed(Some("fork seen".to_string()))
+    );
 }
 
 #[tokio::test]

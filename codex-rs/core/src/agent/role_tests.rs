@@ -84,6 +84,24 @@ async fn apply_explorer_role_sets_model_and_adds_session_flags_layer() {
 }
 
 #[tokio::test]
+async fn apply_claude_style_role_sets_instructions_and_high_reasoning() {
+    let (_home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
+    let before_layers = session_flags_layer_count(&config);
+
+    apply_role_to_config(&mut config, Some("claude-style"))
+        .await
+        .expect("claude-style role should apply");
+
+    let developer_instructions = config
+        .developer_instructions
+        .as_deref()
+        .expect("claude-style should set developer instructions");
+    assert!(developer_instructions.contains("Claude-style analysis and review mode"));
+    assert_eq!(config.model_reasoning_effort, Some(ReasoningEffort::High));
+    assert_eq!(session_flags_layer_count(&config), before_layers + 1);
+}
+
+#[tokio::test]
 async fn apply_role_returns_unavailable_for_missing_user_role_file() {
     let (_home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
     config.agent_roles.insert(
@@ -683,6 +701,19 @@ fn spawn_tool_spec_lists_user_defined_roles_before_built_ins() {
 }
 
 #[test]
+fn spawn_tool_spec_lists_built_in_claude_style_role() {
+    let spec = spawn_tool_spec::build(&BTreeMap::new());
+
+    assert!(spec.contains("claude-style: {"));
+    assert!(
+        spec.contains(
+            "Codex sub-agent to behave like a concise, review-heavy architecture partner"
+        )
+    );
+    assert!(spec.contains("This role's reasoning effort is set to `high` and cannot be changed."));
+}
+
+#[test]
 fn spawn_tool_spec_marks_role_locked_model_and_reasoning_effort() {
     let tempdir = TempDir::new().expect("create temp dir");
     let role_path = tempdir.path().join("researcher.toml");
@@ -733,7 +764,11 @@ fn spawn_tool_spec_marks_role_locked_reasoning_effort_only() {
 }
 
 #[test]
-fn built_in_config_file_contents_resolves_explorer_only() {
+fn built_in_config_file_contents_resolves_known_configs() {
+    assert!(
+        built_in::config_file_contents(Path::new("claude-style.toml"))
+            .is_some_and(|contents| contents.contains("Claude-style analysis and review mode"))
+    );
     assert_eq!(
         built_in::config_file_contents(Path::new("missing.toml")),
         None

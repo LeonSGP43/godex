@@ -53,6 +53,7 @@ You can also use Codex with an API key, but this requires [additional setup](htt
 ## Docs
 
 - [**Codex Documentation**](https://developers.openai.com/codex)
+- [**Agent roles**](./docs/agent-roles.md)
 - [**Contributing**](./docs/contributing.md)
 - [**Installing & building**](./docs/install.md)
 - [**Open source fund**](./docs/open-source-fund.md)

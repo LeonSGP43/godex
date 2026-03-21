@@ -1096,6 +1096,15 @@ fn create_spawn_agent_tool(config: &ToolsConfig) -> ToolSpec {
             },
         ),
         (
+            "backend".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional runtime backend for the spawned agent. Use `codex` (default) for the native Codex sub-agent runtime, or `claude_code` for the external Claude Code backend. `backend=claude_code` supports spawn/send_input/resume_agent/wait_agent/close_agent, inherits the local Claude Code CLI model unless overridden, supports `model` overrides, and applies `fork_context` by replaying the parent thread history into the initial Claude prompt."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
             "fork_context".to_string(),
             JsonSchema::Boolean {
                 description: Some(
@@ -1108,7 +1117,7 @@ fn create_spawn_agent_tool(config: &ToolsConfig) -> ToolSpec {
             "model".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model override for the new agent. Replaces the inherited model."
+                    "Optional model override for the new agent. Replaces the inherited model for the native Codex backend, or selects the Claude model when `backend = \"claude_code\"`."
                         .to_string(),
                 ),
             },

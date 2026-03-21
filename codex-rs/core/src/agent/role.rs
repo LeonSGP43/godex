@@ -355,6 +355,25 @@ mod built_in {
                     }
                 ),
                 (
+                    "claude-style".to_string(),
+                    AgentRoleConfig {
+                        description: Some(r#"Use `claude-style` when you want a Codex sub-agent to behave like a concise, review-heavy architecture partner while still running inside Codex's native spawned-agent runtime.
+Typical tasks:
+- Architecture and design reviews
+- Repo-wide code reading and tradeoff analysis
+- Acceptance review and risk assessment
+Rules:
+- Lead with conclusions, blockers, and key risks.
+- Distinguish confirmed facts from assumptions and open questions.
+- Prefer concrete file references, exact verification steps, and direct language.
+- Stay in analysis and review mode unless the parent explicitly asks for implementation."#.to_string()),
+                        config_file: Some(
+                            "claude-style.toml".to_string().parse().unwrap_or_default()
+                        ),
+                        nickname_candidates: None,
+                    }
+                ),
+                (
                     "explorer".to_string(),
                     AgentRoleConfig {
                         description: Some(r#"Use `explorer` for specific codebase questions.
@@ -408,9 +427,11 @@ Rules:
 
     /// Resolves a built-in role `config_file` path to embedded content.
     pub(super) fn config_file_contents(path: &Path) -> Option<&'static str> {
+        const CLAUDE_STYLE: &str = include_str!("builtins/claude-style.toml");
         const EXPLORER: &str = include_str!("builtins/explorer.toml");
         const AWAITER: &str = include_str!("builtins/awaiter.toml");
         match path.to_str()? {
+            "claude-style.toml" => Some(CLAUDE_STYLE),
             "explorer.toml" => Some(EXPLORER),
             "awaiter.toml" => Some(AWAITER),
             _ => None,

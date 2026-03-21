@@ -12,6 +12,16 @@ Codex can connect to MCP servers configured in `~/.codex/config.toml`. See the c
 
 - https://developers.openai.com/codex/config-reference
 
+## Agent roles
+
+Codex supports built-in and user-defined agent roles for `spawn_agent`.
+
+- For local role behavior and examples, see [Agent roles](./agent-roles.md).
+- Role configuration lives under `[agents.<role>]` in `config.toml`.
+- Built-in roles can also layer embedded config files, such as
+  `claude-style.toml`.
+- Built-in roles currently still run on the native Codex spawned-agent runtime.
+
 ## Apps (Connectors)
 
 Use `$` in the composer to insert a ChatGPT connector; the popover lists accessible

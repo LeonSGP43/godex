@@ -6,6 +6,7 @@
 //! then optionally layer role-specific config on top.
 
 use crate::agent::AgentStatus;
+use crate::agent::backend::SpawnedAgentBackendKind;
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::codex::Session;
 use crate::codex::TurnContext;
@@ -155,9 +156,10 @@ fn build_wait_agent_statuses(
 
 fn collab_spawn_error(err: CodexErr) -> FunctionCallError {
     match err {
-        CodexErr::UnsupportedOperation(_) => {
+        CodexErr::UnsupportedOperation(msg) if msg == "thread manager dropped" => {
             FunctionCallError::RespondToModel("collab manager unavailable".to_string())
         }
+        CodexErr::UnsupportedOperation(msg) => FunctionCallError::RespondToModel(msg),
         err => FunctionCallError::RespondToModel(format!("collab spawn failed: {err}")),
     }
 }
@@ -170,9 +172,10 @@ fn collab_agent_error(agent_id: ThreadId, err: CodexErr) -> FunctionCallError {
         CodexErr::InternalAgentDied => {
             FunctionCallError::RespondToModel(format!("agent with id {agent_id} is closed"))
         }
-        CodexErr::UnsupportedOperation(_) => {
+        CodexErr::UnsupportedOperation(msg) if msg == "thread manager dropped" => {
             FunctionCallError::RespondToModel("collab manager unavailable".to_string())
         }
+        CodexErr::UnsupportedOperation(msg) => FunctionCallError::RespondToModel(msg),
         err => FunctionCallError::RespondToModel(format!("collab tool failed: {err}")),
     }
 }
@@ -364,6 +367,28 @@ async fn apply_requested_spawn_agent_model_overrides(
             &turn.model_info.supported_reasoning_levels,
             reasoning_effort,
         )?;
+        config.model_reasoning_effort = Some(reasoning_effort);
+    }
+
+    Ok(())
+}
+
+fn apply_requested_external_backend_overrides(
+    config: &mut Config,
+    requested_model: Option<&str>,
+    requested_reasoning_effort: Option<ReasoningEffort>,
+    backend_kind: SpawnedAgentBackendKind,
+) -> Result<(), FunctionCallError> {
+    if !matches!(backend_kind, SpawnedAgentBackendKind::ClaudeCode) {
+        return Ok(());
+    }
+
+    // External spawned-agent backends should not silently inherit the parent's
+    // model selection. They must either receive an explicit model override or a
+    // role that locks one in.
+    config.model = requested_model.map(str::to_owned);
+    config.model_provider_id = "claude_code".to_string();
+    if let Some(reasoning_effort) = requested_reasoning_effort {
         config.model_reasoning_effort = Some(reasoning_effort);
     }
 
