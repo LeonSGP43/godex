@@ -115,7 +115,11 @@ contents directly so the current checked-in alpha artifact works the same way.
 It also makes sure the `rustup` shims stay ahead of any direct toolchain
 `cargo` binary on `PATH`, and sets `RUSTUP_HOME` from `rustup show home` when
 the environment does not already provide it. That extra `RUSTUP_HOME` export is
-required for the current Windows Dylint driver path.
+required for the current Windows Dylint driver path. On macOS, both wrappers
+also pin `CC`, `CXX`, and the host-target Cargo linker variable to the Xcode
+toolchain discovered by `xcrun`, and they prepend that toolchain's bin
+directory to `PATH` so helper binaries like `dylint-link` also resolve the real
+compiler instead of a local `cc` wrapper.
 
 If you are changing the lint crate itself, use the source-build wrapper:
 

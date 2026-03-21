@@ -12,6 +12,55 @@ has_library_selection=false
 has_no_deps=false
 expect_value=""
 
+configure_macos_toolchain() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        return
+    fi
+
+    local cc_path=""
+    local cxx_path=""
+    local sdkroot=""
+    local linker_var=""
+    local current_linker=""
+    local toolchain_bin_dir=""
+
+    cc_path="$(xcrun --find cc 2>/dev/null || true)"
+    cxx_path="$(xcrun --find clang 2>/dev/null || true)"
+    sdkroot="$(xcrun --show-sdk-path 2>/dev/null || true)"
+    if [[ -n "$cc_path" ]]; then
+        toolchain_bin_dir="$(dirname "$cc_path")"
+    fi
+
+    if [[ -z "${CC:-}" && -n "$cc_path" ]]; then
+        export CC="$cc_path"
+    fi
+    if [[ -z "${CXX:-}" && -n "$cxx_path" ]]; then
+        export CXX="$cxx_path"
+    fi
+    if [[ -z "${SDKROOT:-}" && -n "$sdkroot" ]]; then
+        export SDKROOT="$sdkroot"
+    fi
+    if [[ -n "$toolchain_bin_dir" && ":$PATH:" != *":$toolchain_bin_dir:"* ]]; then
+        export PATH="$toolchain_bin_dir:$PATH"
+    fi
+
+    case "$(uname -m)" in
+        arm64|aarch64)
+            linker_var="CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER"
+            ;;
+        x86_64)
+            linker_var="CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER"
+            ;;
+    esac
+
+    if [[ -n "$linker_var" ]]; then
+        current_linker="${!linker_var:-}"
+        if [[ -z "$current_linker" && -n "$cxx_path" ]]; then
+            export "$linker_var=$cxx_path"
+        fi
+    fi
+}
+
 for arg in "$@"; do
     if [[ -n "$expect_value" ]]; then
         case "$expect_value" in
@@ -154,6 +203,8 @@ export DYLINT_RUSTFLAGS
 if [[ -z "${CARGO_INCREMENTAL:-}" ]]; then
     export CARGO_INCREMENTAL=0
 fi
+
+configure_macos_toolchain
 
 command=("$cargo_dylint" dylint --lib-path "$normalized_library_path")
 if [[ "$has_library_selection" == false ]]; then
