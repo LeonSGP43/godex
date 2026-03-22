@@ -13,6 +13,8 @@ Current built-in roles include:
 - `worker`: optimized for execution-oriented subtasks.
 - `claude-style`: a native Codex spawned-agent preset for architecture review,
   acceptance review, and tradeoff analysis.
+- `grok`: a native Codex spawned-agent preset for Grok-backed research,
+  planning, and synthesis.
 
 ## `claude-style`
 
@@ -32,6 +34,42 @@ What it does not change:
 
 That means `spawn_agent(agent_type = "claude-style")` still creates a normal
 Codex sub-agent thread, but with a stronger analysis/review posture.
+
+## `grok`
+
+This built-in role is for teams that want Grok to behave like a dedicated
+research employee inside Codex's native spawned-agent runtime rather than as a
+top-level model provider swap.
+
+What they change:
+
+- inject research-oriented `developer_instructions`
+- push the sub-agent toward Codex's built-in `grok` tool instead of manually
+  rebuilding the workflow every time
+- lock reasoning effort at `high`
+- inherit the native Grok preset catalog and default preset selection from the
+  top-level `[grok]` config in `config.toml`
+
+What they do not change:
+
+- they do not switch the spawned agent to an external runtime
+- they do not force a specific model provider
+- they do not bundle credentials into the child; the Grok tools still require
+  a reachable Grok API plus credentials in the environment
+
+This role is designed to pair with Codex's built-in `grok` tool. The built-in
+instructions tell the child to:
+
+- use `preset = "b42"` for current facts, news, and source-heavy search
+- use `preset = "thinking41"` for research planning and decomposition
+- use `preset = "expert41"` for judgments, polished summaries, and reports
+
+That means `spawn_agent(agent_type = "grok")` still creates a normal native
+Codex child thread, but with a much stronger research-worker posture.
+
+If you need to repoint the Grok gateway or remap which model each preset uses,
+change the top-level `[grok]` and `[grok.presets.*]` entries in
+`config.toml`; the built-in Grok roles automatically pick up those settings.
 
 ## Runtime layering
 
@@ -78,6 +116,15 @@ You can call it from `spawn_agent` like this:
 {
   "message": "Review this architecture and identify blockers.",
   "agent_type": "claude-style"
+}
+```
+
+Or use the Grok-backed research role like this:
+
+```json
+{
+  "message": "Investigate the current open-source agent frameworks and summarize the strongest options.",
+  "agent_type": "grok"
 }
 ```
 

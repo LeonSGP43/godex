@@ -374,6 +374,23 @@ Rules:
                     }
                 ),
                 (
+                    "grok".to_string(),
+                    AgentRoleConfig {
+                        description: Some(r#"Use `grok` when you want a native Codex sub-agent to behave like a Grok-backed research employee inside Codex's native spawned-agent runtime.
+Typical tasks:
+- Search current news, facts, and source-backed answers with `b42`
+- Plan research strategy or break down an investigation with `thinking41`
+- Turn known material into a stronger judgment or report with `expert41`
+Rules:
+- Prefer the native tool `grok`.
+- Unless the parent explicitly asks for overrides, rely on the Grok preset routing configured in `config.toml`.
+- Treat the tool result as the primary evidence bundle, then summarize it cleanly for the parent.
+- Stay in research mode; do not switch into implementation unless the parent explicitly asks."#.to_string()),
+                        config_file: Some("grok.toml".to_string().parse().unwrap_or_default()),
+                        nickname_candidates: None,
+                    }
+                ),
+                (
                     "explorer".to_string(),
                     AgentRoleConfig {
                         description: Some(r#"Use `explorer` for specific codebase questions.
@@ -429,10 +446,12 @@ Rules:
     pub(super) fn config_file_contents(path: &Path) -> Option<&'static str> {
         const CLAUDE_STYLE: &str = include_str!("builtins/claude-style.toml");
         const EXPLORER: &str = include_str!("builtins/explorer.toml");
+        const GROK: &str = include_str!("builtins/grok.toml");
         const AWAITER: &str = include_str!("builtins/awaiter.toml");
         match path.to_str()? {
             "claude-style.toml" => Some(CLAUDE_STYLE),
             "explorer.toml" => Some(EXPLORER),
+            "grok.toml" => Some(GROK),
             "awaiter.toml" => Some(AWAITER),
             _ => None,
         }

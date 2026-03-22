@@ -700,6 +700,91 @@
       ],
       "type": "object"
     },
+    "GrokPresetId": {
+      "enum": [
+        "default",
+        "b42",
+        "expert41",
+        "thinking41"
+      ],
+      "type": "string"
+    },
+    "GrokPresetToml": {
+      "additionalProperties": false,
+      "properties": {
+        "fixed_model": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "GrokPresetsToml": {
+      "additionalProperties": false,
+      "properties": {
+        "b42": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GrokPresetToml"
+            }
+          ],
+          "default": null
+        },
+        "default": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GrokPresetToml"
+            }
+          ],
+          "default": null
+        },
+        "expert41": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GrokPresetToml"
+            }
+          ],
+          "default": null
+        },
+        "thinking41": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GrokPresetToml"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "GrokToml": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "type": "string"
+        },
+        "base_origin": {
+          "type": "string"
+        },
+        "default_dynamic_model": {
+          "type": "string"
+        },
+        "default_preset": {
+          "$ref": "#/definitions/GrokPresetId"
+        },
+        "presets": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GrokPresetsToml"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
     "History": {
       "additionalProperties": false,
       "description": "Settings that govern if and what will be written to `~/.codex/history.jsonl`.",
@@ -2162,6 +2247,15 @@
       ],
       "default": null,
       "description": "Settings for ghost snapshots (used for undo)."
+    },
+    "grok": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/GrokToml"
+        }
+      ],
+      "default": null,
+      "description": "Configuration for native Grok research tools."
     },
     "hide_agent_reasoning": {
       "description": "When set to `true`, `AgentReasoning` events will be hidden from the UI/output. Defaults to `false`.",

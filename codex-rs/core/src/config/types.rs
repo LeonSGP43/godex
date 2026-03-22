@@ -30,6 +30,9 @@ pub const DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS: i64 = 30;
 pub const DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS: i64 = 6;
 pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION: usize = 256;
 pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
+pub const DEFAULT_GROK_BASE_ORIGIN: &str = "https://apileon.leonai.top";
+pub const DEFAULT_GROK_API_KEY_ENV: &str = "GROK_API_KEY";
+pub const DEFAULT_GROK_DYNAMIC_MODEL: &str = "grok-4.20-beta";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -45,6 +48,112 @@ pub struct WindowsToml {
     /// Defaults to `true`. Set to `false` to launch the final sandboxed child
     /// process on `Winsta0\\Default` instead of a private desktop.
     pub sandbox_private_desktop: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema)]
+pub enum GrokPresetId {
+    #[serde(rename = "default")]
+    Default,
+    #[serde(rename = "b42")]
+    B42,
+    #[serde(rename = "expert41")]
+    Expert41,
+    #[serde(rename = "thinking41")]
+    Thinking41,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GrokPresetToml {
+    pub path: Option<String>,
+    pub fixed_model: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GrokPresetsToml {
+    #[serde(default)]
+    pub default: Option<GrokPresetToml>,
+    #[serde(default)]
+    pub b42: Option<GrokPresetToml>,
+    #[serde(default)]
+    pub expert41: Option<GrokPresetToml>,
+    #[serde(default)]
+    pub thinking41: Option<GrokPresetToml>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GrokToml {
+    pub base_origin: Option<String>,
+    pub api_key_env: Option<String>,
+    pub default_preset: Option<GrokPresetId>,
+    pub default_dynamic_model: Option<String>,
+    #[serde(default)]
+    pub presets: Option<GrokPresetsToml>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrokPresetConfig {
+    pub path: String,
+    pub fixed_model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrokPresetsConfig {
+    pub default: GrokPresetConfig,
+    pub b42: GrokPresetConfig,
+    pub expert41: GrokPresetConfig,
+    pub thinking41: GrokPresetConfig,
+}
+
+impl GrokPresetsConfig {
+    pub fn get(&self, preset: GrokPresetId) -> &GrokPresetConfig {
+        match preset {
+            GrokPresetId::Default => &self.default,
+            GrokPresetId::B42 => &self.b42,
+            GrokPresetId::Expert41 => &self.expert41,
+            GrokPresetId::Thinking41 => &self.thinking41,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrokConfig {
+    pub base_origin: String,
+    pub api_key_env: String,
+    pub default_preset: GrokPresetId,
+    pub default_dynamic_model: String,
+    pub presets: GrokPresetsConfig,
+}
+
+impl Default for GrokConfig {
+    fn default() -> Self {
+        Self {
+            base_origin: DEFAULT_GROK_BASE_ORIGIN.to_string(),
+            api_key_env: DEFAULT_GROK_API_KEY_ENV.to_string(),
+            default_preset: GrokPresetId::B42,
+            default_dynamic_model: DEFAULT_GROK_DYNAMIC_MODEL.to_string(),
+            presets: GrokPresetsConfig {
+                default: GrokPresetConfig {
+                    path: "/grokcodex".to_string(),
+                    fixed_model: None,
+                },
+                b42: GrokPresetConfig {
+                    path: "/grokcodexb42".to_string(),
+                    fixed_model: Some("grok-4.20-beta".to_string()),
+                },
+                expert41: GrokPresetConfig {
+                    path: "/grokcodex41expert".to_string(),
+                    fixed_model: Some("grok-4.1-expert".to_string()),
+                },
+                thinking41: GrokPresetConfig {
+                    path: "/grokcodex41thinking".to_string(),
+                    fixed_model: Some("grok-4.1-thinking".to_string()),
+                },
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

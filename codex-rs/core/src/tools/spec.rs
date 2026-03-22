@@ -19,6 +19,7 @@ use crate::tools::discoverable::DiscoverablePluginInfo;
 use crate::tools::discoverable::DiscoverableTool;
 use crate::tools::discoverable::DiscoverableToolAction;
 use crate::tools::discoverable::DiscoverableToolType;
+use crate::tools::handlers::GROK_TOOL_NAME;
 use crate::tools::handlers::PLAN_TOOL;
 use crate::tools::handlers::TOOL_SEARCH_DEFAULT_LIMIT;
 use crate::tools::handlers::TOOL_SEARCH_TOOL_NAME;
@@ -1654,6 +1655,65 @@ fn create_test_sync_tool() -> ToolSpec {
     })
 }
 
+fn create_grok_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "query".to_string(),
+            JsonSchema::String {
+                description: Some("Research question to answer with Grok.".to_string()),
+            },
+        ),
+        (
+            "platform".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional platform, ecosystem, or source hint to prioritize during research."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "preset".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional Grok preset override. Defaults to grok.default_preset from config.toml."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "model".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional Grok model override. Only used on dynamic presets; fixed presets keep their configured fixed_model."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "source_note_limit".to_string(),
+            JsonSchema::Number {
+                description: Some(
+                    "Maximum number of source URLs to summarize in the output.".to_string(),
+                ),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: GROK_TOOL_NAME.to_string(),
+        description: "Runs a Grok-backed research pass. Use b42 for fact-finding and latest information, thinking41 for research planning, and expert41 for synthesis or report writing.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["query".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+        output_schema: None,
+    })
+}
+
 fn create_grep_files_tool() -> ToolSpec {
     let properties = BTreeMap::from([
         (
@@ -2564,6 +2624,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::CodeModeWaitHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::GrepFilesHandler;
+    use crate::tools::handlers::GrokHandler;
     use crate::tools::handlers::JsReplHandler;
     use crate::tools::handlers::JsReplResetHandler;
     use crate::tools::handlers::ListDirHandler;
@@ -2892,6 +2953,14 @@ pub(crate) fn build_specs_with_discoverable_tools(
         );
         builder.register_handler("test_sync_tool", test_sync_handler);
     }
+
+    push_tool_spec(
+        &mut builder,
+        create_grok_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    builder.register_handler(GROK_TOOL_NAME, Arc::new(GrokHandler));
 
     let external_web_access = match config.web_search_mode {
         Some(WebSearchMode::Cached) => Some(false),

@@ -4,6 +4,7 @@ use crate::config::edit::apply_blocking;
 use crate::config::types::ApprovalsReviewer;
 use crate::config::types::BundledSkillsConfig;
 use crate::config::types::FeedbackConfigToml;
+use crate::config::types::GrokPresetId;
 use crate::config::types::HistoryPersistence;
 use crate::config::types::McpServerTransportConfig;
 use crate::config::types::MemoriesConfig;
@@ -179,6 +180,82 @@ enabled = false
             config: Vec::new(),
         })
     );
+}
+
+#[test]
+fn config_toml_deserializes_grok_config() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+[grok]
+base_origin = "https://apileon.example"
+api_key_env = "MY_GROK_KEY"
+default_preset = "thinking41"
+default_dynamic_model = "grok-custom"
+
+[grok.presets.b42]
+path = "/custom-b42"
+fixed_model = "grok-b42-custom"
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+
+    let grok = cfg.grok.expect("grok config should be present");
+    assert_eq!(grok.base_origin.as_deref(), Some("https://apileon.example"));
+    assert_eq!(grok.api_key_env.as_deref(), Some("MY_GROK_KEY"));
+    assert_eq!(grok.default_preset, Some(GrokPresetId::Thinking41));
+    assert_eq!(grok.default_dynamic_model.as_deref(), Some("grok-custom"));
+    assert_eq!(
+        grok.presets
+            .and_then(|presets| presets.b42)
+            .and_then(|preset| preset.path),
+        Some("/custom-b42".to_string())
+    );
+}
+
+#[tokio::test]
+async fn load_config_applies_grok_runtime_defaults_and_overrides() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cwd = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"
+[grok]
+base_origin = "https://apileon.example"
+api_key_env = "MY_GROK_KEY"
+default_preset = "thinking41"
+default_dynamic_model = "grok-custom"
+
+[grok.presets.default]
+path = "/dynamic"
+
+[grok.presets.b42]
+path = "/research-b42"
+fixed_model = "grok-b42-custom"
+"#,
+    )?;
+
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(cwd.path().to_path_buf()))
+        .build()
+        .await?;
+
+    assert_eq!(config.grok.base_origin, "https://apileon.example");
+    assert_eq!(config.grok.api_key_env, "MY_GROK_KEY");
+    assert_eq!(config.grok.default_preset, GrokPresetId::Thinking41);
+    assert_eq!(config.grok.default_dynamic_model, "grok-custom");
+    assert_eq!(config.grok.presets.default.path, "/dynamic");
+    assert_eq!(config.grok.presets.b42.path, "/research-b42");
+    assert_eq!(
+        config.grok.presets.b42.fixed_model.as_deref(),
+        Some("grok-b42-custom")
+    );
+    assert_eq!(
+        config.grok.presets.expert41.fixed_model.as_deref(),
+        Some("grok-4.1-expert")
+    );
+
+    Ok(())
 }
 
 #[test]
@@ -4282,6 +4359,7 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             mcp_oauth_callback_port: None,
             mcp_oauth_callback_url: None,
             model_providers: fixture.model_provider_map.clone(),
+            grok: Default::default(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
@@ -4425,6 +4503,7 @@ fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         mcp_oauth_callback_port: None,
         mcp_oauth_callback_url: None,
         model_providers: fixture.model_provider_map.clone(),
+        grok: Default::default(),
         project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
         project_doc_fallback_filenames: Vec::new(),
         tool_output_token_limit: None,
@@ -4566,6 +4645,7 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         mcp_oauth_callback_port: None,
         mcp_oauth_callback_url: None,
         model_providers: fixture.model_provider_map.clone(),
+        grok: Default::default(),
         project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
         project_doc_fallback_filenames: Vec::new(),
         tool_output_token_limit: None,
@@ -4693,6 +4773,7 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         mcp_oauth_callback_port: None,
         mcp_oauth_callback_url: None,
         model_providers: fixture.model_provider_map.clone(),
+        grok: Default::default(),
         project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
         project_doc_fallback_filenames: Vec::new(),
         tool_output_token_limit: None,

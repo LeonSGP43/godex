@@ -3,6 +3,10 @@ use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::types::AppsConfigToml;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
+use crate::config::types::GrokConfig as GrokResearchConfig;
+use crate::config::types::GrokPresetConfig;
+use crate::config::types::GrokPresetId;
+use crate::config::types::GrokToml;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
 use crate::config::types::McpServerDisabledReason;
@@ -405,6 +409,9 @@ pub struct Config {
 
     /// Combined provider map (defaults plus user-defined providers).
     pub model_providers: HashMap<String, ModelProviderInfo>,
+
+    /// Configuration for native Grok research tools.
+    pub grok: GrokResearchConfig,
 
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: usize,
@@ -1322,6 +1329,10 @@ pub struct ConfigToml {
     #[serde(default, deserialize_with = "deserialize_model_providers")]
     pub model_providers: HashMap<String, ModelProviderInfo>,
 
+    /// Configuration for native Grok research tools.
+    #[serde(default)]
+    pub grok: Option<GrokToml>,
+
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: Option<usize>,
 
@@ -1641,6 +1652,86 @@ where
         }
         Some(WebSearchToolConfigInput::Config(config)) => Some(config),
     })
+}
+
+fn resolve_grok_config(config_toml: Option<GrokToml>) -> std::io::Result<GrokResearchConfig> {
+    let mut config = GrokResearchConfig::default();
+    let Some(config_toml) = config_toml else {
+        return Ok(config);
+    };
+
+    if let Some(base_origin) = config_toml.base_origin
+        && !base_origin.trim().is_empty()
+    {
+        config.base_origin = base_origin.trim().trim_end_matches('/').to_string();
+    }
+
+    if let Some(api_key_env) = config_toml.api_key_env
+        && !api_key_env.trim().is_empty()
+    {
+        config.api_key_env = api_key_env.trim().to_string();
+    }
+
+    if let Some(default_dynamic_model) = config_toml.default_dynamic_model
+        && !default_dynamic_model.trim().is_empty()
+    {
+        config.default_dynamic_model = default_dynamic_model.trim().to_string();
+    }
+
+    if let Some(default_preset) = config_toml.default_preset {
+        config.default_preset = default_preset;
+    }
+
+    if let Some(presets) = config_toml.presets {
+        merge_grok_preset_override(&mut config.presets.default, presets.default);
+        merge_grok_preset_override(&mut config.presets.b42, presets.b42);
+        merge_grok_preset_override(&mut config.presets.expert41, presets.expert41);
+        merge_grok_preset_override(&mut config.presets.thinking41, presets.thinking41);
+    }
+
+    validate_grok_preset_config(GrokPresetId::Default, &config.presets.default)?;
+    validate_grok_preset_config(GrokPresetId::B42, &config.presets.b42)?;
+    validate_grok_preset_config(GrokPresetId::Expert41, &config.presets.expert41)?;
+    validate_grok_preset_config(GrokPresetId::Thinking41, &config.presets.thinking41)?;
+
+    Ok(config)
+}
+
+fn merge_grok_preset_override(
+    target: &mut GrokPresetConfig,
+    override_toml: Option<crate::config::types::GrokPresetToml>,
+) {
+    let Some(override_toml) = override_toml else {
+        return;
+    };
+
+    if let Some(path) = override_toml.path
+        && !path.trim().is_empty()
+    {
+        target.path = path.trim().to_string();
+    }
+
+    if let Some(fixed_model) = override_toml.fixed_model {
+        let trimmed = fixed_model.trim();
+        target.fixed_model = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+    }
+}
+
+fn validate_grok_preset_config(
+    preset: GrokPresetId,
+    config: &GrokPresetConfig,
+) -> std::io::Result<()> {
+    if config.path.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("grok preset `{preset:?}` must define a non-empty path"),
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_tool_suggest_config(config_toml: &ConfigToml) -> ToolSuggestConfig {
@@ -2409,6 +2500,7 @@ impl Config {
         for (key, provider) in cfg.model_providers.into_iter() {
             model_providers.entry(key).or_insert(provider);
         }
+        let grok = resolve_grok_config(cfg.grok.clone())?;
 
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
@@ -2720,6 +2812,7 @@ impl Config {
             mcp_oauth_callback_port: cfg.mcp_oauth_callback_port,
             mcp_oauth_callback_url: cfg.mcp_oauth_callback_url.clone(),
             model_providers,
+            grok,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
             project_doc_fallback_filenames: cfg
                 .project_doc_fallback_filenames

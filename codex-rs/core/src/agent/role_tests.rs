@@ -102,6 +102,25 @@ async fn apply_claude_style_role_sets_instructions_and_high_reasoning() {
 }
 
 #[tokio::test]
+async fn apply_grok_role_sets_research_instructions_and_high_reasoning() {
+    let (_home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
+    let before_layers = session_flags_layer_count(&config);
+
+    apply_role_to_config(&mut config, Some("grok"))
+        .await
+        .expect("grok role should apply");
+
+    let developer_instructions = config
+        .developer_instructions
+        .as_deref()
+        .expect("grok should set developer instructions");
+    assert!(developer_instructions.contains("Grok-backed research employee"));
+    assert!(developer_instructions.contains("native tool `grok`"));
+    assert_eq!(config.model_reasoning_effort, Some(ReasoningEffort::High));
+    assert_eq!(session_flags_layer_count(&config), before_layers + 1);
+}
+
+#[tokio::test]
 async fn apply_role_returns_unavailable_for_missing_user_role_file() {
     let (_home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
     config.agent_roles.insert(

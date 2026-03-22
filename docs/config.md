@@ -22,6 +22,48 @@ Codex supports built-in and user-defined agent roles for `spawn_agent`.
   `claude-style.toml`.
 - Built-in roles currently still run on the native Codex spawned-agent runtime.
 
+## Grok research config
+
+The native Grok research tools and Grok-focused built-in agent roles now read
+their routing defaults from `config.toml` instead of relying only on ad-hoc
+environment variables.
+
+The top-level section is `[grok]`. It controls:
+
+- `base_origin`: Grok gateway origin, for example `https://apileon.leonai.top`
+- `api_key_env`: which environment variable contains the Grok API key
+- `default_preset`: default preset for the native `grok` tool
+- `default_dynamic_model`: fallback model when the selected preset is dynamic
+
+You can also override preset-specific endpoint paths and fixed models under
+`[grok.presets.*]`, which makes it possible to retarget or remap the original
+`grokMcp` preset catalog without code changes.
+
+Example:
+
+```toml
+[grok]
+base_origin = "https://apileon.leonai.top"
+api_key_env = "GROK_API_KEY"
+default_preset = "b42"
+default_dynamic_model = "grok-4.20-beta"
+
+[grok.presets.default]
+path = "/grokcodex"
+
+[grok.presets.b42]
+path = "/grokcodexb42"
+fixed_model = "grok-4.20-beta"
+
+[grok.presets.expert41]
+path = "/grokcodex41expert"
+fixed_model = "grok-4.1-expert"
+
+[grok.presets.thinking41]
+path = "/grokcodex41thinking"
+fixed_model = "grok-4.1-thinking"
+```
+
 ## Apps (Connectors)
 
 Use `$` in the composer to insert a ChatGPT connector; the popover lists accessible
