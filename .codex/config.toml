@@ -1,0 +1,21 @@
+[godex_updates]
+enabled = true
+release_repo = "LeonSGP43/godex"
+
+[upstream_updates]
+enabled = true
+repo_root = "/Users/leongong/Desktop/LeonProjects/codex"
+remote = "upstream"
+branch = "main"
+release_repo = "openai/codex"
+build_command = [
+  "cargo",
+  "build",
+  "-p",
+  "codex-cli",
+  "--bin",
+  "godex",
+  "--release",
+  "--manifest-path",
+  "codex-rs/Cargo.toml",
+]

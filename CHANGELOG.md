@@ -6,6 +6,24 @@ All notable changes to this fork are documented in this file.
 
 ### Changed
 
+- What changed: promoted the fork policy into root-level constitutional files for Codex and Claude Code with aligned governance, sync discipline, manifest requirements, and engineering rules.
+- Why: the repository needed one durable, agent-readable constitution so future maintenance and upstream sync work follows the same legal surface regardless of which coding agent is operating in the repo.
+- Impact: both `AGENTS.md` and `CLAUDE.md` now enforce the same upstream-first fork model, hot-file discipline, branch policy, acceptance gates, and documentation obligations.
+- Verification: the new constitutional documents were checked against the fork guidelines, manifest, maintenance workflow, and current root documentation links.
+- Files: `AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`
+
+- What changed: documented long-term fork maintenance policy with a dedicated guidelines document and an explicit fork manifest.
+- Why: keeping `godex` close to upstream Codex requires a stable branch model, a bounded fork surface, and a written source of truth for which differences are allowed to survive upstream sync.
+- Impact: future maintainers now have a concrete policy for sync branches, hot-file handling, acceptance gates, patch groups, and fork-owned behavior review before merging upstream updates back into `main`.
+- Verification: policy docs were reviewed against the current maintenance workflow and the known hot-overlap files in the fork.
+- Files: `docs/godex-fork-guidelines.md`, `docs/godex-fork-manifest.md`, `docs/godex-maintenance.md`, `README.md`, `CHANGELOG.md`
+
+- What changed: established a repo-local maintenance baseline for the `godex` fork with a committed `.codex/config.toml`, a `godex-maintain.sh` wrapper, and a dedicated maintenance runbook.
+- Why: long-term fork health depends on having one repeatable path for upstream sync, release metadata checks, and source rebuilds instead of relying on scattered manual commands or global-only config.
+- Impact: this checkout can now track `LeonSGP43/godex` and `openai/codex` with project-local defaults, and maintainers have a single script entrypoint for status, dry-run sync, compile checks, smoke checks, and release preflight.
+- Verification: shell syntax and command-path validation will be exercised with `bash -n scripts/godex-maintain.sh`, `bash scripts/godex-maintain.sh status`, `bash scripts/godex-maintain.sh sync --dry-run`, and `bash scripts/godex-maintain.sh release-preflight`.
+- Files: `.codex/config.toml`, `scripts/godex-maintain.sh`, `docs/godex-maintenance.md`, `README.md`, `CHANGELOG.md`
+
 - What changed: changed startup announcement loading to synchronously initialize the remote announcement cache on first tooltip use while keeping the prewarm path.
 - Why: the previous async-only path could miss a freshly updated repository announcement on the first rendered startup screen.
 - Impact: a fresh `godex` process now shows the latest public announcement tip from `LeonSGP43/godex` on first launch instead of falling back to a random local promo.

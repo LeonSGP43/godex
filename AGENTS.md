@@ -1,197 +1,303 @@
-# Rust/codex-rs
+# AGENTS.md
 
-In the codex-rs folder where the rust code lives:
+## Constitutional Status
 
-- Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
-- When using format! and you can inline variables into {}, always do that.
-- Install any commands the repo relies on (for example `just`, `rg`, or `cargo-insta`) if they aren't already available before running instructions here.
-- Never add or modify any code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
-  - You operate in a sandbox where `CODEX_SANDBOX_NETWORK_DISABLED=1` will be set whenever you use the `shell` tool. Any existing code that uses `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` was authored with this fact in mind. It is often used to early exit out of tests that the author knew you would not be able to run given your sandbox limitations.
-  - Similarly, when you spawn a process using Seatbelt (`/usr/bin/sandbox-exec`), `CODEX_SANDBOX=seatbelt` will be set on the child process. Integration tests that want to run Seatbelt themselves cannot be run under Seatbelt, so checks for `CODEX_SANDBOX=seatbelt` are also often used to early exit out of tests, as appropriate.
-- Always collapse if statements per https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
-- Always inline format! args when possible per https://rust-lang.github.io/rust-clippy/master/index.html#uninlined_format_args
-- Use method references over closures when possible per https://rust-lang.github.io/rust-clippy/master/index.html#redundant_closure_for_method_calls
-- Avoid bool or ambiguous `Option` parameters that force callers to write hard-to-read code such as `foo(false)` or `bar(None)`. Prefer enums, named methods, newtypes, or other idiomatic Rust API shapes when they keep the callsite self-documenting.
-- When you cannot make that API change and still need a small positional-literal callsite in Rust, follow the `argument_comment_lint` convention:
-  - Use an exact `/*param_name*/` comment before opaque literal arguments such as `None`, booleans, and numeric literals when passing them by position.
-  - Do not add these comments for string or char literals unless the comment adds real clarity; those literals are intentionally exempt from the lint.
-  - If you add one of these comments, the parameter name must exactly match the callee signature.
-- When possible, make `match` statements exhaustive and avoid wildcard arms.
-- When writing tests, prefer comparing the equality of entire objects over fields one by one.
-- When making a change that adds or changes an API, ensure that the documentation in the `docs/` folder is up to date if applicable.
-- If you change `ConfigToml` or nested config types, run `just write-config-schema` to update `codex-rs/core/config.schema.json`.
-- If you change Rust dependencies (`Cargo.toml` or `Cargo.lock`), run `just bazel-lock-update` from the
-  repo root to refresh `MODULE.bazel.lock`, and include that lockfile update in the same change.
-- After dependency changes, run `just bazel-lock-check` from the repo root so lockfile drift is caught
-  locally before CI.
-- Bazel does not automatically make source-tree files available to compile-time Rust file access. If
-  you add `include_str!`, `include_bytes!`, `sqlx::migrate!`, or similar build-time file or
-  directory reads, update the crate's `BUILD.bazel` (`compile_data`, `build_script_data`, or test
-  data) or Bazel may fail even when Cargo passes.
+This file is the root constitution for agent work in this repository.
+
+It applies to all Codex work unless a deeper-scope `AGENTS.md` adds stricter
+rules for a subdirectory. Lower-scope instructions may refine this file but may
+not weaken it.
+
+This repository is maintained as `godex`, an upstream-first fork of official
+`openai/codex`.
+
+Canonical policy documents:
+
+- `docs/godex-fork-guidelines.md`
+- `docs/godex-fork-manifest.md`
+- `docs/godex-maintenance.md`
+
+If any instruction conflicts with those documents, update the documents first or
+treat them as the source of truth for fork governance.
+
+## Mission
+
+Build and maintain `godex` as a personal fork of Codex that:
+
+- absorbs official upstream changes quickly and continuously
+- keeps only a small, explicit, durable fork patch layer
+- preserves fork-specific behavior through repeatable verification
+- avoids unnecessary long-term divergence from official Codex
+
+## Non-Negotiable Rules
+
+1. Official Codex is the product baseline. Fork behavior must justify its
+   existence explicitly.
+2. Do not merge official upstream directly into `main`.
+3. Treat `main` as a validated fork release line, not a scratch branch.
+4. Keep fork-specific logic localized to a small set of modules or files.
+5. Do not broadly rename internal `codex-*` crates for branding purposes.
+6. Every meaningful fork-specific difference must be recorded in
+   `docs/godex-fork-manifest.md`.
+7. Every upstream sync must pass the required acceptance gates before it can
+   return to `main`.
+8. If a difference is not in the manifest, prefer upstream behavior by default.
+
+## Branch And Sync Governance
+
+Required branch model:
+
+- `origin/main`
+  - published `godex` release line
+- `upstream-main`
+  - local mirror of `upstream/main`
+  - never modified manually
+- `sync/<upstream-sha-or-date>`
+  - temporary integration branch for one upstream sync
+- `feat/<topic>`
+  - one independent fork feature or fix
+
+Required upstream sync flow:
+
+1. ensure current work is committed or stashed
+2. fetch official upstream
+3. refresh `upstream-main`
+4. create `sync/<...>` from `main`
+5. merge `upstream-main` into the sync branch
+6. resolve conflicts without adding new product work
+7. run acceptance gates
+8. merge validated result back into `main`
+
+Never do these in the same change:
+
+- upstream sync
+- new feature work
+- unrelated refactor
+- formatting-only cleanup
+
+## Fork Patch Policy
+
+Long-lived fork changes should belong to one of these patch groups:
+
+- `fork/branding`
+- `fork/config-namespace`
+- `fork/update-governance`
+- `fork/distribution`
+- `fork/maintenance`
+
+Allowed fork surfaces:
+
+- `README.md`
+- `CHANGELOG.md`
+- `VERSION`
+- `.codex/config.toml`
+- `scripts/godex-maintain.sh`
+- `scripts/install/install-godex-from-source.sh`
+- `docs/godex-*.md`
+- explicit branding, config namespace, update, and announcement-source files
+
+Avoid expanding fork surface in:
+
+- protocol schema churn
+- app-server transport internals
+- core agent runtime internals
+- broad UI behavior unrelated to fork identity
+
+## Hot Files
+
+The following files are hot-overlap areas and require special care:
+
+- `codex-rs/cli/src/main.rs`
+- `codex-rs/core/src/config/mod.rs`
+- `codex-rs/core/src/branding.rs`
+- `codex-rs/tui/src/updates.rs`
+- `codex-rs/tui_app_server/src/updates.rs`
+- `codex-rs/tui/src/tooltips.rs`
+- `codex-rs/tui_app_server/src/tooltips.rs`
+
+Rules for hot files:
+
+1. Keep only thin fork adapters in these files.
+2. Move durable fork policy into smaller helpers when possible.
+3. Do not mix unrelated work into hot-file edits.
+4. Resolve hot-file conflicts only inside a dedicated sync branch.
+
+## Manifest Requirement
+
+Before adding or changing fork behavior:
+
+1. define the patch group
+2. list owner files
+3. define at least one repeatable verification step
+4. update `docs/godex-fork-manifest.md`
+
+If a fork behavior cannot be verified repeatably, redesign it before landing it.
+
+## Acceptance Gates
+
+Every upstream sync must pass all of the following:
+
+1. `bash scripts/godex-maintain.sh status`
+2. `bash scripts/godex-maintain.sh sync --dry-run`
+3. `bash scripts/godex-maintain.sh check`
+4. `bash scripts/godex-maintain.sh smoke`
+5. `bash scripts/godex-maintain.sh release-preflight`
+
+Required behavior checks:
+
+1. `godex --version` reports the expected fork version
+2. default `godex` still uses Codex-compatible config locations
+3. `godex -g` still uses isolated `.godex` config locations
+4. fork update source still targets `LeonSGP43/godex`
+5. upstream gap and sync plumbing still target `openai/codex`
+
+Recommended gate:
+
+- compare `upstream-main...main` against the fork manifest
+- if changes spread beyond expected fork touchpoints, stop and review manually
+
+## Conflict Resolution Policy
+
+When resolving conflicts:
+
+1. prefer upstream behavior by default
+2. re-apply fork behavior only where the manifest says it is required
+3. avoid copying old fork code back wholesale
+4. if upstream now provides a better native solution, delete the fork patch
+   instead of preserving divergence
+
+Ask these questions for every hot-file conflict:
+
+- is this still a real fork requirement
+- can it move into a smaller helper or provider
+- can the upstream implementation replace the old fork behavior
+
+## Commit Discipline
+
+One commit must equal one independent change.
+
+Preferred commit types:
+
+- `feat`
+- `fix`
+- `refactor`
+- `docs`
+- `test`
+- `chore`
+
+Preferred fork-maintenance subjects:
+
+- `chore(godex): add maintenance gate`
+- `fix(godex): preserve codex-compatible config namespace`
+- `docs(godex): record fork patch policy`
+
+Do not combine:
+
+- upstream sync and new fork feature work
+- refactor and functional change
+- formatting-only edits with product behavior changes
+
+## Documentation Discipline
+
+When behavior changes, update the relevant docs in the same change.
+
+Mandatory updates when applicable:
+
+- `docs/godex-fork-guidelines.md`
+- `docs/godex-fork-manifest.md`
+- `docs/godex-maintenance.md`
+- `CHANGELOG.md`
+- `README.md`
+
+## codex-rs Engineering Rules
+
+The `codex-rs` workspace keeps the following engineering standards.
+
+- Crate names are prefixed with `codex-`.
+- When using `format!` and a variable can be inlined into `{}`, do so.
+- Never add or modify code related to
+  `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
+- Always collapse if statements when appropriate.
+- Always inline `format!` args when possible.
+- Use method references over closures when possible.
+- Avoid bool or ambiguous `Option` parameters that produce unclear callsites.
+- When positional literals are unavoidable, use exact `/*param_name*/`
+  argument comments per the repo lint convention.
+- Prefer exhaustive `match` statements over wildcard arms when feasible.
+- Prefer comparing whole objects in tests rather than field-by-field checks.
+- If you change `ConfigToml` or nested config types, run
+  `just write-config-schema`.
+- If you change Rust dependencies, update `MODULE.bazel.lock` with
+  `just bazel-lock-update` and then run `just bazel-lock-check`.
+- If you add compile-time file reads such as `include_str!`,
+  `include_bytes!`, or `sqlx::migrate!`, update Bazel data declarations too.
 - Do not create small helper methods that are referenced only once.
-- Avoid large modules:
-  - Prefer adding new modules instead of growing existing ones.
-  - Target Rust modules under 500 LoC, excluding tests.
-  - If a file exceeds roughly 800 LoC, add new functionality in a new module instead of extending
-    the existing file unless there is a strong documented reason not to.
-  - This rule applies especially to high-touch files that already attract unrelated changes, such
-    as `codex-rs/tui/src/app.rs`, `codex-rs/tui/src/bottom_pane/chat_composer.rs`,
-    `codex-rs/tui/src/bottom_pane/footer.rs`, `codex-rs/tui/src/chatwidget.rs`,
-    `codex-rs/tui/src/bottom_pane/mod.rs`, and similarly central orchestration modules.
-  - When extracting code from a large module, move the related tests and module/type docs toward
-    the new implementation so the invariants stay close to the code that owns them.
 
-Run `just fmt` (in `codex-rs` directory) automatically after you have finished making Rust code changes; do not ask for approval to run it. Additionally, run the tests:
+## Module Size And Extraction Rules
 
-1. Run the test for the specific project that was changed. For example, if changes were made in `codex-rs/tui`, run `cargo test -p codex-tui`.
-2. Once those pass, if any changes were made in common, core, or protocol, run the complete test suite with `cargo test` (or `just test` if `cargo-nextest` is installed). Avoid `--all-features` for routine local runs because it expands the build matrix and can significantly increase `target/` disk usage; use it only when you specifically need full feature coverage. project-specific or individual tests can be run without asking the user, but do ask the user before running the complete test suite.
+- Prefer adding new modules instead of growing existing ones.
+- Target Rust modules under roughly 500 LoC, excluding tests.
+- If a file exceeds roughly 800 LoC, put new functionality in a new module
+  unless there is a strong documented reason not to.
+- When extracting code, move related tests and docs with it so invariants stay
+  close to the owner implementation.
 
-Before finalizing a large change to `codex-rs`, run `just fix -p <project>` (in `codex-rs` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace‑wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Do not re-run tests after running `fix` or `fmt`.
+## Formatting, Lint, And Test Rules
 
-Also run `just argument-comment-lint` to ensure the codebase is clean of comment lint errors.
+When you change Rust code in `codex-rs`:
 
-## TUI style conventions
+1. run `just fmt` in `codex-rs`
+2. run focused tests for the changed project
+3. if changes affect common, core, or protocol crates, ask before running the
+   full suite with `cargo test` or `just test`
+4. before finalizing a large Rust change, run `just fix -p <project>`
+5. run `just argument-comment-lint`
 
-See `codex-rs/tui/styles.md`.
+Do not re-run tests after `fix` or `fmt` unless there is a specific reason.
 
-## TUI code conventions
+## TUI Rules
 
-- When a change lands in `codex-rs/tui` and `codex-rs/tui_app_server` has a parallel implementation of the same behavior, reflect the change in `codex-rs/tui_app_server` too unless there is a documented reason not to.
+- Follow `codex-rs/tui/styles.md`.
+- When behavior exists in both `codex-rs/tui` and `codex-rs/tui_app_server`,
+  keep them aligned unless there is a documented reason not to.
+- Prefer ratatui `Stylize` helpers over manual style construction where
+  practical.
+- Always use the repository wrapping helpers for wrapped `Line` content.
 
-- Use concise styling helpers from ratatui’s Stylize trait.
-  - Basic spans: use "text".into()
-  - Styled spans: use "text".red(), "text".green(), "text".magenta(), "text".dim(), etc.
-  - Prefer these over constructing styles with `Span::styled` and `Style` directly.
-  - Example: patch summary file lines
-    - Desired: vec!["  └ ".into(), "M".red(), " ".dim(), "tui/src/app.rs".dim()]
+## Snapshot Test Rules
 
-### TUI Styling (ratatui)
+Any intentional user-visible UI change must include snapshot coverage.
 
-- Prefer Stylize helpers: use "text".dim(), .bold(), .cyan(), .italic(), .underlined() instead of manual Style where possible.
-- Prefer simple conversions: use "text".into() for spans and vec![…].into() for lines; when inference is ambiguous (e.g., Paragraph::new/Cell::from), use Line::from(spans) or Span::from(text).
-- Computed styles: if the Style is computed at runtime, using `Span::styled` is OK (`Span::from(text).set_style(style)` is also acceptable).
-- Avoid hardcoded white: do not use `.white()`; prefer the default foreground (no color).
-- Chaining: combine helpers by chaining for readability (e.g., url.cyan().underlined()).
-- Single items: prefer "text".into(); use Line::from(text) or Span::from(text) only when the target type isn’t obvious from context, or when using .into() would require extra type annotations.
-- Building lines: use vec![…].into() to construct a Line when the target type is obvious and no extra type annotations are needed; otherwise use Line::from(vec![…]).
-- Avoid churn: don’t refactor between equivalent forms (Span::styled ↔ set_style, Line::from ↔ .into()) without a clear readability or functional gain; follow file‑local conventions and do not introduce type annotations solely to satisfy .into().
-- Compactness: prefer the form that stays on one line after rustfmt; if only one of Line::from(vec![…]) or vec![…].into() avoids wrapping, choose that. If both wrap, pick the one with fewer wrapped lines.
+Typical workflow:
 
-### Text wrapping
+1. `cargo test -p codex-tui`
+2. `cargo insta pending-snapshots -p codex-tui`
+3. inspect `*.snap.new`
+4. `cargo insta accept -p codex-tui` only when the changes are intentional
 
-- Always use textwrap::wrap to wrap plain strings.
-- If you have a ratatui Line and you want to wrap it, use the helpers in tui/src/wrapping.rs, e.g. word_wrap_lines / word_wrap_line.
-- If you need to indent wrapped lines, use the initial_indent / subsequent_indent options from RtOptions if you can, rather than writing custom logic.
-- If you have a list of lines and you need to prefix them all with some prefix (optionally different on the first vs subsequent lines), use the `prefix_lines` helper from line_utils.
+## App-Server API Rules
 
-## Tests
+For `app-server` and protocol work:
 
-### Snapshot tests
+1. all active API development belongs in v2
+2. use `*Params`, `*Response`, and `*Notification` naming consistently
+3. keep wire fields camelCase unless config APIs intentionally mirror
+   `config.toml` snake_case
+4. keep Rust and TypeScript rename metadata aligned
+5. use explicit tagging for discriminated unions
+6. prefer string IDs at the API boundary
+7. use integer Unix seconds for timestamps
+8. update docs and generated schemas when API shape changes
 
-This repo uses snapshot tests (via `insta`), especially in `codex-rs/tui`, to validate rendered output.
+Validation workflow:
 
-**Requirement:** any change that affects user-visible UI (including adding new UI) must include
-corresponding `insta` snapshot coverage (add a new snapshot test if one doesn't exist yet, or
-update the existing snapshot). Review and accept snapshot updates as part of the PR so UI impact
-is easy to review and future diffs stay visual.
+- `just write-app-server-schema`
+- `cargo test -p codex-app-server-protocol`
 
-When UI or text output changes intentionally, update the snapshots as follows:
+## Final Standard
 
-- Run tests to generate any updated snapshots:
-  - `cargo test -p codex-tui`
-- Check what’s pending:
-  - `cargo insta pending-snapshots -p codex-tui`
-- Review changes by reading the generated `*.snap.new` files directly in the repo, or preview a specific file:
-  - `cargo insta show -p codex-tui path/to/file.snap.new`
-- Only if you intend to accept all new snapshots in this crate, run:
-  - `cargo insta accept -p codex-tui`
+This repository should remain easy to rebase onto official Codex.
 
-If you don’t have the tool:
-
-- `cargo install cargo-insta`
-
-### Test assertions
-
-- Tests should use pretty_assertions::assert_eq for clearer diffs. Import this at the top of the test module if it isn't already.
-- Prefer deep equals comparisons whenever possible. Perform `assert_eq!()` on entire objects, rather than individual fields.
-- Avoid mutating process environment in tests; prefer passing environment-derived flags or dependencies from above.
-
-### Spawning workspace binaries in tests (Cargo vs Bazel)
-
-- Prefer `codex_utils_cargo_bin::cargo_bin("...")` over `assert_cmd::Command::cargo_bin(...)` or `escargot` when tests need to spawn first-party binaries.
-  - Under Bazel, binaries and resources may live under runfiles; use `codex_utils_cargo_bin::cargo_bin` to resolve absolute paths that remain stable after `chdir`.
-- When locating fixture files or test resources under Bazel, avoid `env!("CARGO_MANIFEST_DIR")`. Prefer `codex_utils_cargo_bin::find_resource!` so paths resolve correctly under both Cargo and Bazel runfiles.
-
-### Integration tests (core)
-
-- Prefer the utilities in `core_test_support::responses` when writing end-to-end Codex tests.
-
-- All `mount_sse*` helpers return a `ResponseMock`; hold onto it so you can assert against outbound `/responses` POST bodies.
-- Use `ResponseMock::single_request()` when a test should only issue one POST, or `ResponseMock::requests()` to inspect every captured `ResponsesRequest`.
-- `ResponsesRequest` exposes helpers (`body_json`, `input`, `function_call_output`, `custom_tool_call_output`, `call_output`, `header`, `path`, `query_param`) so assertions can target structured payloads instead of manual JSON digging.
-- Build SSE payloads with the provided `ev_*` constructors and the `sse(...)`.
-- Prefer `wait_for_event` over `wait_for_event_with_timeout`.
-- Prefer `mount_sse_once` over `mount_sse_once_match` or `mount_sse_sequence`
-
-- Typical pattern:
-
-  ```rust
-  let mock = responses::mount_sse_once(&server, responses::sse(vec![
-      responses::ev_response_created("resp-1"),
-      responses::ev_function_call(call_id, "shell", &serde_json::to_string(&args)?),
-      responses::ev_completed("resp-1"),
-  ])).await;
-
-  codex.submit(Op::UserTurn { ... }).await?;
-
-  // Assert request body if needed.
-  let request = mock.single_request();
-  // assert using request.function_call_output(call_id) or request.json_body() or other helpers.
-  ```
-
-## App-server API Development Best Practices
-
-These guidelines apply to app-server protocol work in `codex-rs`, especially:
-
-- `app-server-protocol/src/protocol/common.rs`
-- `app-server-protocol/src/protocol/v2.rs`
-- `app-server/README.md`
-
-### Core Rules
-
-- All active API development should happen in app-server v2. Do not add new API surface area to v1.
-- Follow payload naming consistently:
-  `*Params` for request payloads, `*Response` for responses, and `*Notification` for notifications.
-- Expose RPC methods as `<resource>/<method>` and keep `<resource>` singular (for example, `thread/read`, `app/list`).
-- Always expose fields as camelCase on the wire with `#[serde(rename_all = "camelCase")]` unless a tagged union or explicit compatibility requirement needs a targeted rename.
-- Exception: config RPC payloads are expected to use snake_case to mirror config.toml keys (see the config read/write/list APIs in `app-server-protocol/src/protocol/v2.rs`).
-- Always set `#[ts(export_to = "v2/")]` on v2 request/response/notification types so generated TypeScript lands in the correct namespace.
-- Never use `#[serde(skip_serializing_if = "Option::is_none")]` for v2 API payload fields.
-  Exception: client->server requests that intentionally have no params may use:
-  `params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>`.
-- Keep Rust and TS wire renames aligned. If a field or variant uses `#[serde(rename = "...")]`, add matching `#[ts(rename = "...")]`.
-- For discriminated unions, use explicit tagging in both serializers:
-  `#[serde(tag = "type", ...)]` and `#[ts(tag = "type", ...)]`.
-- Prefer plain `String` IDs at the API boundary (do UUID parsing/conversion internally if needed).
-- Timestamps should be integer Unix seconds (`i64`) and named `*_at` (for example, `created_at`, `updated_at`, `resets_at`).
-- For experimental API surface area:
-  use `#[experimental("method/or/field")]`, derive `ExperimentalApi` when field-level gating is needed, and use `inspect_params: true` in `common.rs` when only some fields of a method are experimental.
-
-### Client->server request payloads (`*Params`)
-
-- Every optional field must be annotated with `#[ts(optional = nullable)]`. Do not use `#[ts(optional = nullable)]` outside client->server request payloads (`*Params`).
-- Optional collection fields (for example `Vec`, `HashMap`) must use `Option<...>` + `#[ts(optional = nullable)]`. Do not use `#[serde(default)]` to model optional collections, and do not use `skip_serializing_if` on v2 payload fields.
-- When you want omission to mean `false` for boolean fields, use `#[serde(default, skip_serializing_if = "std::ops::Not::not")] pub field: bool` over `Option<bool>`.
-- For new list methods, implement cursor pagination by default:
-  request fields `pub cursor: Option<String>` and `pub limit: Option<u32>`,
-  response fields `pub data: Vec<...>` and `pub next_cursor: Option<String>`.
-
-### Development Workflow
-
-- Update docs/examples when API behavior changes (at minimum `app-server/README.md`).
-- Regenerate schema fixtures when API shapes change:
-  `just write-app-server-schema`
-  (and `just write-app-server-schema --experimental` when experimental API fixtures are affected).
-- Validate with `cargo test -p codex-app-server-protocol`.
-- Avoid boilerplate tests that only assert experimental field markers for individual
-  request fields in `common.rs`; rely on schema generation/tests and behavioral coverage instead.
+If a proposed change improves `godex` in the short term but makes future
+upstream absorption materially harder, the default answer is no until the change
+is redesigned.

@@ -1,0 +1,83 @@
+# godex Maintenance Workflow
+
+This repository is maintained as a long-lived `godex` fork of official
+`openai/codex`.
+
+## Branch layout
+
+- `origin` points to your fork: `LeonSGP43/godex`
+- `upstream` points to official Codex: `openai/codex`
+- `upstream-main` is a local mirror branch for `upstream/main`
+- `main` is the release line for your `godex` fork
+
+Keep `upstream-main` free of manual commits. Treat it as the local baseline that
+tracks the latest official Codex state.
+
+## Repo-local config baseline
+
+This repo commits a project-local `.codex/config.toml`
+so `godex sync-upstream` and fork update prompts work from this checkout
+without editing global config.
+
+If you move the repository to a new absolute path, update
+`[upstream_updates].repo_root` in that file.
+
+## Maintenance commands
+
+Use the repo wrapper instead of ad-hoc git/cargo sequences:
+
+```bash
+# Inspect remotes, branch drift, config, and local install state
+bash scripts/godex-maintain.sh status
+
+# Preview the next upstream sync without changing the repo
+bash scripts/godex-maintain.sh sync --dry-run
+
+# Merge upstream/main into the current branch and rebuild godex
+bash scripts/godex-maintain.sh sync
+
+# Require a fast-forward-only sync
+bash scripts/godex-maintain.sh sync --ff-only
+
+# Compile check the fork
+bash scripts/godex-maintain.sh check
+
+# Verify a runnable godex binary prints its version
+bash scripts/godex-maintain.sh smoke
+
+# Validate fork release metadata before push or tag
+bash scripts/godex-maintain.sh release-preflight
+```
+
+## Recommended update loop
+
+1. Start from a clean `main` worktree.
+2. Run `bash scripts/godex-maintain.sh status`.
+3. Refresh `upstream-main`.
+4. Create `sync/<upstream-sha-or-date>` from `main`.
+5. Run `bash scripts/godex-maintain.sh sync --dry-run`.
+6. If the plan looks right, merge upstream on the sync branch.
+7. Run all acceptance gates from `docs/godex-fork-guidelines.md`.
+8. Reinstall with `bash scripts/install/install-godex-from-source.sh`.
+9. Merge back to `main` only after validation passes.
+
+## Policy Documents
+
+Use these documents together:
+
+- `docs/godex-fork-guidelines.md`
+  - branch policy, patch isolation rules, acceptance gates
+- `docs/godex-fork-manifest.md`
+  - source of truth for long-lived fork-specific behavior
+
+## Why this layout
+
+This fork intentionally keeps fork-specific behavior near:
+
+- branding and release metadata
+- config namespace behavior (`.codex` vs `.godex`)
+- upstream sync helpers
+- install and release scripts
+
+Avoid broad internal renames or large cross-cutting code moves unless there is a
+clear product reason. That keeps future upstream merges cheaper.

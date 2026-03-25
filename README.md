@@ -56,6 +56,11 @@ You can also use Codex with an API key, but this requires [additional setup](htt
 - [**Agent roles**](./docs/agent-roles.md)
 - [**Contributing**](./docs/contributing.md)
 - [**Installing & building**](./docs/install.md)
+- [**godex maintenance**](./docs/godex-maintenance.md)
+- [**godex fork guidelines**](./docs/godex-fork-guidelines.md)
+- [**godex fork manifest**](./docs/godex-fork-manifest.md)
+- [**AGENTS.md**](./AGENTS.md)
+- [**CLAUDE.md**](./CLAUDE.md)
 - [**Open source fund**](./docs/open-source-fund.md)
 
 ## Versioning
