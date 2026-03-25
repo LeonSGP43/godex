@@ -5,6 +5,13 @@ description: Push and verify a godex release so GitHub release notices and npm-b
 
 Use this skill when the user wants to publish the latest `godex`, push tags, verify release visibility, or check whether clients can update through npm.
 
+Default release policy for this fork:
+
+- build locally first
+- validate locally first
+- use GitHub for tags/releases/update notice hosting, not as the default compiler
+- use npm as an optional second distribution channel when the maintainer machine is logged in
+
 Repo default: `/Users/leongong/Desktop/LeonProjects/codex`
 
 Binding governance:
@@ -20,23 +27,30 @@ Core workflow:
    - `git -C /Users/leongong/Desktop/LeonProjects/codex status --short --branch`
 2. Prefer the bundled one-command entrypoint:
    - `bash .codex/skills/godex-release-distributor/scripts/run.sh status`
+   - `bash .codex/skills/godex-release-distributor/scripts/run.sh local-stage`
+   - `bash .codex/skills/godex-release-distributor/scripts/run.sh local-publish`
    - `bash .codex/skills/godex-release-distributor/scripts/run.sh publish`
    - `bash .codex/skills/godex-release-distributor/scripts/run.sh verify`
-3. The script should run `bash scripts/godex-maintain.sh release-preflight` before any push or tag action.
-4. Required release inputs:
+3. Prefer local-first release flow for `godex`:
+   - build the current platform release locally
+   - stage the current-platform npm tarball locally
+   - upload tarballs to the GitHub release
+   - publish to npm only if `npm whoami` succeeds on the maintainer machine
+4. The script should run `bash scripts/godex-maintain.sh release-preflight` before any push or tag action.
+5. Required release inputs:
    - `VERSION`
    - `CHANGELOG.md`
    - release notes under `docs/`
-5. This skill only publishes validated `main`.
+6. This skill only publishes validated `main`.
    - never publish directly from `sync/...`
    - never publish from a dirty worktree
    - never bypass the release gate in `AGENTS.md` and `CLAUDE.md`
-6. After a publish step, verify both channels separately:
+7. After a publish step, verify both channels separately:
    - GitHub release/tag in `LeonSGP43/godex`
    - npm registry package `@leonsgp43/godex`
-7. Do not claim that npm updates work until:
+8. Do not claim that npm updates work until:
    - `npm view @leonsgp43/godex version` returns the release version
-8. Do not claim that in-app update notice is live until:
+9. Do not claim that in-app update notice is live until:
    - the release tag exists
    - the GitHub release exists
 
@@ -45,15 +59,20 @@ Important rules:
 - Never push with a dirty worktree.
 - Never publish from any branch other than `main`.
 - Never tag a version that is not recorded in `VERSION` and `CHANGELOG.md`.
+- Local compile is the default for this fork; GitHub Actions release builds are best-effort only.
 - If npm still returns `404`, say npm distribution is not ready even if GitHub release is live.
 - If GitHub release is missing but npm exists, say release notice path is not fully confirmed.
 
 Primary commands:
 
 - `bash .codex/skills/godex-release-distributor/scripts/run.sh status`
+- `bash .codex/skills/godex-release-distributor/scripts/run.sh local-stage`
+- `bash .codex/skills/godex-release-distributor/scripts/run.sh local-publish`
 - `bash .codex/skills/godex-release-distributor/scripts/run.sh publish`
 - `bash .codex/skills/godex-release-distributor/scripts/run.sh verify`
 - `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py status`
+- `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py local-stage`
+- `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py local-publish`
 - `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py publish`
 - `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py verify`
 
@@ -61,6 +80,8 @@ Expected output:
 
 - current repo version
 - target release tag
+- whether local npm auth is ready
+- which local tarballs were staged
 - whether GitHub release exists
 - whether npm package exists
 - whether distribution status is ready / blocked / partially live
