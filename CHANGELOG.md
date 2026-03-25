@@ -12,6 +12,14 @@ All notable changes to this fork are documented in this file.
 - Verification: `sh -n scripts/godex-release.sh scripts/godex-release-local.sh scripts/godex-release-remote.sh`, `bash scripts/godex-release.sh status`, and `bash scripts/godex-release.sh remote verify`.
 - Files: `.codex/skills/godex-release-distributor/SKILL.md`, `.codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`, `scripts/godex-release.sh`, `scripts/godex-release-local.sh`, `scripts/godex-release-remote.sh`, `CHANGELOG.md`
 
+### Changed
+
+- What changed: replaced the upstream Codex splash on the repository welcome section with a fork-owned `godex` hero image stored in the repo.
+- Why: the GitHub landing page should present the fork's own visual identity instead of inheriting upstream branding at the top of the README.
+- Impact: visitors opening the repository on GitHub now see the `godex` hero graphic as the pinned top image.
+- Verification: the local image was resized into `.github/godex-readme-hero.jpg`, and the README top `<img>` source now points at that repository asset.
+- Files: `.github/godex-readme-hero.jpg`, `README.md`, `CHANGELOG.md`
+
 ## [0.2.3] - 2026-03-25
 
 ### Fixed
