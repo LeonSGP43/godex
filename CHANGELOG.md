@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-03-25
+
+### Fixed
+
+- What changed: granted the `build-windows` caller job the `id-token: write` permission required by the reusable Windows release workflow.
+- Why: GitHub rejected the `rust-v0.2.2` tag at workflow startup because the called workflow requested `id-token: write` but the caller job did not allow it.
+- Impact: the fork release workflow can now start the reusable Windows release path without failing GitHub's workflow permission validation.
+- Verification: the workflow startup error on the `rust-v0.2.2` run was inspected from GitHub Actions and matched the caller-job permission gap fixed in `.github/workflows/rust-release.yml`.
+- Files: `.github/workflows/rust-release.yml`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`
+
 ## [0.2.2] - 2026-03-25
 
 ### Fixed
