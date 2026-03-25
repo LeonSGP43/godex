@@ -212,6 +212,86 @@ fixed_model = "grok-b42-custom"
     );
 }
 
+#[test]
+fn config_toml_deserializes_godex_updates_config() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+[godex_updates]
+enabled = true
+release_repo = "LeonSGP43/godex"
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+
+    let godex = cfg
+        .godex_updates
+        .expect("godex updates config should be present");
+    assert_eq!(godex.enabled, Some(true));
+    assert_eq!(godex.release_repo.as_deref(), Some("LeonSGP43/godex"));
+}
+
+#[test]
+fn load_config_applies_godex_update_defaults() {
+    let cfg = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").path().to_path_buf(),
+    )
+    .expect("load config with defaults");
+
+    assert!(cfg.godex_updates.enabled);
+    assert_eq!(cfg.godex_updates.release_repo, None);
+}
+
+#[test]
+fn config_toml_deserializes_upstream_updates_config() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+[upstream_updates]
+enabled = true
+remote = "upstream"
+branch = "main"
+repo_root = "/tmp/godex"
+release_repo = "openai/codex"
+build_command = ["cargo", "build", "-p", "codex-cli", "--bins"]
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+
+    let upstream = cfg
+        .upstream_updates
+        .expect("upstream updates config should be present");
+    assert_eq!(upstream.enabled, Some(true));
+    assert_eq!(upstream.remote.as_deref(), Some("upstream"));
+    assert_eq!(upstream.branch.as_deref(), Some("main"));
+    assert_eq!(upstream.release_repo.as_deref(), Some("openai/codex"));
+    assert_eq!(
+        upstream.build_command,
+        Some(vec![
+            "cargo".to_string(),
+            "build".to_string(),
+            "-p".to_string(),
+            "codex-cli".to_string(),
+            "--bins".to_string()
+        ])
+    );
+}
+
+#[test]
+fn load_config_applies_upstream_update_defaults() {
+    let cfg = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").path().to_path_buf(),
+    )
+    .expect("load config with defaults");
+
+    assert!(!cfg.upstream_updates.enabled);
+    assert_eq!(cfg.upstream_updates.remote, "upstream");
+    assert_eq!(cfg.upstream_updates.branch, "main");
+    assert_eq!(cfg.upstream_updates.release_repo, "openai/codex");
+}
+
 #[tokio::test]
 async fn load_config_applies_grok_runtime_defaults_and_overrides() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
@@ -1848,6 +1928,7 @@ async fn managed_config_overrides_oauth_store_mode() -> anyhow::Result<()> {
     let cwd = AbsolutePathBuf::try_from(codex_home.path())?;
     let config_layer_stack = load_config_layers_state(
         codex_home.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &Vec::new(),
         overrides,
@@ -1977,6 +2058,7 @@ async fn managed_config_wins_over_cli_overrides() -> anyhow::Result<()> {
     let cwd = AbsolutePathBuf::try_from(codex_home.path())?;
     let config_layer_stack = load_config_layers_state(
         codex_home.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[("model".to_string(), TomlValue::String("cli".to_string()))],
         overrides,
@@ -4360,6 +4442,8 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             mcp_oauth_callback_url: None,
             model_providers: fixture.model_provider_map.clone(),
             grok: Default::default(),
+            godex_updates: Default::default(),
+            upstream_updates: Default::default(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
@@ -4504,6 +4588,8 @@ fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         mcp_oauth_callback_url: None,
         model_providers: fixture.model_provider_map.clone(),
         grok: Default::default(),
+        godex_updates: Default::default(),
+        upstream_updates: Default::default(),
         project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
         project_doc_fallback_filenames: Vec::new(),
         tool_output_token_limit: None,
@@ -4646,6 +4732,8 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         mcp_oauth_callback_url: None,
         model_providers: fixture.model_provider_map.clone(),
         grok: Default::default(),
+        godex_updates: Default::default(),
+        upstream_updates: Default::default(),
         project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
         project_doc_fallback_filenames: Vec::new(),
         tool_output_token_limit: None,
@@ -4774,6 +4862,8 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         mcp_oauth_callback_url: None,
         model_providers: fixture.model_provider_map.clone(),
         grok: Default::default(),
+        godex_updates: Default::default(),
+        upstream_updates: Default::default(),
         project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
         project_doc_fallback_filenames: Vec::new(),
         tool_output_token_limit: None,

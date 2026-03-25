@@ -17,6 +17,24 @@ struct TopCli {
     inner: Cli,
 }
 
+fn maybe_configure_isolated_home_from_args() {
+    let use_godex_home = std::env::args_os()
+        .skip(1)
+        .any(|arg| arg == "-g" || arg == "--godex-home");
+    if !use_godex_home {
+        return;
+    }
+
+    if let Ok(godex_home) =
+        codex_core::config::find_home(codex_core::config::ConfigNamespace::GodexIsolated)
+    {
+        unsafe {
+            std::env::set_var("GODEX_HOME", &godex_home);
+            std::env::set_var("CODEX_HOME", &godex_home);
+        }
+    }
+}
+
 fn into_app_server_cli(cli: Cli) -> codex_tui_app_server::Cli {
     codex_tui_app_server::Cli {
         prompt: cli.prompt,
@@ -41,6 +59,7 @@ fn into_app_server_cli(cli: Cli) -> codex_tui_app_server::Cli {
         web_search: cli.web_search,
         add_dir: cli.add_dir,
         no_alt_screen: cli.no_alt_screen,
+        use_godex_home: cli.use_godex_home,
         config_overrides: cli.config_overrides,
     }
 }
@@ -56,6 +75,9 @@ fn into_legacy_update_action(
             UpdateAction::BunGlobalLatest
         }
         codex_tui_app_server::update_action::UpdateAction::BrewUpgrade => UpdateAction::BrewUpgrade,
+        codex_tui_app_server::update_action::UpdateAction::SourceRepoSync => {
+            UpdateAction::SourceRepoSync
+        }
     }
 }
 
@@ -77,6 +99,7 @@ fn into_legacy_exit_info(exit_info: codex_tui_app_server::AppExitInfo) -> AppExi
 }
 
 fn main() -> anyhow::Result<()> {
+    maybe_configure_isolated_home_from_args();
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let top_cli = TopCli::parse();
         let mut inner = top_cli.inner;

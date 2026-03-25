@@ -7,8 +7,9 @@ use anyhow::anyhow;
 use anyhow::bail;
 use clap::ArgGroup;
 use codex_core::config::Config;
+use codex_core::config::ConfigNamespace;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_core::config::find_codex_home;
+use codex_core::config::find_home;
 use codex_core::config::load_global_mcp_servers;
 use codex_core::config::types::McpServerConfig;
 use codex_core::config::types::McpServerTransportConfig;
@@ -38,6 +39,9 @@ use codex_utils_cli::format_env_display::format_env_display;
 pub struct McpCli {
     #[clap(flatten)]
     pub config_overrides: CliConfigOverrides,
+
+    #[clap(skip)]
+    pub use_godex_home: bool,
 
     #[command(subcommand)]
     pub subcommand: McpSubcommand,
@@ -71,7 +75,7 @@ pub struct GetArgs {
 }
 
 #[derive(Debug, clap::Parser)]
-#[command(override_usage = "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
+#[command(override_usage = "godex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
 pub struct AddArgs {
     /// Name for the MCP server configuration.
     pub name: String,
@@ -159,8 +163,14 @@ impl McpCli {
     pub async fn run(self) -> Result<()> {
         let McpCli {
             config_overrides,
+            use_godex_home,
             subcommand,
         } = self;
+        let config_namespace = if use_godex_home {
+            ConfigNamespace::GodexIsolated
+        } else {
+            ConfigNamespace::CodexCompatible
+        };
 
         match subcommand {
             McpSubcommand::List(args) => {
@@ -170,10 +180,10 @@ impl McpCli {
                 run_get(&config_overrides, args).await?;
             }
             McpSubcommand::Add(args) => {
-                run_add(&config_overrides, args).await?;
+                run_add(&config_overrides, config_namespace, args).await?;
             }
             McpSubcommand::Remove(args) => {
-                run_remove(&config_overrides, args).await?;
+                run_remove(&config_overrides, config_namespace, args).await?;
             }
             McpSubcommand::Login(args) => {
                 run_login(&config_overrides, args).await?;
@@ -235,7 +245,11 @@ async fn perform_oauth_login_retry_without_scopes(
     }
 }
 
-async fn run_add(config_overrides: &CliConfigOverrides, add_args: AddArgs) -> Result<()> {
+async fn run_add(
+    config_overrides: &CliConfigOverrides,
+    config_namespace: ConfigNamespace,
+    add_args: AddArgs,
+) -> Result<()> {
     // Validate any provided overrides even though they are not currently applied.
     let overrides = config_overrides
         .parse_overrides()
@@ -251,7 +265,7 @@ async fn run_add(config_overrides: &CliConfigOverrides, add_args: AddArgs) -> Re
 
     validate_server_name(&name)?;
 
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_home(config_namespace).context("failed to resolve config home")?;
     let mut servers = load_global_mcp_servers(&codex_home)
         .await
         .with_context(|| format!("failed to load MCP servers from {}", codex_home.display()))?;
@@ -342,14 +356,19 @@ async fn run_add(config_overrides: &CliConfigOverrides, add_args: AddArgs) -> Re
         }
         McpOAuthLoginSupport::Unsupported => {}
         McpOAuthLoginSupport::Unknown(_) => println!(
-            "MCP server may or may not require login. Run `codex mcp login {name}` to login."
+            "MCP server may or may not require login. Run `{exe} mcp login {name}` to login.",
+            exe = codex_core::branding::APP_EXECUTABLE_NAME,
         ),
     }
 
     Ok(())
 }
 
-async fn run_remove(config_overrides: &CliConfigOverrides, remove_args: RemoveArgs) -> Result<()> {
+async fn run_remove(
+    config_overrides: &CliConfigOverrides,
+    config_namespace: ConfigNamespace,
+    remove_args: RemoveArgs,
+) -> Result<()> {
     config_overrides
         .parse_overrides()
         .map_err(anyhow::Error::msg)?;
@@ -358,7 +377,7 @@ async fn run_remove(config_overrides: &CliConfigOverrides, remove_args: RemoveAr
 
     validate_server_name(&name)?;
 
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_home(config_namespace).context("failed to resolve config home")?;
     let mut servers = load_global_mcp_servers(&codex_home)
         .await
         .with_context(|| format!("failed to load MCP servers from {}", codex_home.display()))?;
@@ -538,7 +557,10 @@ async fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) ->
     }
 
     if entries.is_empty() {
-        println!("No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.");
+        println!(
+            "No MCP servers configured yet. Try `{exe} mcp add my-tool -- my-command`.",
+            exe = codex_core::branding::APP_EXECUTABLE_NAME,
+        );
         return Ok(());
     }
 

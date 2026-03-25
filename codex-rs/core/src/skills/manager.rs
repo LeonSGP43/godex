@@ -14,6 +14,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::config::Config;
+use crate::config::infer_config_namespace;
 use crate::config::types::SkillsConfig;
 use crate::config_loader::CloudRequirementsLoader;
 use crate::config_loader::ConfigLayerStackOrdering;
@@ -153,6 +154,7 @@ impl SkillsManager {
         let cli_overrides: Vec<(String, TomlValue)> = Vec::new();
         let config_layer_stack = match load_config_layers_state(
             &self.codex_home,
+            infer_config_namespace(&config.codex_home),
             Some(cwd_abs),
             &cli_overrides,
             LoaderOverrides::default(),

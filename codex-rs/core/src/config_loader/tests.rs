@@ -93,6 +93,7 @@ async fn returns_config_error_for_invalid_user_config_toml() {
     let cwd = AbsolutePathBuf::try_from(tmp.path()).expect("cwd");
     let err = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -123,6 +124,7 @@ async fn returns_config_error_for_invalid_managed_config_toml() {
     let cwd = AbsolutePathBuf::try_from(tmp.path()).expect("cwd");
     let err = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         overrides,
@@ -212,6 +214,7 @@ extra = true
     let cwd = AbsolutePathBuf::try_from(tmp.path()).expect("cwd");
     let state = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         overrides,
@@ -251,6 +254,7 @@ async fn returns_empty_when_all_layers_missing() {
     let cwd = AbsolutePathBuf::try_from(tmp.path()).expect("cwd");
     let layers = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         overrides,
@@ -348,6 +352,7 @@ flag = false
     let cwd = AbsolutePathBuf::try_from(tmp.path()).expect("cwd");
     let state = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         overrides,
@@ -389,6 +394,7 @@ async fn managed_preferences_requirements_are_applied() -> anyhow::Result<()> {
 
     let state = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(AbsolutePathBuf::try_from(tmp.path())?),
         &[] as &[(String, TomlValue)],
         LoaderOverrides {
@@ -452,6 +458,7 @@ async fn managed_preferences_requirements_take_precedence() -> anyhow::Result<()
 
     let state = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(AbsolutePathBuf::try_from(tmp.path())?),
         &[] as &[(String, TomlValue)],
         LoaderOverrides {
@@ -585,6 +592,7 @@ async fn cloud_requirements_take_precedence_over_mdm_requirements() -> anyhow::R
     let tmp = tempdir()?;
     let state = load_config_layers_state(
         tmp.path(),
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(AbsolutePathBuf::try_from(tmp.path())?),
         &[] as &[(String, TomlValue)],
         LoaderOverrides {
@@ -707,6 +715,7 @@ async fn load_config_layers_includes_cloud_requirements() -> anyhow::Result<()> 
 
     let layers = load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -743,6 +752,7 @@ async fn load_config_layers_fails_when_cloud_requirements_loader_fails() -> anyh
 
     let err = load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -789,6 +799,7 @@ async fn project_layers_prefer_closest_cwd() -> std::io::Result<()> {
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let layers = load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -817,6 +828,58 @@ async fn project_layers_prefer_closest_cwd() -> std::io::Result<()> {
         .and_then(TomlValue::as_str)
         .expect("foo entry");
     assert_eq!(foo, "child");
+    Ok(())
+}
+
+#[tokio::test]
+async fn project_layers_use_godex_namespace_when_requested() -> std::io::Result<()> {
+    let tmp = tempdir()?;
+    let project_root = tmp.path().join("project");
+    let nested = project_root.join("child");
+    tokio::fs::create_dir_all(nested.join(".godex")).await?;
+    tokio::fs::create_dir_all(project_root.join(".godex")).await?;
+    tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
+
+    tokio::fs::write(
+        project_root.join(".godex").join(CONFIG_TOML_FILE),
+        "foo = \"root\"\n",
+    )
+    .await?;
+    tokio::fs::write(
+        nested.join(".godex").join(CONFIG_TOML_FILE),
+        "foo = \"child\"\n",
+    )
+    .await?;
+
+    let codex_home = tmp.path().join("godex-home");
+    tokio::fs::create_dir_all(&codex_home).await?;
+    make_config_for_test(&codex_home, &project_root, TrustLevel::Trusted, None).await?;
+
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home)
+        .config_namespace(crate::config::ConfigNamespace::GodexIsolated)
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(nested.clone()),
+            ..ConfigOverrides::default()
+        })
+        .build()
+        .await?;
+
+    assert_eq!(
+        config
+            .config_layer_stack
+            .layers_high_to_low()
+            .into_iter()
+            .filter_map(|layer| match &layer.name {
+                super::ConfigLayerSource::Project { dot_codex_folder } => {
+                    Some(dot_codex_folder.as_path().to_path_buf())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![nested.join(".godex"), project_root.join(".godex")]
+    );
+    assert_eq!(config.user_instructions.as_deref(), None);
     Ok(())
 }
 
@@ -921,6 +984,7 @@ async fn project_layer_is_added_when_dot_codex_exists_without_config_toml() -> s
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let layers = load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -960,6 +1024,7 @@ async fn codex_home_is_not_loaded_as_project_layer_from_home_dir() -> std::io::R
     let cwd = AbsolutePathBuf::from_absolute_path(&home_dir)?;
     let layers = load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -1010,6 +1075,7 @@ async fn codex_home_within_project_tree_is_not_double_loaded() -> std::io::Resul
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let layers = load_config_layers_state(
         &project_dot_codex,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -1080,6 +1146,7 @@ async fn project_layers_disabled_when_untrusted_or_unknown() -> std::io::Result<
 
     let layers_untrusted = load_config_layers_state(
         &codex_home_untrusted,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd.clone()),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -1118,6 +1185,7 @@ async fn project_layers_disabled_when_untrusted_or_unknown() -> std::io::Result<
 
     let layers_unknown = load_config_layers_state(
         &codex_home_unknown,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -1264,6 +1332,7 @@ async fn invalid_project_config_ignored_when_untrusted_or_unknown() -> std::io::
 
         let layers = load_config_layers_state(
             &codex_home,
+            crate::config::ConfigNamespace::CodexCompatible,
             Some(cwd.clone()),
             &[] as &[(String, TomlValue)],
             LoaderOverrides::default(),
@@ -1320,6 +1389,7 @@ async fn cli_overrides_with_relative_paths_do_not_break_trust_check() -> std::io
 
     load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &cli_overrides,
         LoaderOverrides::default(),
@@ -1362,6 +1432,7 @@ async fn project_root_markers_supports_alternate_markers() -> std::io::Result<()
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let layers = load_config_layers_state(
         &codex_home,
+        crate::config::ConfigNamespace::CodexCompatible,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),

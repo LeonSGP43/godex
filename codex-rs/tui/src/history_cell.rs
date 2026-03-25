@@ -490,15 +490,24 @@ impl HistoryCell for PlainHistoryCell {
 #[cfg_attr(debug_assertions, allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {
+    current_version: String,
     latest_version: String,
+    release_notes_url: String,
     update_action: Option<UpdateAction>,
 }
 
 #[cfg_attr(debug_assertions, allow(dead_code))]
 impl UpdateAvailableHistoryCell {
-    pub(crate) fn new(latest_version: String, update_action: Option<UpdateAction>) -> Self {
+    pub(crate) fn new(
+        current_version: String,
+        latest_version: String,
+        release_notes_url: String,
+        update_action: Option<UpdateAction>,
+    ) -> Self {
         Self {
+            current_version,
             latest_version,
+            release_notes_url,
             update_action,
         }
     }
@@ -513,7 +522,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         } else {
             line![
                 "See ",
-                "https://github.com/openai/codex".cyan().underlined(),
+                self.release_notes_url.clone().cyan().underlined(),
                 " for installation options."
             ]
         };
@@ -521,16 +530,94 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         let content = text![
             line![
                 padded_emoji("✨").bold().cyan(),
-                "Update available!".bold().cyan(),
+                format!(
+                    "{} update available!",
+                    codex_core::branding::APP_PRODUCT_NAME
+                )
+                .bold()
+                .cyan(),
                 " ",
-                format!("{CODEX_CLI_VERSION} -> {}", self.latest_version).bold(),
+                format!("{} -> {}", self.current_version, self.latest_version).bold(),
             ],
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/openai/codex/releases/latest"
-                .cyan()
-                .underlined(),
+            self.release_notes_url.clone().cyan().underlined(),
+        ];
+
+        let inner_width = content
+            .width()
+            .min(usize::from(width.saturating_sub(4)))
+            .max(1);
+        with_border_with_inner_width(content.lines, inner_width)
+    }
+}
+
+#[cfg_attr(debug_assertions, allow(dead_code))]
+#[derive(Debug)]
+pub(crate) struct UpstreamVersionGapHistoryCell {
+    current_version: String,
+    latest_version: String,
+    releases_ahead: usize,
+    release_notes_url: String,
+}
+
+#[cfg_attr(debug_assertions, allow(dead_code))]
+impl UpstreamVersionGapHistoryCell {
+    pub(crate) fn new(
+        current_version: String,
+        latest_version: String,
+        releases_ahead: usize,
+        release_notes_url: String,
+    ) -> Self {
+        Self {
+            current_version,
+            latest_version,
+            releases_ahead,
+            release_notes_url,
+        }
+    }
+}
+
+impl HistoryCell for UpstreamVersionGapHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        use ratatui_macros::line;
+        use ratatui_macros::text;
+
+        let release_word = if self.releases_ahead == 1 {
+            "release"
+        } else {
+            "releases"
+        };
+
+        let content = text![
+            line![
+                padded_emoji("📡").bold().cyan(),
+                format!(
+                    "{} is {} {} ahead",
+                    codex_core::branding::UPSTREAM_PRODUCT_NAME,
+                    self.releases_ahead,
+                    release_word
+                )
+                .bold()
+                .cyan(),
+            ],
+            line![
+                "Tracked upstream: ".dim(),
+                format!("{} -> {}", self.current_version, self.latest_version).bold(),
+            ],
+            line![
+                "Run ".dim(),
+                format!(
+                    "{} sync-upstream",
+                    codex_core::branding::APP_EXECUTABLE_NAME
+                )
+                .cyan(),
+                " to merge the latest upstream changes.".dim(),
+            ],
+            "",
+            "See full release notes:",
+            self.release_notes_url.clone().cyan().underlined(),
         ];
 
         let inner_width = content
@@ -1152,7 +1239,7 @@ pub(crate) fn new_session_info(
             Line::from(vec![
                 "  ".into(),
                 "/init".into(),
-                " - create an AGENTS.md file with instructions for Codex".dim(),
+                " - create an AGENTS.md file with instructions for godex".dim(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -1162,7 +1249,7 @@ pub(crate) fn new_session_info(
             Line::from(vec![
                 "  ".into(),
                 "/permissions".into(),
-                " - choose what Codex is allowed to do".dim(),
+                " - choose what godex is allowed to do".dim(),
             ]),
             Line::from(vec![
                 "  ".into(),
@@ -1310,10 +1397,10 @@ impl HistoryCell for SessionHeaderHistoryCell {
 
         let make_row = |spans: Vec<Span<'static>>| Line::from(spans);
 
-        // Title line rendered inside the box: ">_ OpenAI Codex (vX)"
+        // Title line rendered inside the box: ">_ godex (vX)"
         let title_spans: Vec<Span<'static>> = vec![
             Span::from(">_ ").dim(),
-            Span::from("OpenAI Codex").bold(),
+            Span::from(codex_core::branding::APP_DISPLAY_NAME).bold(),
             Span::from(" ").dim(),
             Span::from(format!("(v{})", self.version)).dim(),
         ];

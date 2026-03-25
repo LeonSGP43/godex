@@ -3125,7 +3125,9 @@ impl App {
 
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
         #[cfg(not(debug_assertions))]
-        let upgrade_version = crate::updates::get_upgrade_version(&config);
+        let godex_update_notice = crate::updates::get_godex_update_notice(&config);
+        #[cfg(not(debug_assertions))]
+        let upstream_release_gap_notice = crate::updates::get_upstream_release_gap_notice(&config);
 
         let mut app = Self {
             model_catalog,
@@ -3203,23 +3205,47 @@ impl App {
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
 
         #[cfg(not(debug_assertions))]
-        let pre_loop_exit_reason = if let Some(latest_version) = upgrade_version {
-            let control = app
-                .handle_event(
-                    tui,
-                    &mut app_server,
-                    AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                        latest_version,
-                        crate::update_action::get_update_action(),
-                    ))),
-                )
-                .await?;
-            match control {
-                AppRunControl::Continue => None,
-                AppRunControl::Exit(exit_reason) => Some(exit_reason),
+        let pre_loop_exit_reason = {
+            let mut exit_reason = None;
+            if let Some(notice) = godex_update_notice {
+                let control = app
+                    .handle_event(
+                        tui,
+                        &mut app_server,
+                        AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
+                            notice.current_version,
+                            notice.latest_version,
+                            notice.release_notes_url,
+                            crate::update_action::get_update_action(&app.config),
+                        ))),
+                    )
+                    .await?;
+                if let AppRunControl::Exit(reason) = control {
+                    exit_reason = Some(reason);
+                }
             }
-        } else {
-            None
+            if exit_reason.is_none()
+                && let Some(notice) = upstream_release_gap_notice
+            {
+                let control = app
+                    .handle_event(
+                        tui,
+                        &mut app_server,
+                        AppEvent::InsertHistoryCell(Box::new(
+                            crate::history_cell::UpstreamVersionGapHistoryCell::new(
+                                notice.current_version,
+                                notice.latest_version,
+                                notice.releases_ahead,
+                                notice.release_notes_url,
+                            ),
+                        )),
+                    )
+                    .await?;
+                if let AppRunControl::Exit(reason) = control {
+                    exit_reason = Some(reason);
+                }
+            }
+            exit_reason
         };
         #[cfg(debug_assertions)]
         let pre_loop_exit_reason: Option<ExitReason> = None;

@@ -33,6 +33,10 @@ pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
 pub const DEFAULT_GROK_BASE_ORIGIN: &str = "https://apileon.leonai.top";
 pub const DEFAULT_GROK_API_KEY_ENV: &str = "GROK_API_KEY";
 pub const DEFAULT_GROK_DYNAMIC_MODEL: &str = "grok-4.20-beta";
+pub const DEFAULT_UPSTREAM_REMOTE: &str = "upstream";
+pub const DEFAULT_UPSTREAM_BRANCH: &str = "main";
+pub const DEFAULT_UPSTREAM_BUILD_COMMAND: &[&str] =
+    &["cargo", "build", "-p", "codex-cli", "--bins"];
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -152,6 +156,65 @@ impl Default for GrokConfig {
                     fixed_model: Some("grok-4.1-thinking".to_string()),
                 },
             },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GodexUpdatesToml {
+    pub enabled: Option<bool>,
+    pub release_repo: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GodexUpdatesConfig {
+    pub enabled: bool,
+    pub release_repo: Option<String>,
+}
+
+impl Default for GodexUpdatesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            release_repo: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct UpstreamUpdatesToml {
+    pub enabled: Option<bool>,
+    pub remote: Option<String>,
+    pub branch: Option<String>,
+    pub repo_root: Option<AbsolutePathBuf>,
+    pub release_repo: Option<String>,
+    pub build_command: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamUpdatesConfig {
+    pub enabled: bool,
+    pub remote: String,
+    pub branch: String,
+    pub repo_root: Option<PathBuf>,
+    pub release_repo: String,
+    pub build_command: Vec<String>,
+}
+
+impl Default for UpstreamUpdatesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            remote: DEFAULT_UPSTREAM_REMOTE.to_string(),
+            branch: DEFAULT_UPSTREAM_BRANCH.to_string(),
+            repo_root: None,
+            release_repo: crate::branding::UPSTREAM_GITHUB_REPO.to_string(),
+            build_command: DEFAULT_UPSTREAM_BUILD_COMMAND
+                .iter()
+                .map(|part| (*part).to_string())
+                .collect(),
         }
     }
 }

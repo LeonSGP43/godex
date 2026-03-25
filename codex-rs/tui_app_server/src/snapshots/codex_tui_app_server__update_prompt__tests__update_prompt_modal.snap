@@ -1,5 +1,5 @@
 ---
-source: tui/src/update_prompt.rs
+source: tui_app_server/src/update_prompt.rs
 expression: terminal.backend()
 ---
 

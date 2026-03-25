@@ -45,30 +45,37 @@ mod wsl_paths;
 use crate::mcp_cmd::McpCli;
 
 use codex_core::config::Config;
+use codex_core::config::ConfigBuilder;
+use codex_core::config::ConfigNamespace;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_core::config::find_codex_home;
+use codex_core::config::find_home;
 use codex_features::FEATURES;
 use codex_features::Stage;
 use codex_features::is_known_feature_key;
 use codex_terminal_detection::TerminalName;
 
-/// Codex CLI
+/// godex CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
+    name = "godex",
     author,
     version,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `codex` command name that users run.
-    bin_name = "codex",
-    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
+    // the generic `godex` command name that users run in this fork.
+    bin_name = "godex",
+    override_usage = "godex [OPTIONS] [PROMPT]\n       godex [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
+    /// Use the isolated godex config namespace (`~/.godex`, `.godex`) instead of the default Codex-compatible one.
+    #[arg(long = "godex-home", short = 'g', default_value_t = false)]
+    use_godex_home: bool,
+
     #[clap(flatten)]
     pub config_overrides: CliConfigOverrides,
 
@@ -135,6 +142,10 @@ enum Subcommand {
 
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
+
+    /// Sync this godex checkout with its configured upstream and rebuild.
+    #[clap(name = "sync-upstream")]
+    SyncUpstream(SyncUpstreamCommand),
 
     /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
@@ -277,7 +288,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | godex login --with-api-key`)"
     )]
     with_api_key: bool,
 
@@ -405,6 +416,33 @@ struct StdioToUdsCommand {
     socket_path: PathBuf,
 }
 
+#[derive(Debug, Parser)]
+struct SyncUpstreamCommand {
+    /// Override the configured repository root for this sync.
+    #[arg(long = "repo-root", value_name = "DIR")]
+    repo_root: Option<PathBuf>,
+
+    /// Override the configured upstream remote name for this sync.
+    #[arg(long = "remote", value_name = "REMOTE")]
+    remote: Option<String>,
+
+    /// Override the configured upstream branch/ref for this sync.
+    #[arg(long = "branch", value_name = "REF")]
+    branch: Option<String>,
+
+    /// Show the commands that would run without executing them.
+    #[arg(long = "dry-run", default_value_t = false)]
+    dry_run: bool,
+
+    /// Skip the rebuild step after a successful merge.
+    #[arg(long = "no-build", default_value_t = false)]
+    no_build: bool,
+
+    /// Require a fast-forward merge when syncing.
+    #[arg(long = "ff-only", default_value_t = false)]
+    ff_only: bool,
+}
+
 fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<String> {
     let AppExitInfo {
         token_usage,
@@ -461,33 +499,141 @@ fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
 fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
     println!();
     let cmd_str = action.command_str();
-    println!("Updating Codex via `{cmd_str}`...");
+    println!(
+        "Updating {} via `{cmd_str}`...",
+        codex_core::branding::APP_DISPLAY_NAME
+    );
 
     let status = {
-        #[cfg(windows)]
-        {
-            // On Windows, run via cmd.exe so .CMD/.BAT are correctly resolved (PATHEXT semantics).
-            std::process::Command::new("cmd")
-                .args(["/C", &cmd_str])
-                .status()?
-        }
-        #[cfg(not(windows))]
-        {
-            let (cmd, args) = action.command_args();
-            let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
-            let normalized_args: Vec<String> = args
-                .iter()
-                .map(crate::wsl_paths::normalize_for_wsl)
-                .collect();
-            std::process::Command::new(&command_path)
-                .args(&normalized_args)
-                .status()?
+        match action {
+            UpdateAction::SourceRepoSync => std::process::Command::new(std::env::current_exe()?)
+                .arg("sync-upstream")
+                .status()?,
+            #[cfg(windows)]
+            _ => {
+                // On Windows, run via cmd.exe so .CMD/.BAT are correctly resolved (PATHEXT semantics).
+                std::process::Command::new("cmd")
+                    .args(["/C", &cmd_str])
+                    .status()?
+            }
+            #[cfg(not(windows))]
+            _ => {
+                let (cmd, args) = action.command_args();
+                let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
+                let normalized_args: Vec<String> = args
+                    .iter()
+                    .map(crate::wsl_paths::normalize_for_wsl)
+                    .collect();
+                std::process::Command::new(&command_path)
+                    .args(&normalized_args)
+                    .status()?
+            }
         }
     };
     if !status.success() {
         anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
-    println!("\n🎉 Update ran successfully! Please restart Codex.");
+    println!(
+        "\n🎉 Update ran successfully! Please restart {}.",
+        codex_core::branding::APP_DISPLAY_NAME
+    );
+    Ok(())
+}
+
+async fn run_sync_upstream_command(
+    cmd: SyncUpstreamCommand,
+    config_namespace: ConfigNamespace,
+) -> anyhow::Result<()> {
+    let config = ConfigBuilder::default()
+        .config_namespace(config_namespace)
+        .build()
+        .await?;
+    let upstream_cfg = &config.upstream_updates;
+
+    let repo_root = cmd
+        .repo_root
+        .or_else(|| upstream_cfg.repo_root.clone())
+        .ok_or_else(|| anyhow::anyhow!("No upstream repo_root configured. Set [upstream_updates].repo_root in the active config.toml or pass --repo-root."))?;
+    let remote = cmd.remote.unwrap_or_else(|| upstream_cfg.remote.clone());
+    let branch = cmd.branch.unwrap_or_else(|| upstream_cfg.branch.clone());
+    let target_ref = format!("{remote}/{branch}");
+
+    ensure_git_clean(&repo_root)?;
+
+    let mut steps: Vec<(String, std::process::Command)> = Vec::new();
+
+    let mut fetch = std::process::Command::new("git");
+    fetch
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["fetch", &remote, "--tags"]);
+    steps.push((
+        format!("git -C {} fetch {} --tags", repo_root.display(), remote),
+        fetch,
+    ));
+
+    let mut merge = std::process::Command::new("git");
+    merge
+        .arg("-C")
+        .arg(&repo_root)
+        .arg("merge")
+        .arg("--no-edit");
+    if cmd.ff_only {
+        merge.arg("--ff-only");
+    }
+    merge.arg(&target_ref);
+    steps.push((
+        format!(
+            "git -C {} merge --no-edit{} {}",
+            repo_root.display(),
+            if cmd.ff_only { " --ff-only" } else { "" },
+            target_ref
+        ),
+        merge,
+    ));
+
+    if !cmd.no_build {
+        let build_command = &upstream_cfg.build_command;
+        if build_command.is_empty() {
+            anyhow::bail!("Configured upstream build_command is empty");
+        }
+        let mut build = std::process::Command::new(&build_command[0]);
+        build.current_dir(&repo_root).args(&build_command[1..]);
+        steps.push((build_command.join(" "), build));
+    }
+
+    for (display, mut process) in steps {
+        println!("> {display}");
+        if cmd.dry_run {
+            continue;
+        }
+        let status = process.status()?;
+        if !status.success() {
+            anyhow::bail!("`{display}` failed with status {status}");
+        }
+    }
+
+    println!(
+        "Upstream sync completed for {}.",
+        codex_core::branding::APP_DISPLAY_NAME
+    );
+    Ok(())
+}
+
+fn ensure_git_clean(repo_root: &PathBuf) -> anyhow::Result<()> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["status", "--short"])
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!("Failed to inspect git status in {}", repo_root.display());
+    }
+    if !String::from_utf8_lossy(&output.stdout).trim().is_empty() {
+        anyhow::bail!(
+            "Refusing to sync upstream because the worktree is dirty. Commit or stash changes first."
+        );
+    }
     Ok(())
 }
 
@@ -580,7 +726,32 @@ fn stage_str(stage: Stage) -> &'static str {
     }
 }
 
+fn config_namespace(use_godex_home: bool) -> ConfigNamespace {
+    if use_godex_home {
+        ConfigNamespace::GodexIsolated
+    } else {
+        ConfigNamespace::CodexCompatible
+    }
+}
+
+fn maybe_configure_isolated_home_from_args() {
+    let use_godex_home = std::env::args_os()
+        .skip(1)
+        .any(|arg| arg == "-g" || arg == "--godex-home");
+    if !use_godex_home {
+        return;
+    }
+
+    if let Ok(godex_home) = find_home(ConfigNamespace::GodexIsolated) {
+        unsafe {
+            std::env::set_var("GODEX_HOME", &godex_home);
+            std::env::set_var("CODEX_HOME", &godex_home);
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
+    maybe_configure_isolated_home_from_args();
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         cli_main(arg0_paths).await?;
         Ok(())
@@ -589,12 +760,15 @@ fn main() -> anyhow::Result<()> {
 
 async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     let MultitoolCli {
+        use_godex_home,
         config_overrides: mut root_config_overrides,
         feature_toggles,
         remote,
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
+    let config_namespace = config_namespace(use_godex_home);
+    interactive.use_godex_home = use_godex_home;
 
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
@@ -621,7 +795,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         }
         Some(Subcommand::Review(review_args)) => {
             reject_remote_mode_for_subcommand(root_remote.as_deref(), "review")?;
-            let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
+            let mut exec_cli = ExecCli::try_parse_from(["godex", "exec"])?;
             exec_cli.command = Some(ExecCommand::Review(review_args));
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
@@ -637,6 +811,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             reject_remote_mode_for_subcommand(root_remote.as_deref(), "mcp")?;
             // Propagate any root-level config overrides (e.g. `-c key=value`).
             prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
+            mcp_cli.use_godex_home = use_godex_home;
             mcp_cli.run().await?;
         }
         Some(Subcommand::AppServer(app_server_cli)) => match app_server_cli.subcommand {
@@ -702,6 +877,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 all,
                 config_overrides,
             );
+            interactive.use_godex_home = use_godex_home;
             let exit_info = run_interactive_tui(
                 interactive,
                 remote.remote.or(root_remote.clone()),
@@ -725,6 +901,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 all,
                 config_overrides,
             );
+            interactive.use_godex_home = use_godex_home;
             let exit_info = run_interactive_tui(
                 interactive,
                 remote.remote.or(root_remote.clone()),
@@ -732,6 +909,10 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             )
             .await?;
             handle_app_exit(exit_info)?;
+        }
+        Some(Subcommand::SyncUpstream(cmd)) => {
+            reject_remote_mode_for_subcommand(root_remote.as_deref(), "sync-upstream")?;
+            run_sync_upstream_command(cmd, config_namespace).await?;
         }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(root_remote.as_deref(), "login")?;
@@ -919,7 +1100,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
 
 async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
-    let codex_home = find_codex_home()?;
+    let codex_home = find_home(config_namespace(interactive.use_godex_home))?;
     ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
         .set_feature_enabled(feature, /*enabled*/ true)
@@ -932,7 +1113,7 @@ async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow
 
 async fn disable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
-    let codex_home = find_codex_home()?;
+    let codex_home = find_home(config_namespace(interactive.use_godex_home))?;
     ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
         .set_feature_enabled(feature, /*enabled*/ false)
@@ -1030,7 +1211,8 @@ fn prepend_config_flags(
 fn reject_remote_mode_for_subcommand(remote: Option<&str>, subcommand: &str) -> anyhow::Result<()> {
     if let Some(remote) = remote {
         anyhow::bail!(
-            "`--remote {remote}` is only supported for interactive TUI commands, not `codex {subcommand}`"
+            "`--remote {remote}` is only supported for interactive TUI commands, not `{exe} {subcommand}`",
+            exe = codex_core::branding::APP_EXECUTABLE_NAME,
         );
     }
     Ok(())
@@ -1119,6 +1301,7 @@ fn into_app_server_tui_cli(cli: TuiCli) -> codex_tui_app_server::Cli {
         add_dir: cli.add_dir,
         no_alt_screen: cli.no_alt_screen,
         config_overrides: cli.config_overrides,
+        use_godex_home: cli.use_godex_home,
     }
 }
 
@@ -1133,6 +1316,9 @@ fn into_legacy_update_action(
             UpdateAction::BunGlobalLatest
         }
         codex_tui_app_server::update_action::UpdateAction::BrewUpgrade => UpdateAction::BrewUpgrade,
+        codex_tui_app_server::update_action::UpdateAction::SourceRepoSync => {
+            UpdateAction::SourceRepoSync
+        }
     }
 }
 
@@ -1264,7 +1450,7 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
 
 fn print_completion(cmd: CompletionCommand) {
     let mut app = MultitoolCli::command();
-    let name = "codex";
+    let name = codex_core::branding::APP_EXECUTABLE_NAME;
     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 }
 
@@ -1284,6 +1470,7 @@ mod tests {
             subcommand,
             feature_toggles: _,
             remote: _,
+            ..
         } = cli;
 
         let Subcommand::Resume(ResumeCommand {
@@ -1315,6 +1502,7 @@ mod tests {
             subcommand,
             feature_toggles: _,
             remote: _,
+            ..
         } = cli;
 
         let Subcommand::Fork(ForkCommand {
@@ -1747,5 +1935,56 @@ mod tests {
             .to_overrides()
             .expect_err("feature should be rejected");
         assert_eq!(err.to_string(), "Unknown feature flag: does_not_exist");
+    }
+
+    #[test]
+    fn sync_upstream_subcommand_parses() {
+        let cli = MultitoolCli::try_parse_from(["godex", "sync-upstream", "--dry-run"])
+            .expect("parse should succeed");
+        let Some(Subcommand::SyncUpstream(cmd)) = cli.subcommand else {
+            panic!("expected sync-upstream subcommand");
+        };
+        assert!(cmd.dry_run);
+        assert!(!cmd.no_build);
+        assert!(!cmd.ff_only);
+    }
+
+    #[test]
+    fn godex_home_flag_parses() {
+        let cli = MultitoolCli::try_parse_from(["godex", "-g", "sync-upstream", "--dry-run"])
+            .expect("parse should succeed");
+        assert!(cli.use_godex_home);
+    }
+
+    #[test]
+    fn maps_source_repo_sync_update_action() {
+        assert_eq!(
+            into_legacy_update_action(
+                codex_tui_app_server::update_action::UpdateAction::SourceRepoSync
+            ),
+            UpdateAction::SourceRepoSync
+        );
+    }
+
+    #[test]
+    fn workspace_version_matches_repo_version_file() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("resolve repo root");
+        let version = std::fs::read_to_string(repo_root.join("VERSION")).expect("read VERSION");
+        assert_eq!(env!("CARGO_PKG_VERSION"), version.trim());
+    }
+
+    #[test]
+    fn changelog_has_unreleased_and_release_headings() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("resolve repo root");
+        let changelog =
+            std::fs::read_to_string(repo_root.join("CHANGELOG.md")).expect("read CHANGELOG.md");
+        assert!(changelog.contains("## [Unreleased]"));
+        assert!(changelog.contains("## [0.1.0]"));
     }
 }

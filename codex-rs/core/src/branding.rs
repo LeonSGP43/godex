@@ -1,0 +1,11 @@
+pub const APP_DISPLAY_NAME: &str = "godex";
+pub const APP_EXECUTABLE_NAME: &str = "godex";
+pub const APP_PACKAGE_NAME: &str = "godex-cli";
+pub const APP_PACKAGE_INSTALL_SPEC: &str = "godex-cli@latest";
+pub const APP_BREW_PACKAGE_NAME: &str = "godex";
+pub const APP_PRODUCT_NAME: &str = "godex";
+pub const APP_GITHUB_REPO: &str = "LeonSGP43/godex";
+pub const APP_GITHUB_URL: &str = "https://github.com/LeonSGP43/godex";
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const UPSTREAM_PRODUCT_NAME: &str = "Official Codex";
+pub const UPSTREAM_GITHUB_REPO: &str = "openai/codex";

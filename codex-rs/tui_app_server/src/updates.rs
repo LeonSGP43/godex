@@ -1,123 +1,405 @@
 #![cfg(not(debug_assertions))]
 
-use crate::update_action;
-use crate::update_action::UpdateAction;
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
+use codex_core::branding;
 use codex_core::config::Config;
 use codex_core::default_client::create_client;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::version::CODEX_CLI_VERSION;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GodexUpdateNotice {
+    pub current_version: String,
+    pub latest_version: String,
+    pub release_notes_url: String,
+}
 
-pub fn get_upgrade_version(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamReleaseGapNotice {
+    pub current_version: String,
+    pub latest_version: String,
+    pub releases_ahead: usize,
+    pub release_notes_url: String,
+}
+
+pub fn godex_current_version() -> String {
+    branding::APP_VERSION.to_string()
+}
+
+pub fn get_godex_update_notice(config: &Config) -> Option<GodexUpdateNotice> {
+    if !config.check_for_update_on_startup || !config.godex_updates.enabled {
+        return None;
+    }
+    let release_repo = effective_godex_release_repo(config)?;
+    let updates_file = updates_filepath(config);
+    let state = read_updates_state(&updates_file).ok();
+    refresh_updates_if_needed(config, &updates_file, state.as_ref());
+
+    let info = state?.godex?;
+    if is_newer(&info.latest_version, branding::APP_VERSION).unwrap_or(false) {
+        Some(GodexUpdateNotice {
+            current_version: godex_current_version(),
+            latest_version: info.latest_version,
+            release_notes_url: format!("https://github.com/{}/releases/latest", release_repo),
+        })
+    } else {
+        None
+    }
+}
+
+pub fn get_godex_update_notice_for_popup(config: &Config) -> Option<GodexUpdateNotice> {
+    let notice = get_godex_update_notice(config)?;
+    let updates_file = updates_filepath(config);
+    if let Ok(state) = read_updates_state(&updates_file)
+        && state
+            .godex
+            .and_then(|info| info.dismissed_version)
+            .as_deref()
+            == Some(notice.latest_version.as_str())
+    {
+        return None;
+    }
+    Some(notice)
+}
+
+pub fn get_upstream_release_gap_notice(config: &Config) -> Option<UpstreamReleaseGapNotice> {
+    if !config.check_for_update_on_startup
+        || !config.upstream_updates.enabled
+        || config.upstream_updates.repo_root.is_none()
+    {
         return None;
     }
 
-    let version_file = version_filepath(config);
-    let info = read_version_info(&version_file).ok();
+    let updates_file = updates_filepath(config);
+    let state = read_updates_state(&updates_file).ok();
+    refresh_updates_if_needed(config, &updates_file, state.as_ref());
 
-    if match &info {
-        None => true,
-        Some(info) => info.last_checked_at < Utc::now() - Duration::hours(20),
-    } {
-        // Refresh the cached latest version in the background so TUI startup
-        // isn’t blocked by a network call. The UI reads the previously cached
-        // value (if any) for this run; the next run shows the banner if needed.
-        tokio::spawn(async move {
-            check_for_update(&version_file)
-                .await
-                .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
-        });
+    let info = state?.upstream?;
+    if info.releases_ahead == 0 {
+        return None;
     }
 
-    info.and_then(|info| {
-        if is_newer(&info.latest_version, CODEX_CLI_VERSION).unwrap_or(false) {
-            Some(info.latest_version)
-        } else {
-            None
-        }
+    Some(UpstreamReleaseGapNotice {
+        current_version: info.current_version,
+        latest_version: info.latest_version,
+        releases_ahead: info.releases_ahead,
+        release_notes_url: upstream_release_notes_url(config),
     })
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct UpdatesState {
+    #[serde(default)]
+    godex: Option<GodexVersionInfo>,
+    #[serde(default)]
+    upstream: Option<UpstreamReleaseGapInfo>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct VersionInfo {
+struct GodexVersionInfo {
     latest_version: String,
-    // ISO-8601 timestamp (RFC3339)
     last_checked_at: DateTime<Utc>,
     #[serde(default)]
     dismissed_version: Option<String>,
 }
 
-const VERSION_FILENAME: &str = "version.json";
-// We use the latest version from the cask if installation is via homebrew - homebrew does not immediately pick up the latest release and can lag behind.
-const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct UpstreamReleaseGapInfo {
+    current_version: String,
+    latest_version: String,
+    releases_ahead: usize,
+    last_checked_at: DateTime<Utc>,
+}
+
+const UPDATES_FILENAME: &str = "updates.json";
+const UPDATE_CHECK_INTERVAL_HOURS: i64 = 20;
 
 #[derive(Deserialize, Debug, Clone)]
 struct ReleaseInfo {
     tag_name: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-struct HomebrewCaskInfo {
-    version: String,
+fn updates_filepath(config: &Config) -> PathBuf {
+    config.codex_home.join(UPDATES_FILENAME)
 }
 
-fn version_filepath(config: &Config) -> PathBuf {
-    config.codex_home.join(VERSION_FILENAME)
-}
-
-fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
-    let contents = std::fs::read_to_string(version_file)?;
+fn read_updates_state(updates_file: &Path) -> anyhow::Result<UpdatesState> {
+    let contents = std::fs::read_to_string(updates_file)?;
     Ok(serde_json::from_str(&contents)?)
 }
 
-async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
-    let latest_version = match update_action::get_update_action() {
-        Some(UpdateAction::BrewUpgrade) => {
-            let HomebrewCaskInfo { version } = create_client()
-                .get(HOMEBREW_CASK_API_URL)
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<HomebrewCaskInfo>()
-                .await?;
-            version
-        }
-        _ => {
-            let ReleaseInfo {
-                tag_name: latest_tag_name,
-            } = create_client()
-                .get(LATEST_RELEASE_URL)
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<ReleaseInfo>()
-                .await?;
-            extract_version_from_latest_tag(&latest_tag_name)?
-        }
-    };
+fn refresh_updates_if_needed(config: &Config, updates_file: &Path, state: Option<&UpdatesState>) {
+    if !needs_refresh(config, state) {
+        return;
+    }
 
-    // Preserve any previously dismissed version if present.
-    let prev_info = read_version_info(version_file).ok();
-    let info = VersionInfo {
-        latest_version,
-        last_checked_at: Utc::now(),
-        dismissed_version: prev_info.and_then(|p| p.dismissed_version),
-    };
+    let config = config.clone();
+    let updates_file = updates_file.to_path_buf();
+    tokio::spawn(async move {
+        refresh_updates(&config, &updates_file)
+            .await
+            .inspect_err(|e| tracing::error!("Failed to refresh updates: {e}"))
+    });
+}
 
-    let json_line = format!("{}\n", serde_json::to_string(&info)?);
-    if let Some(parent) = version_file.parent() {
+fn needs_refresh(config: &Config, state: Option<&UpdatesState>) -> bool {
+    let now = Utc::now();
+    let has_godex_release_repo = effective_godex_release_repo(config).is_some();
+
+    let godex_stale = config.godex_updates.enabled
+        && has_godex_release_repo
+        && state
+            .and_then(|state| state.godex.as_ref())
+            .is_none_or(|info| {
+                info.last_checked_at < now - Duration::hours(UPDATE_CHECK_INTERVAL_HOURS)
+            });
+
+    let upstream_stale = config.upstream_updates.enabled
+        && config.upstream_updates.repo_root.is_some()
+        && state
+            .and_then(|state| state.upstream.as_ref())
+            .is_none_or(|info| {
+                info.last_checked_at < now - Duration::hours(UPDATE_CHECK_INTERVAL_HOURS)
+            });
+
+    godex_stale || upstream_stale
+}
+
+async fn refresh_updates(config: &Config, updates_file: &Path) -> anyhow::Result<()> {
+    let prev_state = read_updates_state(updates_file).unwrap_or_default();
+    let godex = refresh_godex_update_info(config, prev_state.godex.as_ref()).await?;
+    let upstream = refresh_upstream_release_gap(config).await?;
+    let state = UpdatesState { godex, upstream };
+
+    let json_line = format!("{}\n", serde_json::to_string(&state)?);
+    if let Some(parent) = updates_file.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::write(version_file, json_line).await?;
+    tokio::fs::write(updates_file, json_line).await?;
     Ok(())
+}
+
+async fn refresh_godex_update_info(
+    config: &Config,
+    previous: Option<&GodexVersionInfo>,
+) -> anyhow::Result<Option<GodexVersionInfo>> {
+    if !config.godex_updates.enabled {
+        return Ok(None);
+    }
+
+    let Some(release_repo) = effective_godex_release_repo(config) else {
+        return Ok(None);
+    };
+
+    let latest_version = fetch_latest_release_version(&release_repo).await?;
+    Ok(Some(GodexVersionInfo {
+        latest_version,
+        last_checked_at: Utc::now(),
+        dismissed_version: previous.and_then(|info| info.dismissed_version.clone()),
+    }))
+}
+
+async fn refresh_upstream_release_gap(
+    config: &Config,
+) -> anyhow::Result<Option<UpstreamReleaseGapInfo>> {
+    if !config.upstream_updates.enabled {
+        return Ok(None);
+    }
+
+    let Some(current_version) = source_repo_base_version(config) else {
+        return Ok(None);
+    };
+
+    let releases = fetch_release_versions(&config.upstream_updates.release_repo).await?;
+    let releases_ahead = count_releases_ahead(&releases, &current_version).unwrap_or_default();
+    let latest_version = releases
+        .iter()
+        .next_back()
+        .map(|version| format_version(*version))
+        .unwrap_or_else(|| current_version.clone());
+
+    Ok(Some(UpstreamReleaseGapInfo {
+        current_version,
+        latest_version,
+        releases_ahead,
+        last_checked_at: Utc::now(),
+    }))
+}
+
+async fn fetch_latest_release_version(release_repo: &str) -> anyhow::Result<String> {
+    let ReleaseInfo { tag_name, .. } = create_client()
+        .get(format!(
+            "https://api.github.com/repos/{release_repo}/releases/latest"
+        ))
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<ReleaseInfo>()
+        .await?;
+    extract_version_from_release_tag(&tag_name)
+}
+
+async fn fetch_release_versions(release_repo: &str) -> anyhow::Result<BTreeSet<(u64, u64, u64)>> {
+    let releases = create_client()
+        .get(format!(
+            "https://api.github.com/repos/{release_repo}/releases?per_page=100"
+        ))
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<Vec<ReleaseInfo>>()
+        .await?;
+
+    Ok(releases
+        .into_iter()
+        .filter(|release| !release.draft && !release.prerelease)
+        .filter_map(|release| extract_version_from_release_tag(&release.tag_name).ok())
+        .filter_map(|version| parse_version(&version))
+        .collect())
+}
+
+fn upstream_release_notes_url(config: &Config) -> String {
+    format!(
+        "https://github.com/{}/releases/latest",
+        config.upstream_updates.release_repo
+    )
+}
+
+fn effective_godex_release_repo(config: &Config) -> Option<String> {
+    config
+        .godex_updates
+        .release_repo
+        .as_deref()
+        .map(str::trim)
+        .filter(|repo| !repo.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            config
+                .upstream_updates
+                .repo_root
+                .as_deref()
+                .and_then(detect_origin_github_repo)
+        })
+        .or_else(|| Some(branding::APP_GITHUB_REPO.to_string()))
+}
+
+fn detect_origin_github_repo(repo_root: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let remote = String::from_utf8(output.stdout).ok()?;
+    parse_github_repo(remote.trim())
+}
+
+fn parse_github_repo(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    let normalized = remote
+        .strip_prefix("git@github.com:")
+        .or_else(|| remote.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| remote.strip_prefix("https://github.com/"))
+        .or_else(|| remote.strip_prefix("http://github.com/"))?;
+    let normalized = normalized.trim_end_matches(".git").trim_matches('/');
+    let mut parts = normalized.split('/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some(format!("{owner}/{repo}"))
+}
+
+fn source_repo_base_version(config: &Config) -> Option<String> {
+    let repo_root = config.upstream_updates.repo_root.as_ref()?;
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args([
+            "describe",
+            "--tags",
+            "--match",
+            "rust-v*",
+            "--abbrev=0",
+            "HEAD",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let tag = String::from_utf8(output.stdout).ok()?;
+    extract_version_from_release_tag(tag.trim()).ok()
+}
+
+pub async fn dismiss_godex_version(config: &Config, version: &str) -> anyhow::Result<()> {
+    let updates_file = updates_filepath(config);
+    let mut state = match read_updates_state(&updates_file) {
+        Ok(state) => state,
+        Err(_) => return Ok(()),
+    };
+    let Some(godex) = state.godex.as_mut() else {
+        return Ok(());
+    };
+    godex.dismissed_version = Some(version.to_string());
+    let json_line = format!("{}\n", serde_json::to_string(&state)?);
+    if let Some(parent) = updates_file.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(updates_file, json_line).await?;
+    Ok(())
+}
+
+fn extract_version_from_release_tag(tag_name: &str) -> anyhow::Result<String> {
+    for candidate in [
+        tag_name,
+        tag_name.strip_prefix("rust-v").unwrap_or(tag_name),
+        tag_name.strip_prefix("godex-v").unwrap_or(tag_name),
+        tag_name.strip_prefix('v').unwrap_or(tag_name),
+    ] {
+        if parse_version(candidate).is_some() {
+            return Ok(candidate.to_string());
+        }
+    }
+
+    if let Some(candidate) = tag_name
+        .split(|c: char| !c.is_ascii_digit() && c != '.')
+        .find(|candidate| parse_version(candidate).is_some())
+    {
+        return Ok(candidate.to_string());
+    }
+
+    anyhow::bail!("Failed to parse release tag '{tag_name}'");
+}
+
+fn count_releases_ahead(
+    releases: &BTreeSet<(u64, u64, u64)>,
+    current_version: &str,
+) -> Option<usize> {
+    let current = parse_version(current_version)?;
+    Some(
+        releases
+            .iter()
+            .filter(|version| **version > current)
+            .count(),
+    )
+}
+
+fn format_version(version: (u64, u64, u64)) -> String {
+    format!("{}.{}.{}", version.0, version.1, version.2)
 }
 
 fn is_newer(latest: &str, current: &str) -> Option<bool> {
@@ -125,48 +407,6 @@ fn is_newer(latest: &str, current: &str) -> Option<bool> {
         (Some(l), Some(c)) => Some(l > c),
         _ => None,
     }
-}
-
-fn extract_version_from_latest_tag(latest_tag_name: &str) -> anyhow::Result<String> {
-    latest_tag_name
-        .strip_prefix("rust-v")
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow::anyhow!("Failed to parse latest tag name '{latest_tag_name}'"))
-}
-
-/// Returns the latest version to show in a popup, if it should be shown.
-/// This respects the user's dismissal choice for the current latest version.
-pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup {
-        return None;
-    }
-
-    let version_file = version_filepath(config);
-    let latest = get_upgrade_version(config)?;
-    // If the user dismissed this exact version previously, do not show the popup.
-    if let Ok(info) = read_version_info(&version_file)
-        && info.dismissed_version.as_deref() == Some(latest.as_str())
-    {
-        return None;
-    }
-    Some(latest)
-}
-
-/// Persist a dismissal for the current latest version so we don't show
-/// the update popup again for this version.
-pub async fn dismiss_version(config: &Config, version: &str) -> anyhow::Result<()> {
-    let version_file = version_filepath(config);
-    let mut info = match read_version_info(&version_file) {
-        Ok(info) => info,
-        Err(_) => return Ok(()),
-    };
-    info.dismissed_version = Some(version.to_string());
-    let json_line = format!("{}\n", serde_json::to_string(&info)?);
-    if let Some(parent) = version_file.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(version_file, json_line).await?;
-    Ok(())
 }
 
 fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
@@ -182,31 +422,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_version_from_brew_api_json() {
-        //
-        // https://formulae.brew.sh/api/cask/codex.json
-        let cask_json = r#"{
-            "token": "codex",
-            "full_token": "codex",
-            "tap": "homebrew/cask",
-            "version": "0.96.0",
-        }"#;
-        let HomebrewCaskInfo { version } = serde_json::from_str::<HomebrewCaskInfo>(cask_json)
-            .expect("failed to parse version from cask json");
-        assert_eq!(version, "0.96.0");
-    }
-
-    #[test]
-    fn extracts_version_from_latest_tag() {
+    fn extracts_version_from_release_tags() {
         assert_eq!(
-            extract_version_from_latest_tag("rust-v1.5.0").expect("failed to parse version"),
+            extract_version_from_release_tag("rust-v1.5.0").expect("failed to parse version"),
             "1.5.0"
+        );
+        assert_eq!(
+            extract_version_from_release_tag("godex-v0.1.0").expect("failed to parse version"),
+            "0.1.0"
+        );
+        assert_eq!(
+            extract_version_from_release_tag("v2.3.4").expect("failed to parse version"),
+            "2.3.4"
         );
     }
 
     #[test]
-    fn latest_tag_without_prefix_is_invalid() {
-        assert!(extract_version_from_latest_tag("v1.5.0").is_err());
+    fn latest_tag_without_semver_is_invalid() {
+        assert!(extract_version_from_release_tag("release-candidate").is_err());
+    }
+
+    #[test]
+    fn counts_upstream_releases_ahead() {
+        let releases = BTreeSet::from([(0, 99, 0), (1, 0, 0), (1, 1, 0)]);
+        assert_eq!(count_releases_ahead(&releases, "0.99.0"), Some(2));
+        assert_eq!(count_releases_ahead(&releases, "1.1.0"), Some(0));
     }
 
     #[test]
@@ -224,8 +464,19 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_is_ignored() {
-        assert_eq!(parse_version(" 1.2.3 \n"), Some((1, 2, 3)));
-        assert_eq!(is_newer(" 1.2.3 ", "1.2.2"), Some(true));
+    fn parses_github_remote_urls() {
+        assert_eq!(
+            parse_github_repo("git@github.com:LeonSGP43/godex.git"),
+            Some("LeonSGP43/godex".to_string())
+        );
+        assert_eq!(
+            parse_github_repo("https://github.com/LeonSGP43/godex"),
+            Some("LeonSGP43/godex".to_string())
+        );
+        assert_eq!(
+            parse_github_repo("ssh://git@github.com/LeonSGP43/godex.git"),
+            Some("LeonSGP43/godex".to_string())
+        );
+        assert_eq!(parse_github_repo("https://gitlab.com/LeonSGP43/godex"), None);
     }
 }

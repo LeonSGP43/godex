@@ -36,15 +36,18 @@ pub(crate) async fn run_update_prompt_if_needed(
     tui: &mut Tui,
     config: &Config,
 ) -> Result<UpdatePromptOutcome> {
-    let Some(latest_version) = updates::get_upgrade_version_for_popup(config) else {
+    let Some(update_notice) = updates::get_godex_update_notice_for_popup(config) else {
         return Ok(UpdatePromptOutcome::Continue);
     };
-    let Some(update_action) = crate::update_action::get_update_action() else {
-        return Ok(UpdatePromptOutcome::Continue);
-    };
+    let update_action = crate::update_action::get_update_action(config);
 
-    let mut screen =
-        UpdatePromptScreen::new(tui.frame_requester(), latest_version.clone(), update_action);
+    let mut screen = UpdatePromptScreen::new(
+        tui.frame_requester(),
+        update_notice.current_version,
+        update_notice.latest_version,
+        update_notice.release_notes_url,
+        update_action,
+    );
     tui.draw(u16::MAX, |frame| {
         frame.render_widget_ref(&screen, frame.area());
     })?;
@@ -70,12 +73,17 @@ pub(crate) async fn run_update_prompt_if_needed(
 
     match screen.selection() {
         Some(UpdateSelection::UpdateNow) => {
-            tui.terminal.clear()?;
-            Ok(UpdatePromptOutcome::RunUpdate(update_action))
+            if let Some(update_action) = update_action {
+                tui.terminal.clear()?;
+                Ok(UpdatePromptOutcome::RunUpdate(update_action))
+            } else {
+                Ok(UpdatePromptOutcome::Continue)
+            }
         }
         Some(UpdateSelection::NotNow) | None => Ok(UpdatePromptOutcome::Continue),
         Some(UpdateSelection::DontRemind) => {
-            if let Err(err) = updates::dismiss_version(config, screen.latest_version()).await {
+            if let Err(err) = updates::dismiss_godex_version(config, screen.latest_version()).await
+            {
                 tracing::error!("Failed to persist update dismissal: {err}");
             }
             Ok(UpdatePromptOutcome::Continue)
@@ -94,7 +102,8 @@ struct UpdatePromptScreen {
     request_frame: FrameRequester,
     latest_version: String,
     current_version: String,
-    update_action: UpdateAction,
+    release_notes_url: String,
+    update_action: Option<UpdateAction>,
     highlighted: UpdateSelection,
     selection: Option<UpdateSelection>,
 }
@@ -102,13 +111,16 @@ struct UpdatePromptScreen {
 impl UpdatePromptScreen {
     fn new(
         request_frame: FrameRequester,
+        current_version: String,
         latest_version: String,
-        update_action: UpdateAction,
+        release_notes_url: String,
+        update_action: Option<UpdateAction>,
     ) -> Self {
         Self {
             request_frame,
             latest_version,
-            current_version: env!("CARGO_PKG_VERSION").to_string(),
+            current_version,
+            release_notes_url,
             update_action,
             highlighted: UpdateSelection::UpdateNow,
             selection: None,
@@ -186,12 +198,22 @@ impl WidgetRef for &UpdatePromptScreen {
         Clear.render(area, buf);
         let mut column = ColumnRenderable::new();
 
-        let update_command = self.update_action.command_str();
+        let update_label = self
+            .update_action
+            .map(|action| format!("Update now (runs `{}`)", action.command_str()))
+            .unwrap_or_else(|| {
+                "I'll update manually after reviewing the release notes".to_string()
+            });
 
         column.push("");
         column.push(Line::from(vec![
             padded_emoji("  ✨").bold().cyan(),
-            "Update available!".bold(),
+            format!(
+                "{product} update available!",
+                product = codex_core::branding::APP_PRODUCT_NAME
+            )
+            .bold()
+            .into(),
             " ".into(),
             format!(
                 "{current} -> {latest}",
@@ -204,16 +226,14 @@ impl WidgetRef for &UpdatePromptScreen {
         column.push(
             Line::from(vec![
                 "Release notes: ".dim(),
-                "https://github.com/openai/codex/releases/latest"
-                    .dim()
-                    .underlined(),
+                self.release_notes_url.clone().dim().underlined(),
             ])
             .inset(Insets::tlbr(0, 2, 0, 0)),
         );
         column.push("");
         column.push(selection_option_row(
             0,
-            format!("Update now (runs `{update_command}`)"),
+            update_label,
             self.highlighted == UpdateSelection::UpdateNow,
         ));
         column.push(selection_option_row(
@@ -252,8 +272,10 @@ mod tests {
     fn new_prompt() -> UpdatePromptScreen {
         UpdatePromptScreen::new(
             FrameRequester::test_dummy(),
+            "0.0.0".into(),
             "9.9.9".into(),
-            UpdateAction::NpmGlobalLatest,
+            "https://github.com/LeonSGP43/godex/releases/latest".into(),
+            Some(UpdateAction::NpmGlobalLatest),
         )
     }
 

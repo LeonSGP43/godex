@@ -710,6 +710,168 @@ async fn close_agent_shuts_down_running_claude_code_backend() {
 }
 
 #[tokio::test]
+async fn send_input_rejects_for_closed_native_spawned_agent() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+
+    let mut config = (*turn.config).clone();
+    let provider = built_in_model_providers(/* openai_base_url */ None)["ollama"].clone();
+    config.model_provider_id = "ollama".to_string();
+    config.model_provider = provider.clone();
+    turn.provider = provider;
+    turn.config = Arc::new(config);
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "inspect this repo",
+            "agent_type": "explorer"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent id");
+
+    let (mut close_session, close_turn) = make_session_and_context().await;
+    close_session.services.agent_control = agent_control.clone();
+    let close_invocation = invocation(
+        Arc::new(close_session),
+        Arc::new(close_turn),
+        "close_agent",
+        function_payload(json!({"id": agent_id.to_string()})),
+    );
+    CloseAgentHandler
+        .handle(close_invocation)
+        .await
+        .expect("close_agent should succeed");
+    assert_eq!(
+        agent_control.get_status(agent_id).await,
+        AgentStatus::NotFound
+    );
+
+    let (mut send_session, send_turn) = make_session_and_context().await;
+    send_session.services.agent_control = agent_control;
+    let send_invocation = invocation(
+        Arc::new(send_session),
+        Arc::new(send_turn),
+        "send_input",
+        function_payload(json!({"id": agent_id.to_string(), "message": "follow up"})),
+    );
+    let Err(err) = SendInputHandler.handle(send_invocation).await else {
+        panic!("send_input should fail for a closed native spawned agent");
+    };
+    assert_eq!(
+        err,
+        FunctionCallError::RespondToModel(format!("agent with id {agent_id} not found"))
+    );
+}
+
+#[tokio::test]
+async fn send_input_rejects_for_closed_user_defined_role_agent() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let codex_home = TempDir::new().expect("create temp codex home");
+    std::fs::create_dir_all(codex_home.path().join("agents")).expect("create agents dir");
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"
+[agents.reviewer]
+description = "Review role"
+config_file = "./agents/reviewer.toml"
+nickname_candidates = ["Atlas"]
+"#,
+    )
+    .expect("write config.toml");
+    std::fs::write(
+        codex_home.path().join("agents/reviewer.toml"),
+        r#"
+model_reasoning_effort = "high"
+"#,
+    )
+    .expect("write role file");
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect("load config");
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let agent_control = manager.agent_control();
+    session.services.agent_control = agent_control.clone();
+    turn.config = Arc::new(config);
+
+    let spawn_invocation = invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "spawn_agent",
+        function_payload(json!({
+            "message": "review this architecture",
+            "agent_type": "reviewer"
+        })),
+    );
+    let output = SpawnAgentHandler
+        .handle(spawn_invocation)
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn result should be json");
+    let agent_id = agent_id(&result.agent_id).expect("agent id");
+
+    let (mut close_session, close_turn) = make_session_and_context().await;
+    close_session.services.agent_control = agent_control.clone();
+    let close_invocation = invocation(
+        Arc::new(close_session),
+        Arc::new(close_turn),
+        "close_agent",
+        function_payload(json!({"id": agent_id.to_string()})),
+    );
+    CloseAgentHandler
+        .handle(close_invocation)
+        .await
+        .expect("close_agent should succeed");
+    assert_eq!(
+        agent_control.get_status(agent_id).await,
+        AgentStatus::NotFound
+    );
+
+    let (mut send_session, send_turn) = make_session_and_context().await;
+    send_session.services.agent_control = agent_control;
+    let send_invocation = invocation(
+        Arc::new(send_session),
+        Arc::new(send_turn),
+        "send_input",
+        function_payload(json!({"id": agent_id.to_string(), "message": "follow up"})),
+    );
+    let Err(err) = SendInputHandler.handle(send_invocation).await else {
+        panic!("send_input should fail for a closed user-defined role agent");
+    };
+    assert_eq!(
+        err,
+        FunctionCallError::RespondToModel(format!("agent with id {agent_id} not found"))
+    );
+}
+
+#[tokio::test]
 async fn send_input_interrupt_restarts_running_claude_code_backend() {
     #[derive(Debug, Deserialize)]
     struct SpawnAgentResult {

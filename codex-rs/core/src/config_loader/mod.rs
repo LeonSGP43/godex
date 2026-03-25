@@ -5,6 +5,7 @@ mod macos;
 #[cfg(test)]
 mod tests;
 
+use crate::config::ConfigNamespace;
 use crate::config::ConfigToml;
 use crate::config_loader::layer_io::LoadedConfigLayers;
 use crate::git_info::resolve_root_git_project_for_trust;
@@ -99,8 +100,8 @@ pub(crate) async fn first_layer_config_error_from_entries(
 ///   `%ProgramData%\OpenAI\Codex\config.toml` (Windows)
 /// - user      `${CODEX_HOME}/config.toml`
 /// - cwd       `${PWD}/config.toml` (loaded but disabled when the directory is untrusted)
-/// - tree      parent directories up to root looking for `./.codex/config.toml` (loaded but disabled when untrusted)
-/// - repo      `$(git rev-parse --show-toplevel)/.codex/config.toml` (loaded but disabled when untrusted)
+/// - tree      parent directories up to root looking for `./.<namespace>/config.toml` (loaded but disabled when untrusted)
+/// - repo      `$(git rev-parse --show-toplevel)/.<namespace>/config.toml` (loaded but disabled when untrusted)
 /// - runtime   e.g., --config flags, model selector in UI
 ///
 /// (*) Only available on macOS via managed device profiles.
@@ -113,6 +114,7 @@ pub(crate) async fn first_layer_config_error_from_entries(
 /// endpoint) should `cwd` be `None`.
 pub async fn load_config_layers_state(
     codex_home: &Path,
+    config_namespace: ConfigNamespace,
     cwd: Option<AbsolutePathBuf>,
     cli_overrides: &[(String, TomlValue)],
     overrides: LoaderOverrides,
@@ -245,6 +247,7 @@ pub async fn load_config_layers_state(
             &project_trust_context.project_root,
             &project_trust_context,
             codex_home,
+            config_namespace,
         )
         .await?;
         layers.extend(project_layers);
@@ -794,6 +797,7 @@ async fn load_project_layers(
     project_root: &AbsolutePathBuf,
     trust_context: &ProjectTrustContext,
     codex_home: &Path,
+    config_namespace: ConfigNamespace,
 ) -> io::Result<Vec<ConfigLayerEntry>> {
     let codex_home_abs = AbsolutePathBuf::from_absolute_path(codex_home)?;
     let codex_home_normalized =
@@ -815,8 +819,9 @@ async fn load_project_layers(
     dirs.reverse();
 
     let mut layers = Vec::new();
+    let project_config_dir_name = config_namespace.default_dir_name();
     for dir in dirs {
-        let dot_codex = dir.join(".codex");
+        let dot_codex = dir.join(project_config_dir_name);
         if !tokio::fs::metadata(&dot_codex)
             .await
             .map(|meta| meta.is_dir())

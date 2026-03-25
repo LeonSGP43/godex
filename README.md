@@ -58,4 +58,14 @@ You can also use Codex with an API key, but this requires [additional setup](htt
 - [**Installing & building**](./docs/install.md)
 - [**Open source fund**](./docs/open-source-fund.md)
 
+## Versioning
+
+This fork manages its own SemVer release line for `godex`.
+
+- The repository root `VERSION` file is the release baseline for the fork.
+- `codex-rs/Cargo.toml` must match `VERSION` so `godex --version` stays accurate.
+- `CHANGELOG.md` keeps both an `Unreleased` section and released version sections for future cuts.
+- Official Codex upstream release tracking is separate from `godex`'s own fork versioning.
+- Source installs should use `bash scripts/install/install-godex-from-source.sh` so `godex` and official `codex` can coexist on the same machine.
+
 This repository is licensed under the [Apache-2.0 License](LICENSE).

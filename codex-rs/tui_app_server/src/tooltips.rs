@@ -4,19 +4,19 @@ use lazy_static::lazy_static;
 use rand::Rng;
 
 const ANNOUNCEMENT_TIP_URL: &str =
-    "https://raw.githubusercontent.com/LeonGong/codex/godex-announcement-test/announcement_tip.toml";
+    "https://raw.githubusercontent.com/LeonSGP43/godex/main/announcement_tip.toml";
 
 const IS_MACOS: bool = cfg!(target_os = "macos");
 const IS_WINDOWS: bool = cfg!(target_os = "windows");
 
 const PAID_TOOLTIP: &str =
-    "*New* Try the **godex App** with 2x rate limits until *April 2nd*. Run 'godex app' or visit https://github.com/leongong/godex";
+    "*New* Try the **godex App** with 2x rate limits until *April 2nd*. Run 'godex app' or visit https://github.com/LeonSGP43/godex";
 const PAID_TOOLTIP_WINDOWS: &str =
-    "*New* Try the **godex App**, now available on **Windows**, with 2x rate limits until *April 2nd*. Run 'godex app' or visit https://github.com/leongong/godex";
+    "*New* Try the **godex App**, now available on **Windows**, with 2x rate limits until *April 2nd*. Run 'godex app' or visit https://github.com/LeonSGP43/godex";
 const PAID_TOOLTIP_NON_MAC: &str = "*New* 2x rate limits until *April 2nd*.";
 const FAST_TOOLTIP: &str = "*New* Use **/fast** to enable our fastest inference at 2X plan usage.";
 const OTHER_TOOLTIP: &str =
-    "*New* Build faster with the **godex App**. Run 'godex app' or visit https://github.com/leongong/godex";
+    "*New* Build faster with the **godex App**. Run 'godex app' or visit https://github.com/LeonSGP43/godex";
 const OTHER_TOOLTIP_NON_MAC: &str = "*New* Build faster with godex.";
 const FREE_GO_TOOLTIP: &str =
     "*New* For a limited time, godex is included in your plan for free – let’s build together.";

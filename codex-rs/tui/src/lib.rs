@@ -19,9 +19,10 @@ use codex_core::auth::enforce_login_restrictions;
 use codex_core::check_execpolicy_for_warnings;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
+use codex_core::config::ConfigNamespace;
 use codex_core::config::ConfigOverrides;
-use codex_core::config::find_codex_home;
-use codex_core::config::load_config_as_toml_with_cli_overrides;
+use codex_core::config::find_home;
+use codex_core::config::load_config_as_toml_with_cli_overrides_in_namespace;
 use codex_core::config::resolve_oss_provider;
 use codex_core::config_loader::CloudRequirementsLoader;
 use codex_core::config_loader::ConfigLoadError;
@@ -268,6 +269,11 @@ pub async fn run_main(
     arg0_paths: Arg0DispatchPaths,
     loader_overrides: LoaderOverrides,
 ) -> std::io::Result<AppExitInfo> {
+    let config_namespace = if cli.use_godex_home {
+        ConfigNamespace::GodexIsolated
+    } else {
+        ConfigNamespace::CodexCompatible
+    };
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -309,7 +315,7 @@ pub async fn run_main(
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
-    let codex_home = match find_codex_home() {
+    let codex_home = match find_home(config_namespace) {
         Ok(codex_home) => codex_home.to_path_buf(),
         Err(err) => {
             eprintln!("Error finding codex home: {err}");
@@ -324,8 +330,9 @@ pub async fn run_main(
     };
 
     #[allow(clippy::print_stderr)]
-    let config_toml = match load_config_as_toml_with_cli_overrides(
+    let config_toml = match load_config_as_toml_with_cli_overrides_in_namespace(
         &codex_home,
+        config_namespace,
         &config_cwd,
         cli_kv_overrides.clone(),
     )
@@ -427,6 +434,7 @@ pub async fn run_main(
         cli_kv_overrides.clone(),
         overrides.clone(),
         cloud_requirements.clone(),
+        config_namespace,
     )
     .await;
 
@@ -690,6 +698,11 @@ async fn run_ratatui_app(
                 cli_kv_overrides.clone(),
                 overrides.clone(),
                 cloud_requirements.clone(),
+                if cli.use_godex_home {
+                    ConfigNamespace::GodexIsolated
+                } else {
+                    ConfigNamespace::CodexCompatible
+                },
             )
             .await
         } else {
@@ -710,7 +723,8 @@ async fn run_ratatui_app(
             thread_name: None,
             update_action: None,
             exit_reason: ExitReason::Fatal(format!(
-                "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
+                "No saved session found with ID {id_str}. Run `{exe} {action}` without an ID to choose from existing sessions.",
+                exe = codex_core::branding::APP_EXECUTABLE_NAME,
             )),
         })
     };
@@ -782,7 +796,8 @@ async fn run_ratatui_app(
                                     thread_name: None,
                                     update_action: None,
                                     exit_reason: ExitReason::Fatal(format!(
-                                        "Found latest saved session at {rollout_path}, but failed to read its metadata. Run `codex fork` to choose from existing sessions."
+                                        "Found latest saved session at {rollout_path}, but failed to read its metadata. Run `{exe} fork` to choose from existing sessions.",
+                                        exe = codex_core::branding::APP_EXECUTABLE_NAME,
                                     )),
                                 });
                             }
@@ -876,7 +891,8 @@ async fn run_ratatui_app(
                             thread_name: None,
                             update_action: None,
                             exit_reason: ExitReason::Fatal(format!(
-                                "Found latest saved session at {rollout_path}, but failed to read its metadata. Run `codex resume` to choose from existing sessions."
+                                "Found latest saved session at {rollout_path}, but failed to read its metadata. Run `{exe} resume` to choose from existing sessions.",
+                                exe = codex_core::branding::APP_EXECUTABLE_NAME,
                             )),
                         });
                     }
@@ -950,6 +966,11 @@ async fn run_ratatui_app(
                 cli_kv_overrides.clone(),
                 overrides.clone(),
                 cloud_requirements.clone(),
+                if cli.use_godex_home {
+                    ConfigNamespace::GodexIsolated
+                } else {
+                    ConfigNamespace::CodexCompatible
+                },
                 fallback_cwd,
             )
             .await
@@ -962,7 +983,7 @@ async fn run_ratatui_app(
     // this must happen after the last possible reload.
     if let Some(w) = crate::render::highlight::set_theme_override(
         config.tui_theme.clone(),
-        find_codex_home().ok(),
+        Some(config.codex_home.clone()),
     ) {
         config.startup_warnings.push(w);
     }
@@ -1187,11 +1208,13 @@ async fn load_config_or_exit(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
     cloud_requirements: CloudRequirementsLoader,
+    config_namespace: ConfigNamespace,
 ) -> Config {
     load_config_or_exit_with_fallback_cwd(
         cli_kv_overrides,
         overrides,
         cloud_requirements,
+        config_namespace,
         /*fallback_cwd*/ None,
     )
     .await
@@ -1201,10 +1224,12 @@ async fn load_config_or_exit_with_fallback_cwd(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
     cloud_requirements: CloudRequirementsLoader,
+    config_namespace: ConfigNamespace,
     fallback_cwd: Option<PathBuf>,
 ) -> Config {
     #[allow(clippy::print_stderr)]
     match ConfigBuilder::default()
+        .config_namespace(config_namespace)
         .cli_overrides(cli_kv_overrides)
         .harness_overrides(overrides)
         .cloud_requirements(cloud_requirements)

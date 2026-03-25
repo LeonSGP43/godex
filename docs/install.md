@@ -49,6 +49,40 @@ just test
 cargo test --all-features
 ```
 
+### Install `godex` from your source checkout
+
+This fork keeps `godex` parallel to official `codex` instead of replacing it.
+
+```bash
+cd /path/to/your/godex/repo
+bash scripts/install/install-godex-from-source.sh
+```
+
+What the installer does:
+
+- builds `codex-rs` with `cargo build -p codex-cli --bin godex --release`
+- installs only `godex` into a user bin directory such as `~/.local/bin`
+- leaves the official `codex` command untouched
+- appends the install dir to your shell profile if it is not already on `PATH`
+
+Useful options:
+
+```bash
+# Preview without changing anything
+bash scripts/install/install-godex-from-source.sh --dry-run
+
+# Install a debug build for local development
+bash scripts/install/install-godex-from-source.sh --debug
+
+# Install into a specific directory
+bash scripts/install/install-godex-from-source.sh --install-dir ~/bin
+
+# Use a symlink instead of copying the binary
+bash scripts/install/install-godex-from-source.sh --symlink
+```
+
+For the maintenance workflow after upstream merges, rebuild and reinstall with the same script.
+
 ## Tracing / verbose logging
 
 Codex is written in Rust, so it honors the `RUST_LOG` environment variable to configure its logging behavior.

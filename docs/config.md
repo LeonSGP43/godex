@@ -78,6 +78,86 @@ Codex can run a notification hook when the agent finishes a turn. See the config
 
 When Codex knows which client started the turn, the legacy notify JSON payload also includes a top-level `client` field. The TUI reports `codex-tui`, and the app server reports the `clientInfo.name` value from `initialize`.
 
+## godex upstream updates
+
+`godex` runs in two config modes:
+
+- default `godex`: reuse Codex config locations
+  - global: `~/.codex`
+  - project: `.codex`
+- `godex -g`: use isolated godex config locations
+  - global: `~/.godex`
+  - project: `.godex`
+
+That keeps `godex` parallel to official Codex by default, while still giving
+you an explicit isolated mode when needed.
+
+Use `[godex_updates]` for the fork's own release tracking:
+
+- `enabled`: turn godex release monitoring on or off
+- `release_repo`: GitHub repo to compare against for new godex releases
+
+Example:
+
+```toml
+[godex_updates]
+enabled = true
+release_repo = "LeonSGP43/godex"
+```
+
+With that in place:
+
+- startup can show `godex update available!`
+- the comparison is against the current `godex --version`, not the tracked
+  upstream Codex base version
+- if no automatic update action is known, the UI falls back to release notes
+
+The top-level `[upstream_updates]` section controls two different things:
+
+- startup notices that show how many releases behind official Codex the tracked
+  upstream base is
+- the `godex sync-upstream` command, which fetches, merges, and rebuilds your
+  local checkout
+
+Supported fields:
+
+- `enabled`: turn source-based upstream monitoring on or off
+- `repo_root`: absolute path to the local godex git checkout
+- `remote`: tracked git remote name, usually `upstream`
+- `branch`: tracked upstream branch/ref, usually `main`
+- `release_repo`: GitHub repo used for release checks, usually `openai/codex`
+- `build_command`: argv array used after a successful sync
+
+Example:
+
+```toml
+[upstream_updates]
+enabled = true
+repo_root = "/Users/leongong/Desktop/LeonProjects/codex"
+remote = "upstream"
+branch = "main"
+release_repo = "openai/codex"
+build_command = ["cargo", "build", "-p", "codex-cli", "--bins"]
+```
+
+Recommended remote layout:
+
+- `origin`: your godex fork
+- `upstream`: the official Codex repository
+
+With that in place:
+
+- startup can show that `Official Codex` is several releases ahead
+- `godex sync-upstream` runs `git fetch`, `git merge`, and then your configured
+  build command
+- dirty worktrees are rejected before merge to avoid clobbering local changes
+
+Typical workflow:
+
+- run `godex` when you want full compatibility with your existing Codex config
+- run `godex -g` when you want separate godex-only config, trust state, and MCP
+  settings
+
 ## JSON Schema
 
 The generated JSON Schema for `config.toml` lives at `codex-rs/core/config.schema.json`.

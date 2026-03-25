@@ -1,21 +1,47 @@
+#[cfg(not(debug_assertions))]
+use codex_core::config::Config;
+
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
-    /// Update via `npm install -g @openai/codex@latest`.
+    /// Update via `npm install -g godex-cli@latest`.
     NpmGlobalLatest,
-    /// Update via `bun install -g @openai/codex@latest`.
+    /// Update via `bun install -g godex-cli@latest`.
     BunGlobalLatest,
-    /// Update via `brew upgrade codex`.
+    /// Update via `brew upgrade --cask godex`.
     BrewUpgrade,
+    /// Update a source-built godex checkout by syncing its configured upstream.
+    SourceRepoSync,
 }
 
 impl UpdateAction {
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
+            UpdateAction::NpmGlobalLatest => (
+                "npm",
+                &[
+                    "install",
+                    "-g",
+                    codex_core::branding::APP_PACKAGE_INSTALL_SPEC,
+                ],
+            ),
+            UpdateAction::BunGlobalLatest => (
+                "bun",
+                &[
+                    "install",
+                    "-g",
+                    codex_core::branding::APP_PACKAGE_INSTALL_SPEC,
+                ],
+            ),
+            UpdateAction::BrewUpgrade => (
+                "brew",
+                &["upgrade", "--cask", codex_core::branding::APP_BREW_PACKAGE_NAME],
+            ),
+            UpdateAction::SourceRepoSync => (
+                codex_core::branding::APP_EXECUTABLE_NAME,
+                &["sync-upstream"],
+            ),
         }
     }
 
@@ -28,7 +54,8 @@ impl UpdateAction {
 }
 
 #[cfg(not(debug_assertions))]
-pub(crate) fn get_update_action() -> Option<UpdateAction> {
+pub(crate) fn get_update_action(config: &Config) -> Option<UpdateAction> {
+    let _ = config;
     let exe = std::env::current_exe().unwrap_or_default();
     let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
     let managed_by_bun = std::env::var_os("CODEX_MANAGED_BY_BUN").is_some();
@@ -82,7 +109,7 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 true,
-                std::path::Path::new("/opt/homebrew/bin/codex"),
+                std::path::Path::new("/opt/homebrew/bin/godex"),
                 false,
                 false
             ),
@@ -91,7 +118,7 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 true,
-                std::path::Path::new("/usr/local/bin/codex"),
+                std::path::Path::new("/usr/local/bin/godex"),
                 false,
                 false
             ),

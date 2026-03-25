@@ -1,5 +1,6 @@
 use super::ConfigToml;
 use super::deserialize_config_toml_with_base;
+use crate::config::ConfigNamespace;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::managed_features::validate_explicit_feature_settings_in_config_toml;
@@ -416,6 +417,7 @@ impl ConfigService {
         let cwd: Option<AbsolutePathBuf> = None;
         load_config_layers_state(
             &self.codex_home,
+            ConfigNamespace::CodexCompatible,
             cwd,
             &self.cli_overrides,
             self.loader_overrides.clone(),

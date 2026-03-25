@@ -1,3 +1,4 @@
+use crate::config::ConfigNamespace;
 use crate::config::NetworkToml;
 use crate::config::PermissionsToml;
 use crate::config::find_codex_home;
@@ -46,6 +47,7 @@ async fn build_config_state_with_mtimes() -> Result<(ConfigState, Vec<LayerMtime
     let overrides = LoaderOverrides::default();
     let config_layer_stack = load_config_layers_state(
         &codex_home,
+        ConfigNamespace::CodexCompatible,
         /*cwd*/ None,
         &cli_overrides,
         overrides,

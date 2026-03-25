@@ -3,6 +3,8 @@ use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::types::AppsConfigToml;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
+use crate::config::types::GodexUpdatesConfig;
+use crate::config::types::GodexUpdatesToml;
 use crate::config::types::GrokConfig as GrokResearchConfig;
 use crate::config::types::GrokPresetConfig;
 use crate::config::types::GrokPresetId;
@@ -28,6 +30,8 @@ use crate::config::types::SkillsConfig;
 use crate::config::types::ToolSuggestConfig;
 use crate::config::types::ToolSuggestDiscoverable;
 use crate::config::types::Tui;
+use crate::config::types::UpstreamUpdatesConfig;
+use crate::config::types::UpstreamUpdatesToml;
 use crate::config::types::UriBasedFileOpener;
 use crate::config::types::WindowsSandboxModeToml;
 use crate::config::types::WindowsToml;
@@ -116,6 +120,8 @@ mod network_proxy_spec;
 mod permissions;
 pub mod profile;
 pub mod schema;
+
+pub use codex_utils_home_dir::ConfigNamespace;
 pub mod service;
 pub mod types;
 pub use codex_config::Constrained;
@@ -413,6 +419,12 @@ pub struct Config {
     /// Configuration for native Grok research tools.
     pub grok: GrokResearchConfig,
 
+    /// Settings for monitoring released godex versions for this fork.
+    pub godex_updates: GodexUpdatesConfig,
+
+    /// Settings for tracking and syncing a configured upstream source repository.
+    pub upstream_updates: UpstreamUpdatesConfig,
+
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: usize,
 
@@ -610,6 +622,7 @@ pub struct Config {
 #[derive(Debug, Clone, Default)]
 pub struct ConfigBuilder {
     codex_home: Option<PathBuf>,
+    config_namespace: ConfigNamespace,
     cli_overrides: Option<Vec<(String, TomlValue)>>,
     harness_overrides: Option<ConfigOverrides>,
     loader_overrides: Option<LoaderOverrides>,
@@ -620,6 +633,11 @@ pub struct ConfigBuilder {
 impl ConfigBuilder {
     pub fn codex_home(mut self, codex_home: PathBuf) -> Self {
         self.codex_home = Some(codex_home);
+        self
+    }
+
+    pub fn config_namespace(mut self, config_namespace: ConfigNamespace) -> Self {
+        self.config_namespace = config_namespace;
         self
     }
 
@@ -651,13 +669,15 @@ impl ConfigBuilder {
     pub async fn build(self) -> std::io::Result<Config> {
         let Self {
             codex_home,
+            config_namespace,
             cli_overrides,
             harness_overrides,
             loader_overrides,
             cloud_requirements,
             fallback_cwd,
         } = self;
-        let codex_home = codex_home.map_or_else(find_codex_home, std::io::Result::Ok)?;
+        let codex_home =
+            codex_home.map_or_else(|| find_home(config_namespace), std::io::Result::Ok)?;
         if let Err(err) = maybe_migrate_smart_approvals_alias(&codex_home).await {
             tracing::warn!(error = %err, "failed to migrate smart_approvals feature alias");
         }
@@ -672,6 +692,7 @@ impl ConfigBuilder {
         harness_overrides.cwd = Some(cwd.to_path_buf());
         let config_layer_stack = load_config_layers_state(
             &codex_home,
+            config_namespace,
             Some(cwd),
             &cli_overrides,
             loader_overrides,
@@ -828,7 +849,7 @@ impl Config {
     pub fn load_default_with_cli_overrides(
         cli_overrides: Vec<(String, TomlValue)>,
     ) -> std::io::Result<Self> {
-        let codex_home = find_codex_home()?;
+        let codex_home = find_home(ConfigNamespace::CodexCompatible)?;
         let mut merged = toml::Value::try_from(ConfigToml::default()).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -874,11 +895,27 @@ pub async fn load_config_as_toml_with_cli_overrides(
     cwd: &AbsolutePathBuf,
     cli_overrides: Vec<(String, TomlValue)>,
 ) -> std::io::Result<ConfigToml> {
+    load_config_as_toml_with_cli_overrides_in_namespace(
+        codex_home,
+        infer_config_namespace(codex_home),
+        cwd,
+        cli_overrides,
+    )
+    .await
+}
+
+pub async fn load_config_as_toml_with_cli_overrides_in_namespace(
+    codex_home: &Path,
+    config_namespace: ConfigNamespace,
+    cwd: &AbsolutePathBuf,
+    cli_overrides: Vec<(String, TomlValue)>,
+) -> std::io::Result<ConfigToml> {
     if let Err(err) = maybe_migrate_smart_approvals_alias(codex_home).await {
         tracing::warn!(error = %err, "failed to migrate smart_approvals feature alias");
     }
     let config_layer_stack = load_config_layers_state(
         codex_home,
+        config_namespace,
         Some(cwd.clone()),
         &cli_overrides,
         LoaderOverrides::default(),
@@ -1049,6 +1086,7 @@ pub async fn load_global_mcp_servers(
     let cwd: Option<AbsolutePathBuf> = None;
     let config_layer_stack = load_config_layers_state(
         codex_home,
+        ConfigNamespace::CodexCompatible,
         cwd,
         &cli_overrides,
         LoaderOverrides::default(),
@@ -1492,6 +1530,14 @@ pub struct ConfigToml {
     /// Set to `false` only if your Codex updates are centrally managed.
     /// Defaults to `true`.
     pub check_for_update_on_startup: Option<bool>,
+
+    /// Settings for monitoring and syncing a tracked upstream source repository.
+    #[serde(default)]
+    pub upstream_updates: Option<UpstreamUpdatesToml>,
+
+    /// Settings for monitoring released godex versions for this fork.
+    #[serde(default)]
+    pub godex_updates: Option<GodexUpdatesToml>,
 
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
@@ -2684,6 +2730,59 @@ impl Config {
         let review_model = override_review_model.or(cfg.review_model);
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
+        let godex_updates = cfg
+            .godex_updates
+            .map(|godex| {
+                let mut resolved = GodexUpdatesConfig::default();
+                resolved.enabled = godex.enabled.unwrap_or(resolved.enabled);
+                resolved.release_repo = godex.release_repo.and_then(|release_repo| {
+                    let trimmed = release_repo.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                });
+                resolved
+            })
+            .unwrap_or_default();
+        let upstream_updates = cfg
+            .upstream_updates
+            .map(|upstream| {
+                let mut resolved = UpstreamUpdatesConfig::default();
+                resolved.enabled = upstream.enabled.unwrap_or(resolved.enabled);
+                if let Some(remote) = upstream.remote {
+                    let trimmed = remote.trim();
+                    if !trimmed.is_empty() {
+                        resolved.remote = trimmed.to_string();
+                    }
+                }
+                if let Some(branch) = upstream.branch {
+                    let trimmed = branch.trim();
+                    if !trimmed.is_empty() {
+                        resolved.branch = trimmed.to_string();
+                    }
+                }
+                resolved.repo_root = upstream.repo_root.map(Into::into);
+                if let Some(release_repo) = upstream.release_repo {
+                    let trimmed = release_repo.trim();
+                    if !trimmed.is_empty() {
+                        resolved.release_repo = trimmed.to_string();
+                    }
+                }
+                if let Some(build_command) = upstream.build_command {
+                    let normalized: Vec<String> = build_command
+                        .into_iter()
+                        .map(|part| part.trim().to_string())
+                        .filter(|part| !part.is_empty())
+                        .collect();
+                    if !normalized.is_empty() {
+                        resolved.build_command = normalized;
+                    }
+                }
+                resolved
+            })
+            .unwrap_or_default();
         let model_catalog = load_model_catalog(
             config_profile
                 .model_catalog_json
@@ -2813,6 +2912,8 @@ impl Config {
             mcp_oauth_callback_url: cfg.mcp_oauth_callback_url.clone(),
             model_providers,
             grok,
+            godex_updates,
+            upstream_updates,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
             project_doc_fallback_filenames: cfg
                 .project_doc_fallback_filenames
@@ -3088,7 +3189,18 @@ fn toml_uses_deprecated_instructions_file(value: &TomlValue) -> bool {
 /// - If `CODEX_HOME` is not set, this function does not verify that the
 ///   directory exists.
 pub fn find_codex_home() -> std::io::Result<PathBuf> {
-    codex_utils_home_dir::find_codex_home()
+    find_home(ConfigNamespace::CodexCompatible)
+}
+
+pub fn find_home(namespace: ConfigNamespace) -> std::io::Result<PathBuf> {
+    codex_utils_home_dir::find_home(namespace)
+}
+
+pub fn infer_config_namespace(codex_home: &Path) -> ConfigNamespace {
+    match codex_home.file_name().and_then(|name| name.to_str()) {
+        Some(".godex") => ConfigNamespace::GodexIsolated,
+        _ => ConfigNamespace::CodexCompatible,
+    }
 }
 
 /// Returns the path to the folder where Codex logs are stored. Does not verify
