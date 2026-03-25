@@ -4,7 +4,9 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
-### Changed
+## [0.2.0] - 2026-03-25
+
+### Added
 
 - What changed: promoted the fork policy into root-level constitutional files for Codex and Claude Code with aligned governance, sync discipline, manifest requirements, and engineering rules.
 - Why: the repository needed one durable, agent-readable constitution so future maintenance and upstream sync work follows the same legal surface regardless of which coding agent is operating in the repo.
@@ -36,6 +38,8 @@ All notable changes to this fork are documented in this file.
 - Verification: the repository file is pushed to `main`, fetched back from `raw.githubusercontent.com`, and checked against the expected live marker string.
 - Files: `announcement_tip.toml`, `CHANGELOG.md`
 
+### Changed
+
 - What changed: introduced `godex` fork governance work, including parallel config namespace support, fork-specific release tracking, and official Codex upstream monitoring.
 - Why: this fork needs to run beside official Codex while still making upstream merges and fork releases manageable.
 - Impact: `godex` can distinguish default `.codex` compatibility mode from isolated `-g` mode, and release/version management now has a dedicated home in the repository.
@@ -53,6 +57,26 @@ All notable changes to this fork are documented in this file.
 - Impact: release notes, issue links, and remote announcement tips can now be served from the final public fork instead of placeholder repo names.
 - Verification: repository resolution was checked with `gh repo view`, and raw announcement URLs are expected to resolve after the first push to `LeonSGP43/godex`.
 - Files: `codex-rs/core/src/branding.rs`, `codex-rs/tui/src/tooltips.rs`, `codex-rs/tui_app_server/src/tooltips.rs`, `announcement_tip.toml`
+
+- What changed: merged official Codex upstream through `e590fad50b83` into `godex`, then fast-forwarded `main` to that validated sync result.
+- Why: the fork needs continuous, constitutional upstream absorption instead of letting divergence grow around a stale baseline.
+- Impact: `godex` now carries the newer plugin, app-server, protocol, multi-agent, sandboxing, code-mode, and CI changes from official Codex while preserving only the manifest-listed fork behavior.
+- Verification: `bash scripts/godex-maintain.sh status`, `bash scripts/godex-maintain.sh sync --dry-run`, `bash scripts/godex-maintain.sh check`, `bash scripts/godex-maintain.sh smoke`, and `bash scripts/godex-maintain.sh release-preflight` all passed on the sync branch before mergeback.
+- Files: `codex-rs/`, `.github/`, `MODULE.bazel`, `patches/`, `scripts/test-remote-env.sh`
+
+- What changed: added a hard pre-push version gate for `main`, prepared formal release notes for `0.2.0`, and promoted the pending changelog entries into a real release section.
+- Why: release metadata must advance with the code, otherwise future `main` pushes can silently publish significant fork changes under an old version number.
+- Impact: pushing `main` now requires a fresh `VERSION`, aligned Cargo workspace versioning, a matching changelog release heading, and an emptied `Unreleased` section for the release being published.
+- Verification: `bash scripts/godex-maintain.sh release-preflight` now checks version alignment and rejects a push-ready `main` if it still carries the same version as `origin/main`.
+- Files: `VERSION`, `codex-rs/Cargo.toml`, `CHANGELOG.md`, `scripts/godex-maintain.sh`, `docs/godex-release-0.2.0.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/godex-maintenance.md`
+
+### Fixed
+
+- What changed: limited the legacy `agent/backend` module to test-only compilation.
+- Why: upstream runtime changes left that backend layer as test support only, but it was still entering production builds and generating dead-code warnings.
+- Impact: normal `godex` builds no longer emit the old `core/src/agent/backend.rs` dead-code warning set, while tests keep the helper code they still need.
+- Verification: `bash scripts/godex-maintain.sh check` completed without the previous `backend.rs` dead-code warnings, and `bash scripts/godex-maintain.sh smoke` still reported `godex 0.2.0`.
+- Files: `codex-rs/core/src/agent/mod.rs`
 
 ## [0.1.0] - 2026-03-23
 

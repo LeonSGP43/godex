@@ -134,7 +134,8 @@ After sync:
 1. run acceptance gates
 2. review the changed fork touchpoints
 3. update changelog if the fork behavior changed
-4. merge back to `main` only after validation passes
+4. if `main` will be pushed, bump the fork version and promote release notes out of `Unreleased`
+5. merge back to `main` only after validation passes
 
 ## Acceptance Gates
 
@@ -147,6 +148,13 @@ Required gates:
 3. `bash scripts/godex-maintain.sh check`
 4. `bash scripts/godex-maintain.sh smoke`
 5. `bash scripts/godex-maintain.sh release-preflight`
+
+Push rule for `main`:
+
+- if `main` is ahead of `origin/main`, `VERSION` must also move forward
+- `codex-rs/Cargo.toml` must match `VERSION`
+- `CHANGELOG.md` must contain `## [<version>]` for that version
+- `## [Unreleased]` must be empty for the release being pushed
 
 Required behavior checks:
 

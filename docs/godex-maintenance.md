@@ -49,6 +49,14 @@ bash scripts/godex-maintain.sh smoke
 bash scripts/godex-maintain.sh release-preflight
 ```
 
+`release-preflight` is the hard gate before any push from `main`.
+If `main` is ahead of `origin/main`, it now requires all of the following:
+
+- `VERSION` has been bumped beyond the version on `origin/main`
+- `codex-rs/Cargo.toml` matches `VERSION`
+- `CHANGELOG.md` has a `## [<version>]` section for that version
+- `## [Unreleased]` no longer carries the release entries being pushed
+
 ## Recommended update loop
 
 1. Start from a clean `main` worktree.
@@ -60,6 +68,7 @@ bash scripts/godex-maintain.sh release-preflight
 7. Run all acceptance gates from `docs/godex-fork-guidelines.md`.
 8. Reinstall with `bash scripts/install/install-godex-from-source.sh`.
 9. Merge back to `main` only after validation passes.
+10. Before pushing `main`, bump the version and pass `bash scripts/godex-maintain.sh release-preflight`.
 
 ## Policy Documents
 

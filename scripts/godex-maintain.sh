@@ -22,7 +22,7 @@ Commands:
   sync [options]        Fetch official Codex, refresh upstream-main, merge into current branch, and rebuild
   check                 Run cargo check for the godex CLI
   smoke                 Verify a runnable godex binary reports its version
-  release-preflight     Validate VERSION/CHANGELOG alignment for the fork
+  release-preflight     Validate VERSION/CHANGELOG alignment and main push readiness
 
 Sync options:
   --dry-run             Print planned commands without executing them
@@ -235,6 +235,42 @@ run_release_preflight() {
   )"
   [[ -n "$workspace_version" ]] || die "failed to read workspace.package version"
   [[ "$workspace_version" == "$version" ]] || die "VERSION ($version) does not match codex-rs/Cargo.toml ($workspace_version)"
+  rg -q "^## \[$version\]" "$REPO_ROOT/CHANGELOG.md" || die "CHANGELOG.md missing release heading for VERSION [$version]"
+
+  local current_branch
+  current_branch="$(git -C "$REPO_ROOT" branch --show-current)"
+  if [[ "$current_branch" == "main" ]] && git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/main"; then
+    local left_right
+    left_right="$(git -C "$REPO_ROOT" rev-list --left-right --count origin/main...HEAD)"
+    local ahead
+    ahead="${left_right##*$'\t'}"
+
+    if [[ "$ahead" != "0" ]]; then
+      local remote_version
+      remote_version="$(git -C "$REPO_ROOT" show origin/main:VERSION 2>/dev/null || true)"
+      remote_version="${remote_version//$'\n'/}"
+
+      if [[ -n "$remote_version" && "$remote_version" == "$version" ]]; then
+        die "main is ahead of origin/main but VERSION is still $version; bump VERSION before push"
+      fi
+
+      local unreleased_block
+      unreleased_block="$(
+        awk '
+          /^## \[Unreleased\]$/ { in_unreleased = 1; next }
+          /^## \[/ {
+            if (in_unreleased) {
+              exit
+            }
+          }
+          in_unreleased { print }
+        ' "$REPO_ROOT/CHANGELOG.md"
+      )"
+      if printf '%s\n' "$unreleased_block" | rg -q '^- '; then
+        die "CHANGELOG.md still has entries under [Unreleased]; move them into [$version] before pushing main"
+      fi
+    fi
+  fi
 
   step "Release preflight passed"
   printf 'version: %s\n' "$version"

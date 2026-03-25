@@ -121,6 +121,18 @@ Also verify:
 - fork release source points to `LeonSGP43/godex`
 - upstream source points to `openai/codex`
 
+## Release And Push Gate
+
+Do not push `main` until release metadata is advanced with the code:
+
+1. bump `VERSION`
+2. keep `codex-rs/Cargo.toml` aligned with `VERSION`
+3. move the pending notes from `## [Unreleased]` into `## [<version>]`
+4. leave `## [Unreleased]` empty for the next cycle
+5. run `bash scripts/godex-maintain.sh release-preflight`
+
+If `main` is ahead of `origin/main` and still carries the same version number, stop and fix release metadata before push.
+
 ## Conflict Resolution Policy
 
 When upstream and fork behavior collide:

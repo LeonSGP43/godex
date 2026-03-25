@@ -156,6 +156,18 @@ Recommended gate:
 - compare `upstream-main...main` against the fork manifest
 - if changes spread beyond expected fork touchpoints, stop and review manually
 
+## Release And Push Gate
+
+Do not push `main` unless version governance is complete:
+
+1. bump `VERSION`
+2. update `codex-rs/Cargo.toml` to the same version
+3. move release notes out of `## [Unreleased]` into `## [<version>]`
+4. keep `## [Unreleased]` empty for the next cycle
+5. run `bash scripts/godex-maintain.sh release-preflight`
+
+If `main` is ahead of `origin/main` and `VERSION` has not changed, pushing is forbidden.
+
 ## Conflict Resolution Policy
 
 When resolving conflicts:
