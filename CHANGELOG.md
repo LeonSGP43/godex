@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-03-25
+
+### Changed
+
+- What changed: redesigned the repository landing page into a fork-owned `godex` homepage, clarified the difference from official Codex, added an explicit acknowledgment section, and aligned install guidance with the currently reliable source-install path.
+- Why: the README and install docs should present `godex` as a credible public fork without overstating distribution channels that are not yet consistently live.
+- Impact: GitHub visitors now get a clearer explanation of what `godex` is, which fork-specific additions it keeps, how it differs from upstream, and which install path should be trusted today.
+- Verification: reviewed `README.md`, `docs/install.md`, and release-governance docs together so install-channel statements and fork-positioning claims no longer conflict.
+- Files: `README.md`, `docs/install.md`, `CHANGELOG.md`
+
 ## [0.2.4] - 2026-03-25
 
 ### Added
