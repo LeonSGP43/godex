@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-25
+
+### Added
+
+- What changed: added a first-class npm distribution path for the fork with the published package family `@leonsgp43/godex`, `godex-npm-*` release tarballs, fork-owned install scripts, and corrected in-app npm upgrade hints.
+- Why: the fork had already renamed the CLI and release governance, but install and update flows still pointed at upstream `@openai/codex`, which made global installs and self-update guidance inconsistent.
+- Impact: `godex` can now be installed and upgraded through npm and GitHub release installers without sending users back to the official Codex package, while the underlying native artifact layout stays close to upstream for easier syncs.
+- Verification: `python3 scripts/stage_npm_packages.py --release-version 0.2.0 --package codex --output-dir /tmp/godex-npm-stage`, `bash scripts/godex-maintain.sh release-preflight`, and `cargo test -p codex-tui update_prompt -- --nocapture` should validate tarball naming, release metadata, and updated upgrade prompts.
+- Files: `codex-cli/package.json`, `codex-cli/bin/codex.js`, `codex-cli/scripts/build_npm_package.py`, `scripts/stage_npm_packages.py`, `scripts/install/install.sh`, `scripts/install/install.ps1`, `.github/workflows/ci.yml`, `.github/workflows/rust-release.yml`, `codex-rs/core/src/branding.rs`, `codex-rs/tui/src/update_action.rs`, `codex-rs/tui_app_server/src/update_action.rs`, `README.md`, `docs/install.md`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`
+
 ## [0.1.1] - 2026-03-25
 
 ### Added
