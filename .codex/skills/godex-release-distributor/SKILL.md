@@ -26,6 +26,9 @@ Core workflow:
 1. Confirm repo state first:
    - `git -C /Users/leongong/Desktop/LeonProjects/codex status --short --branch`
 2. Prefer the bundled one-command entrypoint:
+   - `bash scripts/godex-release.sh publish`
+   - `bash scripts/godex-release.sh stage`
+   - `bash scripts/godex-release.sh remote publish`
    - `bash .codex/skills/godex-release-distributor/scripts/run.sh status`
    - `bash .codex/skills/godex-release-distributor/scripts/run.sh local-stage`
    - `bash .codex/skills/godex-release-distributor/scripts/run.sh local-publish`
@@ -65,6 +68,13 @@ Important rules:
 
 Primary commands:
 
+- `bash scripts/godex-release.sh publish`
+- `bash scripts/godex-release.sh stage`
+- `bash scripts/godex-release.sh status`
+- `bash scripts/godex-release.sh verify`
+- `bash scripts/godex-release.sh remote publish`
+- `bash scripts/godex-release-local.sh publish`
+- `bash scripts/godex-release-remote.sh publish`
 - `bash .codex/skills/godex-release-distributor/scripts/run.sh status`
 - `bash .codex/skills/godex-release-distributor/scripts/run.sh local-stage`
 - `bash .codex/skills/godex-release-distributor/scripts/run.sh local-publish`

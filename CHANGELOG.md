@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- What changed: added local-first release wrapper commands so `godex` can be staged and published from the maintainer machine with `scripts/godex-release.sh`, while keeping an explicit remote fallback path for future use.
+- Why: this fork should default to local compilation and local packaging instead of depending on GitHub Actions as the primary build system.
+- Impact: future releases can use a simple local entrypoint for stage/publish/status/verify, and remote release commands remain available as a secondary path instead of the default.
+- Verification: `sh -n scripts/godex-release.sh scripts/godex-release-local.sh scripts/godex-release-remote.sh`, `bash scripts/godex-release.sh status`, and `bash scripts/godex-release.sh remote verify`.
+- Files: `.codex/skills/godex-release-distributor/SKILL.md`, `.codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`, `scripts/godex-release.sh`, `scripts/godex-release-local.sh`, `scripts/godex-release-remote.sh`, `CHANGELOG.md`
+
 ## [0.2.3] - 2026-03-25
 
 ### Fixed
