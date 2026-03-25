@@ -1,3 +1,4 @@
+#[cfg(test)]
 pub(crate) mod backend;
 pub(crate) mod agent_resolver;
 pub(crate) mod control;
