@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-03-25
+
+### Fixed
+
+- What changed: made the GitHub release workflow degrade safely inside the `godex` fork by skipping upstream-only signing, Windows release runners, DotSlash publication, WinGet publication, and latest-alpha branch updates when the repository is not `openai/codex`.
+- Why: the first `rust-v0.2.1` tag in the fork hit a GitHub Actions startup failure because the upstream release workflow assumed OpenAI-only Windows signing secrets and runner infrastructure.
+- Impact: tagged releases in `LeonSGP43/godex` can now proceed to GitHub Release and npm publication without depending on unavailable upstream-private release resources.
+- Verification: `python3 - <<'PY' ... yaml.safe_load(...) ... PY` validated the edited workflow files locally, and the broken `rust-v0.2.1` tag run was traced to the release workflow before this fix.
+- Files: `.github/workflows/rust-release.yml`, `.github/workflows/rust-release-windows.yml`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`
+
 ## [0.2.1] - 2026-03-25
 
 ### Added
