@@ -8,44 +8,26 @@
 | Git (optional, recommended) | 2.23+ for built-in PR helpers                                   |
 | RAM                         | 4-GB minimum (8-GB recommended)                                 |
 
-### DotSlash
+### Current channel status
 
-The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
+Treat release channels by observed availability, not by assumption:
 
-### Install `godex` via npm
+- Reliable today: build and install `godex` from your local source checkout.
+- GitHub Releases: use them as release history and public release signaling.
+- npm and managed installers: only use them when the specific release or package is visibly published for that version.
 
-This fork publishes a managed npm package for the `godex` command:
-
-```bash
-npm install -g @leonsgp43/godex
-```
-
-Upgrade later with:
+If you are maintaining the fork, verify release readiness first:
 
 ```bash
-npm install -g @leonsgp43/godex@latest
-```
-
-### Install `godex` from the latest GitHub release
-
-Use the release installer if you want a managed binary without cloning the repo:
-
-```bash
-curl -fsSL https://github.com/LeonSGP43/godex/releases/latest/download/install.sh | sh
-```
-
-On Windows PowerShell:
-
-```powershell
-irm https://github.com/LeonSGP43/godex/releases/latest/download/install.ps1 | iex
+bash scripts/godex-maintain.sh release-preflight
 ```
 
 ### Build from source
 
 ```bash
-# Clone the repository and navigate to the root of the Cargo workspace.
-git clone https://github.com/openai/codex.git
-cd codex/codex-rs
+# Clone the fork and navigate to the root of the Cargo workspace.
+git clone https://github.com/LeonSGP43/godex.git
+cd godex/codex-rs
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -57,11 +39,11 @@ cargo install just
 # Optional: install nextest for the `just test` helper
 cargo install --locked cargo-nextest
 
-# Build Codex.
+# Build godex.
 cargo build
 
 # Launch the TUI with a sample prompt.
-cargo run --bin codex -- "explain this codebase to me"
+cargo run --bin godex -- "explain this codebase to me"
 
 # After making changes, use the root justfile helpers (they default to codex-rs):
 just fmt
@@ -110,6 +92,17 @@ bash scripts/install/install-godex-from-source.sh --symlink
 ```
 
 For the maintenance workflow after upstream merges, rebuild and reinstall with the same script.
+
+### Optional managed channels
+
+The fork keeps room for GitHub-release installers and npm distribution, but these are release-state dependent.
+
+Use them only when the current release explicitly ships them:
+
+- GitHub release page: `https://github.com/LeonSGP43/godex/releases/latest`
+- npm package page: verify that `@leonsgp43/godex` exists before documenting or relying on `npm install -g`
+
+That keeps the public install docs honest while the fork's release pipeline continues to mature.
 
 ## Tracing / verbose logging
 

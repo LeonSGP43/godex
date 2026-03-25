@@ -1,54 +1,203 @@
-<p align="center"><code>npm i -g @leonsgp43/godex</code><br />or <code>curl -fsSL https://github.com/LeonSGP43/godex/releases/latest/download/install.sh | sh</code></p>
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="./.github/godex-readme-hero.jpg" alt="godex hero image" width="80%" />
 </p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>godex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+
+<h1 align="center">godex</h1>
+
+<p align="center">
+  <strong>An optimized, upstream-first personal fork of OpenAI Codex.</strong>
+</p>
+
+<p align="center">
+  Built to stay close to official <code>openai/codex</code> while extending it with a deliberately small fork layer:
+  fork-owned release governance, dual config modes, side-by-side install support, upstream sync tooling, and a local-first release workflow.
+</p>
+
+<p align="center">
+  <a href="https://github.com/LeonSGP43/godex/releases/latest"><img src="https://img.shields.io/github/v/release/LeonSGP43/godex?display_name=tag&sort=semver" alt="Latest release" /></a>
+  <a href="https://github.com/LeonSGP43/godex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/LeonSGP43/godex" alt="License" /></a>
+  <a href="https://github.com/openai/codex"><img src="https://img.shields.io/badge/upstream-openai%2Fcodex-black" alt="Upstream openai/codex" /></a>
+  <img src="https://img.shields.io/badge/fork%20strategy-upstream--first-2d6cdf" alt="Upstream-first fork" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/LeonSGP43/godex/releases/latest">Latest Release</a>
+  ·
+  <a href="./docs/install.md">Install</a>
+  ·
+  <a href="./docs/godex-maintenance.md">Maintenance</a>
+  ·
+  <a href="./docs/godex-fork-guidelines.md">Fork Guidelines</a>
+  ·
+  <a href="./docs/godex-fork-manifest.md">Fork Manifest</a>
+</p>
+
+> `godex` is not a rewrite of Codex. It is an optimized personal modded edition of Codex with a deliberately small fork surface.
+> Official Codex remains the product baseline. `godex` adds a thin, explicit layer for release control, install coexistence,
+> fork-specific update plumbing, and long-term maintainability.
+>
+> `godex` is an independent personal fork and is not an official OpenAI distribution.
+
+## Why `godex`
+
+`godex` exists for one reason: keep the power of official Codex while making it easier to maintain as a long-lived personal distribution.
+
+- Stay close to upstream instead of drifting into an unmergeable fork.
+- Run `godex` side-by-side with official `codex` on the same machine.
+- Track fork releases and official upstream changes as two separate channels.
+- Use a local-first release process so the fork does not depend on GitHub Actions as its primary build machine.
+- Keep every long-lived difference explicit, reviewable, and documented.
+
+## `godex` At A Glance
+
+| Area | `godex` extension | Why it matters |
+| --- | --- | --- |
+| Fork identity | Fork-owned app identity, versioning, repo links, release metadata, and startup announcement source all point to `LeonSGP43/godex`. | The fork behaves like its own distribution instead of pretending to be upstream. |
+| Parallel install model | `godex` is installed and managed as `godex`, not as a replacement for `codex`. | You can keep official Codex and `godex` on the same machine without clobbering one with the other. |
+| Dual config modes | Default `godex` reuses `~/.codex` and project `.codex`; `godex -g` switches to isolated `~/.godex` and project `.godex`. | You can choose compatibility mode or a clean fork-only config namespace. |
+| Dual update governance | `[godex_updates]` tracks the fork's own releases, while `[upstream_updates]` tracks official `openai/codex`. | Fork release detection and upstream drift are separated instead of mixed together. |
+| Upstream sync tooling | Repo-local sync helpers, constitutional docs, and `sync/<upstream-sha-or-date>` branch discipline are built into the repo. | Upstream absorption is standardized, repeatable, and safer to maintain. |
+| Local-first release flow | `scripts/godex-release.sh`, `scripts/godex-release-local.sh`, and the release skill default to local build and local packaging. | The fork can be released from the maintainer machine without treating GitHub Actions as the default compiler. |
+| Fork-owned maintenance layer | `scripts/godex-maintain.sh`, root constitutions, manifest rules, and acceptance gates are part of the repository. | Future updates are governed by repo law, not by memory or ad hoc shell habits. |
+
+The table above is the short version. The section below spells out the fork-owned additions one by one.
+
+## Fork-Specific Additions, One By One
+
+### 1. `godex` Has Its Own Distribution Identity
+
+- The executable name is `godex`.
+- The GitHub release repo is `LeonSGP43/godex`.
+- The fork has its own version line and changelog policy.
+- The startup announcement feed is fork-owned instead of upstream-owned.
+
+Relevant files:
+- `codex-rs/core/src/branding.rs`
+- `codex-rs/tui/src/tooltips.rs`
+- `codex-rs/tui_app_server/src/tooltips.rs`
+- `announcement_tip.toml`
+
+### 2. `godex` Can Coexist With Official Codex
+
+- This fork is designed to live next to official `codex`, not overwrite it.
+- Source install uses `bash scripts/install/install-godex-from-source.sh`.
+- The install flow is fork-specific and keeps `godex` isolated as its own command.
+
+Relevant files:
+- `scripts/install/install-godex-from-source.sh`
+- `docs/install.md`
+
+### 3. `godex` Supports Compatibility Mode and Isolated Mode
+
+- Run `godex` for Codex-compatible config paths.
+- Run `godex -g` for dedicated `~/.godex` / `.godex` paths.
+- This makes migration and experimentation much easier than a hard break from upstream config layout.
+
+Relevant files:
+- `codex-rs/cli/src/main.rs`
+- `codex-rs/core/src/config/mod.rs`
+- `docs/config.md`
+
+### 4. `godex` Separates Fork Updates From Upstream Updates
+
+- Fork release checks point at `LeonSGP43/godex`.
+- Upstream gap checks still point at `openai/codex`.
+- `godex sync-upstream` stays tied to official Codex while your own release prompts stay tied to the fork.
+
+Relevant files:
+- `codex-rs/tui/src/updates.rs`
+- `codex-rs/tui_app_server/src/updates.rs`
+- `docs/config.md`
+
+### 5. `godex` Has Repo-Law For Long-Term Maintenance
+
+- Root constitutions define what is allowed in the fork.
+- The fork manifest lists the long-lived differences that are permitted to survive upstream sync.
+- The maintenance runbook defines acceptance gates before changes re-enter `main`.
+
+Relevant files:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/godex-fork-guidelines.md`
+- `docs/godex-fork-manifest.md`
+- `docs/godex-maintenance.md`
+
+### 6. `godex` Uses a Local-First Release Workflow
+
+- `bash scripts/godex-release.sh publish`
+- `bash scripts/godex-release.sh stage`
+- `bash scripts/godex-release.sh remote publish`
+
+The default path is local build and local packaging. Remote publish remains available as a fallback, not as the primary release machine.
+
+Relevant files:
+- `scripts/godex-release.sh`
+- `scripts/godex-release-local.sh`
+- `scripts/godex-release-remote.sh`
+- `.codex/skills/godex-release-distributor/`
+
+## Current Install Status
+
+The fork's release architecture is in transition from governance setup into stable distribution.
+
+- Reliable today: build and install from your local checkout.
+- GitHub Release: used as the fork's public release signal and release history.
+- npm and managed installers: supported by the fork's release design, but only treat them as live when the current package or release asset is actually published.
+
+### Recommended Install Right Now
+
+```bash
+git clone https://github.com/LeonSGP43/godex.git
+cd godex
+bash scripts/install/install-godex-from-source.sh
+```
+
+### Local Maintainer Release Commands
+
+```bash
+# Check maintenance and release status
+bash scripts/godex-maintain.sh status
+bash scripts/godex-maintain.sh release-preflight
+
+# Local-first release flow
+bash scripts/godex-release.sh stage
+bash scripts/godex-release.sh publish
+
+# Keep the remote path available for future use
+bash scripts/godex-release.sh remote publish
+```
+
+## Positioning
+
+Use [official Codex](https://github.com/openai/codex) if you want the upstream product defaults.
+
+Use `godex` if you want a personal modded fork with fork-owned release governance, side-by-side install behavior, and a disciplined upstream-sync workflow.
 
 ---
 
 ## Quickstart
 
-### Installing and running Codex CLI
+### Run `godex`
 
-Install globally with your preferred package manager:
+After installing from source:
 
-```shell
-# Install using npm
-npm install -g @leonsgp43/godex
+```bash
+godex
 ```
 
-```shell
-# Install using Homebrew
-brew install --cask codex
+### Choose Your Config Mode
+
+```bash
+# Codex-compatible mode
+godex
+
+# Isolated godex-only mode
+godex -g
 ```
 
-Then simply run `godex` to get started.
+### Sign In
 
-<details>
-<summary>You can also go to the <a href="https://github.com/LeonSGP43/godex/releases/latest">latest godex GitHub Release</a> and download the installer or platform assets.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Team, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
+Run `godex` and select **Sign in with ChatGPT** if you want to use the same authentication flow supported by upstream Codex. You can also use an API key with the same underlying Codex authentication model.
 
 ## Docs
 
@@ -87,5 +236,12 @@ Version policy for this fork:
   - staged upgrades to install, config, or update flows
 - `1.0.0`
   - stable personal distribution with a long-term maintenance commitment
+
+## Thanks
+
+`godex` is built on top of the official [`openai/codex`](https://github.com/openai/codex) project.
+
+Thanks to the Codex team and upstream maintainers for building the base system that makes this fork possible.
+This repository exists to personalize, optimize, and maintain a forked distribution for a specific workflow, not to erase the value of official Codex.
 
 This repository is licensed under the [Apache-2.0 License](LICENSE).
