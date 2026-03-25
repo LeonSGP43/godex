@@ -4,7 +4,7 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-03-25
+## [0.1.1] - 2026-03-25
 
 ### Added
 
@@ -64,18 +64,18 @@ All notable changes to this fork are documented in this file.
 - Verification: `bash scripts/godex-maintain.sh status`, `bash scripts/godex-maintain.sh sync --dry-run`, `bash scripts/godex-maintain.sh check`, `bash scripts/godex-maintain.sh smoke`, and `bash scripts/godex-maintain.sh release-preflight` all passed on the sync branch before mergeback.
 - Files: `codex-rs/`, `.github/`, `MODULE.bazel`, `patches/`, `scripts/test-remote-env.sh`
 
-- What changed: added a hard pre-push version gate for `main`, prepared formal release notes for `0.2.0`, and promoted the pending changelog entries into a real release section.
+- What changed: added a hard pre-push version gate for `main`, prepared formal release notes for `0.1.1`, and promoted the pending changelog entries into a real release section.
 - Why: release metadata must advance with the code, otherwise future `main` pushes can silently publish significant fork changes under an old version number.
 - Impact: pushing `main` now requires a fresh `VERSION`, aligned Cargo workspace versioning, a matching changelog release heading, and an emptied `Unreleased` section for the release being published.
 - Verification: `bash scripts/godex-maintain.sh release-preflight` now checks version alignment and rejects a push-ready `main` if it still carries the same version as `origin/main`.
-- Files: `VERSION`, `codex-rs/Cargo.toml`, `CHANGELOG.md`, `scripts/godex-maintain.sh`, `docs/godex-release-0.2.0.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/godex-maintenance.md`
+- Files: `VERSION`, `codex-rs/Cargo.toml`, `CHANGELOG.md`, `scripts/godex-maintain.sh`, `docs/godex-release-0.1.1.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/godex-maintenance.md`
 
 ### Fixed
 
 - What changed: limited the legacy `agent/backend` module to test-only compilation.
 - Why: upstream runtime changes left that backend layer as test support only, but it was still entering production builds and generating dead-code warnings.
 - Impact: normal `godex` builds no longer emit the old `core/src/agent/backend.rs` dead-code warning set, while tests keep the helper code they still need.
-- Verification: `bash scripts/godex-maintain.sh check` completed without the previous `backend.rs` dead-code warnings, and `bash scripts/godex-maintain.sh smoke` still reported `godex 0.2.0`.
+- Verification: `bash scripts/godex-maintain.sh check` completed without the previous `backend.rs` dead-code warnings, and `bash scripts/godex-maintain.sh smoke` still reported `godex 0.1.1`.
 - Files: `codex-rs/core/src/agent/mod.rs`
 
 ## [0.1.0] - 2026-03-23

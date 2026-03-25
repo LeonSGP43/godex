@@ -168,6 +168,12 @@ Do not push `main` unless version governance is complete:
 
 If `main` is ahead of `origin/main` and `VERSION` has not changed, pushing is forbidden.
 
+Version strategy:
+
+- `0.1.x` for upstream syncs, governance hardening, documentation/script updates, and small fixes
+- `0.2.0` only when the fork adds clear user-facing capabilities or materially changes default behavior
+- `1.0.0` only when `godex` is being treated as a stable long-term personal distribution
+
 ## Conflict Resolution Policy
 
 When resolving conflicts:

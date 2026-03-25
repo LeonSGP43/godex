@@ -57,6 +57,12 @@ If `main` is ahead of `origin/main`, it now requires all of the following:
 - `CHANGELOG.md` has a `## [<version>]` section for that version
 - `## [Unreleased]` no longer carries the release entries being pushed
 
+Recommended version cadence:
+
+- `0.1.x` for upstream syncs and maintenance-layer improvements
+- `0.2.0` for actual fork feature steps or meaningful default behavior changes
+- `1.0.0` only when you want to stand behind `godex` as a stable long-term personal release line
+
 ## Recommended update loop
 
 1. Start from a clean `main` worktree.

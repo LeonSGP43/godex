@@ -1,10 +1,10 @@
-# godex 0.2.0 Release Notes
+# godex 0.1.1 Release Notes
 
 Release date: 2026-03-25
 
 ## Summary
 
-`godex 0.2.0` absorbs the official Codex upstream baseline at `e590fad50b83`
+`godex 0.1.1` absorbs the official Codex upstream baseline at `e590fad50b83`
 while keeping the fork constitutional layer intact. This release is the first
 large upstream catch-up performed under the new fork-governance model.
 
@@ -14,6 +14,7 @@ large upstream catch-up performed under the new fork-governance model.
 - preserved `godex` config namespace behavior and fork release identity
 - kept fork divergence bounded to the manifest-listed areas
 - added a hard pre-push version gate for future `main` releases
+- aligned the written version cadence so upstream sync work stays on `0.1.x`
 
 ## Upstream Changes Pulled In
 
@@ -51,7 +52,7 @@ The synchronized branch and the post-sync cleanup were validated with:
 
 Observed runtime result:
 
-- `godex --version` => `godex 0.2.0`
+- `godex --version` => `godex 0.1.1`
 
 ## Follow-Up
 

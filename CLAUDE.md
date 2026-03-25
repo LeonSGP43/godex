@@ -133,6 +133,12 @@ Do not push `main` until release metadata is advanced with the code:
 
 If `main` is ahead of `origin/main` and still carries the same version number, stop and fix release metadata before push.
 
+Version strategy:
+
+- `0.1.x` for upstream syncs, governance improvements, documentation/script changes, and small fixes
+- `0.2.0` only when the fork gains clear user-facing fork functionality or meaningful default-behavior changes
+- `1.0.0` only when `godex` is intentionally being published as a stable long-term personal distribution
+
 ## Conflict Resolution Policy
 
 When upstream and fork behavior collide:

@@ -74,4 +74,18 @@ This fork manages its own SemVer release line for `godex`.
 - Official Codex upstream release tracking is separate from `godex`'s own fork versioning.
 - Source installs should use `bash scripts/install/install-godex-from-source.sh` so `godex` and official `codex` can coexist on the same machine.
 
+Version policy for this fork:
+
+- `0.1.x`
+  - pure upstream syncs
+  - fork governance improvements
+  - docs, scripts, and release-gate tightening
+  - small fixes
+- `0.2.0`
+  - clearly new fork user-facing capabilities
+  - meaningful default-behavior changes
+  - staged upgrades to install, config, or update flows
+- `1.0.0`
+  - stable personal distribution with a long-term maintenance commitment
+
 This repository is licensed under the [Apache-2.0 License](LICENSE).

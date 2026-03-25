@@ -156,6 +156,12 @@ Push rule for `main`:
 - `CHANGELOG.md` must contain `## [<version>]` for that version
 - `## [Unreleased]` must be empty for the release being pushed
 
+Version cadence:
+
+- use `0.1.x` for routine upstream absorption, fork governance, docs/scripts work, and small fixes
+- use `0.2.0` only when fork-specific product behavior takes a real step forward
+- use `1.0.0` only when the fork is ready to be treated as a stable long-term personal line
+
 Required behavior checks:
 
 1. `godex --version` reports the expected fork version
