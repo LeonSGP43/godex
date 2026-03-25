@@ -6,22 +6,34 @@ on:
       release-lto:
         required: true
         type: string
+      publish-signed-windows-assets:
+        required: false
+        type: boolean
+        default: false
     secrets:
       AZURE_TRUSTED_SIGNING_CLIENT_ID:
-        required: true
+        required: false
       AZURE_TRUSTED_SIGNING_TENANT_ID:
-        required: true
+        required: false
       AZURE_TRUSTED_SIGNING_SUBSCRIPTION_ID:
-        required: true
+        required: false
       AZURE_TRUSTED_SIGNING_ENDPOINT:
-        required: true
+        required: false
       AZURE_TRUSTED_SIGNING_ACCOUNT_NAME:
-        required: true
+        required: false
       AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME:
-        required: true
+        required: false
 
 jobs:
+  skip-windows-release:
+    if: ${{ !inputs.publish-signed-windows-assets }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip Windows release assets
+        run: echo "Skipping Windows release assets for this repository."
+
   build-windows-binaries:
+    if: ${{ inputs.publish-signed-windows-assets }}
     name: Build Windows binaries - ${{ matrix.runner }} - ${{ matrix.target }} - ${{ matrix.bundle }}
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 60
@@ -119,6 +131,7 @@ jobs:
             codex-rs/target/${{ matrix.target }}/release/staged-${{ matrix.bundle }}/*
 
   build-windows:
+    if: ${{ inputs.publish-signed-windows-assets }}
     needs:
       - build-windows-binaries
     name: Build - ${{ matrix.runner }} - ${{ matrix.target }}

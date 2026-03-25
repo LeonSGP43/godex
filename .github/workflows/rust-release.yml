@@ -248,7 +248,7 @@ jobs:
           target: ${{ matrix.target }}
           artifacts-dir: ${{ github.workspace }}/codex-rs/target/${{ matrix.target }}/release
 
-      - if: ${{ runner.os == 'macOS' }}
+      - if: ${{ runner.os == 'macOS' && github.repository == 'openai/codex' }}
         name: MacOS code signing (binaries)
         uses: ./.github/actions/macos-code-sign
         with:
@@ -307,7 +307,7 @@ jobs:
             exit 1
           fi
 
-      - if: ${{ runner.os == 'macOS' }}
+      - if: ${{ runner.os == 'macOS' && github.repository == 'openai/codex' }}
         name: MacOS code signing (dmg)
         uses: ./.github/actions/macos-code-sign
         with:
@@ -387,6 +387,7 @@ jobs:
     uses: ./.github/workflows/rust-release-windows.yml
     with:
       release-lto: ${{ contains(github.ref_name, '-alpha') && 'thin' || 'fat' }}
+      publish-signed-windows-assets: ${{ github.repository == 'openai/codex' }}
     secrets: inherit
 
   argument-comment-lint-release-assets:
@@ -394,7 +395,7 @@ jobs:
     needs: tag-check
     uses: ./.github/workflows/rust-release-argument-comment-lint.yml
     with:
-      publish: true
+      publish: ${{ github.repository == 'openai/codex' }}
 
   zsh-release-assets:
     name: zsh release assets
@@ -533,21 +534,24 @@ jobs:
           # (e.g. -alpha, -beta). Otherwise publish a normal release.
           prerelease: ${{ contains(steps.release_name.outputs.name, '-') }}
 
-      - uses: facebook/dotslash-publish-release@v2
+      - if: ${{ github.repository == 'openai/codex' }}
+        uses: facebook/dotslash-publish-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag: ${{ github.ref_name }}
           config: .github/dotslash-config.json
 
-      - uses: facebook/dotslash-publish-release@v2
+      - if: ${{ github.repository == 'openai/codex' }}
+        uses: facebook/dotslash-publish-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag: ${{ github.ref_name }}
           config: .github/dotslash-zsh-config.json
 
-      - uses: facebook/dotslash-publish-release@v2
+      - if: ${{ github.repository == 'openai/codex' }}
+        uses: facebook/dotslash-publish-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -557,7 +561,7 @@ jobs:
       - name: Trigger developers.openai.com deploy
         # Only trigger the deploy if the release is not a pre-release.
         # The deploy is used to update the developers.openai.com website with the new config schema json file.
-        if: ${{ !contains(steps.release_name.outputs.name, '-') }}
+        if: ${{ github.repository == 'openai/codex' && !contains(steps.release_name.outputs.name, '-') }}
         continue-on-error: true
         env:
           DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL: ${{ secrets.DEV_WEBSITE_VERCEL_DEPLOY_HOOK_URL }}
@@ -684,7 +688,7 @@ jobs:
     needs: release
     # Only publish stable/mainline releases to WinGet; pre-releases include a
     # '-' in the semver string (e.g., 1.2.3-alpha.1).
-    if: ${{ !contains(needs.release.outputs.version, '-') }}
+    if: ${{ github.repository == 'openai/codex' && !contains(needs.release.outputs.version, '-') }}
     # This job only invokes a GitHub Action to open/update the winget-pkgs PR;
     # it does not execute Windows-only tooling, so Linux is sufficient.
     runs-on: ubuntu-latest
@@ -707,6 +711,7 @@ jobs:
     permissions:
       contents: write
     needs: release
+    if: ${{ github.repository == 'openai/codex' }}
     runs-on: ubuntu-latest
 
     steps:
