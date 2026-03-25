@@ -4,6 +4,8 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-03-25
+
 ### Added
 
 - What changed: added local-first release wrapper commands so `godex` can be staged and published from the maintainer machine with `scripts/godex-release.sh`, while keeping an explicit remote fallback path for future use.
