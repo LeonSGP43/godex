@@ -6,6 +6,12 @@ All notable changes to this fork are documented in this file.
 
 ### Changed
 
+- What changed: refreshed the public `announcement_tip.toml` marker for a live godex remote-tip sync verification.
+- Why: the fork now serves startup announcements from `LeonSGP43/godex`, so a fresh remote marker makes it easy to verify that new launches pick up the latest repository content instead of stale assumptions.
+- Impact: new `godex` processes should resolve the updated public tip text from the fork repository on startup.
+- Verification: the repository file is pushed to `main`, fetched back from `raw.githubusercontent.com`, and checked against the expected live marker string.
+- Files: `announcement_tip.toml`, `CHANGELOG.md`
+
 - What changed: introduced `godex` fork governance work, including parallel config namespace support, fork-specific release tracking, and official Codex upstream monitoring.
 - Why: this fork needs to run beside official Codex while still making upstream merges and fork releases manageable.
 - Impact: `godex` can distinguish default `.codex` compatibility mode from isolated `-g` mode, and release/version management now has a dedicated home in the repository.
