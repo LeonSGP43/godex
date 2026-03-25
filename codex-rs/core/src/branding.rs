@@ -1,7 +1,7 @@
 pub const APP_DISPLAY_NAME: &str = "godex";
 pub const APP_EXECUTABLE_NAME: &str = "godex";
-pub const APP_PACKAGE_NAME: &str = "godex-cli";
-pub const APP_PACKAGE_INSTALL_SPEC: &str = "godex-cli@latest";
+pub const APP_PACKAGE_NAME: &str = "@leonsgp43/godex";
+pub const APP_PACKAGE_INSTALL_SPEC: &str = "@leonsgp43/godex@latest";
 pub const APP_BREW_PACKAGE_NAME: &str = "godex";
 pub const APP_PRODUCT_NAME: &str = "godex";
 pub const APP_GITHUB_REPO: &str = "LeonSGP43/godex";

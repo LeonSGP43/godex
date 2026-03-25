@@ -1,10 +1,12 @@
 <h1 align="center">OpenAI Codex CLI</h1>
 <p align="center">Lightweight coding agent that runs in your terminal</p>
 
-<p align="center"><code>npm i -g @openai/codex</code></p>
+<p align="center"><code>npm i -g @leonsgp43/godex</code></p>
 
 > [!IMPORTANT]
 > This is the documentation for the _legacy_ TypeScript implementation of the Codex CLI. It has been superseded by the _Rust_ implementation. See the [README in the root of the Codex repository](https://github.com/openai/codex/blob/main/README.md) for details.
+>
+> In this fork, the managed package name is `@leonsgp43/godex` and the executable is `godex`.
 
 ![Codex demo GIF using: codex "explain this codebase to me"](../.github/demo.gif)
 

@@ -27,6 +27,7 @@ _SPEC.loader.exec_module(_BUILD_MODULE)
 PACKAGE_NATIVE_COMPONENTS = getattr(_BUILD_MODULE, "PACKAGE_NATIVE_COMPONENTS", {})
 PACKAGE_EXPANSIONS = getattr(_BUILD_MODULE, "PACKAGE_EXPANSIONS", {})
 CODEX_PLATFORM_PACKAGES = getattr(_BUILD_MODULE, "CODEX_PLATFORM_PACKAGES", {})
+CODEX_NPM_BASENAME = getattr(_BUILD_MODULE, "CODEX_NPM_BASENAME", "codex")
 
 
 def parse_args() -> argparse.Namespace:
@@ -133,7 +134,9 @@ def run_command(cmd: list[str]) -> None:
 def tarball_name_for_package(package: str, version: str) -> str:
     if package in CODEX_PLATFORM_PACKAGES:
         platform = package.removeprefix("codex-")
-        return f"codex-npm-{platform}-{version}.tgz"
+        return f"{CODEX_NPM_BASENAME}-npm-{platform}-{version}.tgz"
+    if package == "codex":
+        return f"{CODEX_NPM_BASENAME}-npm-{version}.tgz"
     return f"{package}-npm-{version}.tgz"
 
 

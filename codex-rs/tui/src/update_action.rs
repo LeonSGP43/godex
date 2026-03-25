@@ -4,9 +4,9 @@ use codex_core::config::Config;
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
-    /// Update via `npm install -g godex-cli@latest`.
+    /// Update via `npm install -g @leonsgp43/godex@latest`.
     NpmGlobalLatest,
-    /// Update via `bun install -g godex-cli@latest`.
+    /// Update via `bun install -g @leonsgp43/godex@latest`.
     BunGlobalLatest,
     /// Update via `brew upgrade --cask godex`.
     BrewUpgrade,

@@ -1,11 +1,11 @@
-<p align="center"><code>npm i -g @openai/codex</code><br />or <code>brew install --cask codex</code></p>
+<p align="center"><code>npm i -g @leonsgp43/godex</code><br />or <code>curl -fsSL https://github.com/LeonSGP43/godex/releases/latest/download/install.sh | sh</code></p>
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
 </p>
 </br>
 If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
+</br>If you want the desktop app experience, run <code>godex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
 </br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
 
 ---
@@ -18,7 +18,7 @@ Install globally with your preferred package manager:
 
 ```shell
 # Install using npm
-npm install -g @openai/codex
+npm install -g @leonsgp43/godex
 ```
 
 ```shell
@@ -26,10 +26,10 @@ npm install -g @openai/codex
 brew install --cask codex
 ```
 
-Then simply run `codex` to get started.
+Then simply run `godex` to get started.
 
 <details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
+<summary>You can also go to the <a href="https://github.com/LeonSGP43/godex/releases/latest">latest godex GitHub Release</a> and download the installer or platform assets.</summary>
 
 Each GitHub Release contains many executables, but in practice, you likely want one of these:
 

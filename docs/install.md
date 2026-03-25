@@ -12,6 +12,34 @@
 
 The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
 
+### Install `godex` via npm
+
+This fork publishes a managed npm package for the `godex` command:
+
+```bash
+npm install -g @leonsgp43/godex
+```
+
+Upgrade later with:
+
+```bash
+npm install -g @leonsgp43/godex@latest
+```
+
+### Install `godex` from the latest GitHub release
+
+Use the release installer if you want a managed binary without cloning the repo:
+
+```bash
+curl -fsSL https://github.com/LeonSGP43/godex/releases/latest/download/install.sh | sh
+```
+
+On Windows PowerShell:
+
+```powershell
+irm https://github.com/LeonSGP43/godex/releases/latest/download/install.ps1 | iex
+```
+
 ### Build from source
 
 ```bash

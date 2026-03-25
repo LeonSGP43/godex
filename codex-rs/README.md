@@ -4,14 +4,14 @@ We provide Codex CLI as a standalone, native executable to ensure a zero-depende
 
 ## Installing Codex
 
-Today, the easiest way to install Codex is via `npm`:
+In this fork, the easiest way to install the managed `godex` command is via `npm`:
 
 ```shell
-npm i -g @openai/codex
-codex
+npm i -g @leonsgp43/godex
+godex
 ```
 
-You can also install via Homebrew (`brew install --cask codex`) or download a platform-specific release directly from our [GitHub Releases](https://github.com/openai/codex/releases).
+You can also download a platform-specific release directly from the fork's [GitHub Releases](https://github.com/LeonSGP43/godex/releases).
 
 ## Documentation quickstart
 

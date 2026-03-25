@@ -7,7 +7,7 @@ expression: terminal.backend()
 
   Release notes: https://github.com/LeonSGP43/godex/releases/latest
 
-› 1. Update now (runs `npm install -g godex-cli@latest`)                        
+› 1. Update now (runs `npm install -g @leonsgp43/godex@latest`)
   2. Skip
   3. Skip until next version
 

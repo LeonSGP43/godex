@@ -11,15 +11,54 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
+const cliPackageJson = require("../package.json");
 
-const PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
-  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
-  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
+const metaPackageName = cliPackageJson.name;
+const packageScope = metaPackageName.startsWith("@")
+  ? metaPackageName.split("/")[0]
+  : null;
+const packageBaseName = metaPackageName.startsWith("@")
+  ? metaPackageName.split("/")[1]
+  : metaPackageName;
+const executableName = Object.keys(cliPackageJson.bin ?? {})[0] ?? "godex";
+const installSpec = `${metaPackageName}@latest`;
+
+const scopedPackageName = (packageName) =>
+  packageScope ? `${packageScope}/${packageName}` : packageName;
+
+const PLATFORM_PACKAGE_TAG_BY_TARGET = {
+  "x86_64-unknown-linux-musl": "linux-x64",
+  "aarch64-unknown-linux-musl": "linux-arm64",
+  "x86_64-apple-darwin": "darwin-x64",
+  "aarch64-apple-darwin": "darwin-arm64",
+  "x86_64-pc-windows-msvc": "win32-x64",
+  "aarch64-pc-windows-msvc": "win32-arm64",
 };
+
+const PLATFORM_PACKAGE_BY_TARGET = Object.fromEntries(
+  Object.entries(PLATFORM_PACKAGE_TAG_BY_TARGET).map(([targetTriple, platformTag]) => [
+    targetTriple,
+    scopedPackageName(`${packageBaseName}-${platformTag}`),
+  ]),
+);
+
+const bundledBinaryCandidates = Array.from(new Set([executableName, "codex"])).map(
+  (binaryBaseName) => ({
+    dir: binaryBaseName,
+    filename:
+      process.platform === "win32" ? `${binaryBaseName}.exe` : binaryBaseName,
+  }),
+);
+
+function resolveBundledBinary(rootDir) {
+  for (const candidate of bundledBinaryCandidates) {
+    const binaryPath = path.join(rootDir, candidate.dir, candidate.filename);
+    if (existsSync(binaryPath)) {
+      return binaryPath;
+    }
+  }
+  return null;
+}
 
 const { platform, arch } = process;
 
@@ -75,30 +114,24 @@ if (!platformPackage) {
   throw new Error(`Unsupported target triple: ${targetTriple}`);
 }
 
-const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
 const localVendorRoot = path.join(__dirname, "..", "vendor");
-const localBinaryPath = path.join(
-  localVendorRoot,
-  targetTriple,
-  "codex",
-  codexBinaryName,
-);
+const localBinaryPath = resolveBundledBinary(path.join(localVendorRoot, targetTriple));
 
 let vendorRoot;
 try {
   const packageJsonPath = require.resolve(`${platformPackage}/package.json`);
   vendorRoot = path.join(path.dirname(packageJsonPath), "vendor");
 } catch {
-  if (existsSync(localBinaryPath)) {
+  if (localBinaryPath) {
     vendorRoot = localVendorRoot;
   } else {
     const packageManager = detectPackageManager();
     const updateCommand =
       packageManager === "bun"
-        ? "bun install -g @openai/codex@latest"
-        : "npm install -g @openai/codex@latest";
+        ? `bun install -g ${installSpec}`
+        : `npm install -g ${installSpec}`;
     throw new Error(
-      `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
+      `Missing optional dependency ${platformPackage}. Reinstall ${executableName}: ${updateCommand}`,
     );
   }
 }
@@ -107,15 +140,25 @@ if (!vendorRoot) {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @openai/codex@latest"
-      : "npm install -g @openai/codex@latest";
+      ? `bun install -g ${installSpec}`
+      : `npm install -g ${installSpec}`;
   throw new Error(
-    `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
+    `Missing optional dependency ${platformPackage}. Reinstall ${executableName}: ${updateCommand}`,
   );
 }
 
 const archRoot = path.join(vendorRoot, targetTriple);
-const binaryPath = path.join(archRoot, "codex", codexBinaryName);
+const binaryPath = resolveBundledBinary(archRoot);
+if (!binaryPath) {
+  const packageManager = detectPackageManager();
+  const updateCommand =
+    packageManager === "bun"
+      ? `bun install -g ${installSpec}`
+      : `npm install -g ${installSpec}`;
+  throw new Error(
+    `Missing bundled executable for ${targetTriple}. Reinstall ${executableName}: ${updateCommand}`,
+  );
+}
 
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
@@ -134,8 +177,8 @@ function getUpdatedPath(newDirs) {
 }
 
 /**
- * Use heuristics to detect the package manager that was used to install Codex
- * in order to give the user a hint about how to update it.
+ * Use heuristics to detect the package manager that was used to install this
+ * package in order to give the user a hint about how to update it.
  */
 function detectPackageManager() {
   const userAgent = process.env.npm_config_user_agent || "";

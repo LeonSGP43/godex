@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and optionally package the @openai/codex npm module."""
+"""Stage and optionally package the fork npm distribution modules."""
 
 import argparse
 import json
@@ -14,48 +14,66 @@ CODEX_CLI_ROOT = SCRIPT_DIR.parent
 REPO_ROOT = CODEX_CLI_ROOT.parent
 RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / "npm"
 CODEX_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
-CODEX_NPM_NAME = "@openai/codex"
+
+
+def split_npm_package_name(package_name: str) -> tuple[str | None, str]:
+    if package_name.startswith("@") and "/" in package_name:
+        scope, basename = package_name.split("/", 1)
+        return scope, basename
+    return None, package_name
+
+
+def scoped_package_name(scope: str | None, package_basename: str) -> str:
+    return f"{scope}/{package_basename}" if scope else package_basename
+
+
+with open(CODEX_CLI_ROOT / "package.json", "r", encoding="utf-8") as fh:
+    CODEX_PACKAGE_JSON = json.load(fh)
+
+CODEX_NPM_NAME = CODEX_PACKAGE_JSON["name"]
+CODEX_NPM_SCOPE, CODEX_NPM_BASENAME = split_npm_package_name(CODEX_NPM_NAME)
+CODEX_NPM_TARBALL_PREFIX = f"{CODEX_NPM_BASENAME}-npm"
 
 # `npm_name` is the local optional-dependency alias consumed by `bin/codex.js`.
-# The underlying package published to npm is always `@openai/codex`.
+# The underlying package published to npm is always the fork meta package.
 CODEX_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
     "codex-linux-x64": {
-        "npm_name": "@openai/codex-linux-x64",
+        "npm_name": scoped_package_name(CODEX_NPM_SCOPE, f"{CODEX_NPM_BASENAME}-linux-x64"),
         "npm_tag": "linux-x64",
         "target_triple": "x86_64-unknown-linux-musl",
         "os": "linux",
         "cpu": "x64",
     },
     "codex-linux-arm64": {
-        "npm_name": "@openai/codex-linux-arm64",
+        "npm_name": scoped_package_name(CODEX_NPM_SCOPE, f"{CODEX_NPM_BASENAME}-linux-arm64"),
         "npm_tag": "linux-arm64",
         "target_triple": "aarch64-unknown-linux-musl",
         "os": "linux",
         "cpu": "arm64",
     },
     "codex-darwin-x64": {
-        "npm_name": "@openai/codex-darwin-x64",
+        "npm_name": scoped_package_name(CODEX_NPM_SCOPE, f"{CODEX_NPM_BASENAME}-darwin-x64"),
         "npm_tag": "darwin-x64",
         "target_triple": "x86_64-apple-darwin",
         "os": "darwin",
         "cpu": "x64",
     },
     "codex-darwin-arm64": {
-        "npm_name": "@openai/codex-darwin-arm64",
+        "npm_name": scoped_package_name(CODEX_NPM_SCOPE, f"{CODEX_NPM_BASENAME}-darwin-arm64"),
         "npm_tag": "darwin-arm64",
         "target_triple": "aarch64-apple-darwin",
         "os": "darwin",
         "cpu": "arm64",
     },
     "codex-win32-x64": {
-        "npm_name": "@openai/codex-win32-x64",
+        "npm_name": scoped_package_name(CODEX_NPM_SCOPE, f"{CODEX_NPM_BASENAME}-win32-x64"),
         "npm_tag": "win32-x64",
         "target_triple": "x86_64-pc-windows-msvc",
         "os": "win32",
         "cpu": "x64",
     },
     "codex-win32-arm64": {
-        "npm_name": "@openai/codex-win32-arm64",
+        "npm_name": scoped_package_name(CODEX_NPM_SCOPE, f"{CODEX_NPM_BASENAME}-win32-arm64"),
         "npm_tag": "win32-arm64",
         "target_triple": "aarch64-pc-windows-msvc",
         "os": "win32",
@@ -96,7 +114,7 @@ COMPONENT_DEST_DIR: dict[str, str] = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build or stage the Codex CLI npm package.")
+    parser = argparse.ArgumentParser(description=f"Build or stage the {CODEX_NPM_NAME} npm package.")
     parser.add_argument(
         "--package",
         choices=PACKAGE_CHOICES,
@@ -229,7 +247,7 @@ def prepare_staging_dir(staging_dir: Path | None) -> tuple[Path, bool]:
             raise RuntimeError(f"Staging directory {staging_dir} is not empty.")
         return staging_dir, False
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="codex-npm-stage-"))
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"{CODEX_NPM_BASENAME}-npm-stage-"))
     return temp_dir, True
 
 
@@ -259,24 +277,21 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         if readme_src.exists():
             shutil.copy2(readme_src, staging_dir / "README.md")
 
-        with open(CODEX_CLI_ROOT / "package.json", "r", encoding="utf-8") as fh:
-            codex_package_json = json.load(fh)
-
         package_json = {
             "name": CODEX_NPM_NAME,
             "version": platform_version,
-            "license": codex_package_json.get("license", "Apache-2.0"),
+            "license": CODEX_PACKAGE_JSON.get("license", "Apache-2.0"),
             "os": [platform_package["os"]],
             "cpu": [platform_package["cpu"]],
             "files": ["vendor"],
-            "repository": codex_package_json.get("repository"),
+            "repository": CODEX_PACKAGE_JSON.get("repository"),
         }
 
-        engines = codex_package_json.get("engines")
+        engines = CODEX_PACKAGE_JSON.get("engines")
         if isinstance(engines, dict):
             package_json["engines"] = engines
 
-        package_manager = codex_package_json.get("packageManager")
+        package_manager = CODEX_PACKAGE_JSON.get("packageManager")
         if isinstance(package_manager, str):
             package_json["packageManager"] = package_manager
     elif package == "codex-responses-api-proxy":
@@ -419,7 +434,7 @@ def run_npm_pack(staging_dir: Path, output_path: Path) -> Path:
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="codex-npm-pack-") as pack_dir_str:
+    with tempfile.TemporaryDirectory(prefix=f"{CODEX_NPM_BASENAME}-npm-pack-") as pack_dir_str:
         pack_dir = Path(pack_dir_str)
         stdout = subprocess.check_output(
             ["npm", "pack", "--json", "--pack-destination", str(pack_dir)],

@@ -41,7 +41,7 @@ function Get-ReleaseUrl {
         [string]$ResolvedVersion
     )
 
-    return "https://github.com/openai/codex/releases/download/rust-v$ResolvedVersion/$AssetName"
+    return "https://github.com/LeonSGP43/godex/releases/download/rust-v$ResolvedVersion/$AssetName"
 }
 
 function Path-Contains {
@@ -70,9 +70,9 @@ function Resolve-Version {
         return $normalizedVersion
     }
 
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/openai/codex/releases/latest"
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/LeonSGP43/godex/releases/latest"
     if (-not $release.tag_name) {
-        Write-Error "Failed to resolve the latest Codex release version."
+        Write-Error "Failed to resolve the latest godex release version."
         exit 1
     }
 
@@ -85,7 +85,7 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 if (-not [Environment]::Is64BitOperatingSystem) {
-    Write-Error "Codex requires a 64-bit version of Windows."
+    Write-Error "godex requires a 64-bit version of Windows."
     exit 1
 }
 
@@ -110,23 +110,25 @@ switch ($architecture) {
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
-    $installDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin"
-} else {
+if (-not [string]::IsNullOrWhiteSpace($env:GODEX_INSTALL_DIR)) {
+    $installDir = $env:GODEX_INSTALL_DIR
+} elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
     $installDir = $env:CODEX_INSTALL_DIR
+} else {
+    $installDir = Join-Path $env:LOCALAPPDATA "Programs\godex\bin"
 }
 
-$codexPath = Join-Path $installDir "codex.exe"
-$installMode = if (Test-Path $codexPath) { "Updating" } else { "Installing" }
+$godexPath = Join-Path $installDir "godex.exe"
+$installMode = if (Test-Path $godexPath) { "Updating" } else { "Installing" }
 
-Write-Step "$installMode Codex CLI"
+Write-Step "$installMode godex CLI"
 Write-Step "Detected platform: $platformLabel"
 
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $resolvedVersion = Resolve-Version
 Write-Step "Resolved version: $resolvedVersion"
-$packageAsset = "codex-npm-$npmTag-$resolvedVersion.tgz"
+$packageAsset = "godex-npm-$npmTag-$resolvedVersion.tgz"
 
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-install-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
@@ -136,7 +138,7 @@ try {
     $extractDir = Join-Path $tempDir "extract"
     $url = Get-ReleaseUrl -AssetName $packageAsset -ResolvedVersion $resolvedVersion
 
-    Write-Step "Downloading Codex CLI"
+    Write-Step "Downloading godex CLI"
     Invoke-WebRequest -Uri $url -OutFile $archivePath
 
     New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
@@ -145,7 +147,7 @@ try {
     $vendorRoot = Join-Path $extractDir "package/vendor/$target"
     Write-Step "Installing to $installDir"
     $copyMap = @{
-        "codex/codex.exe" = "codex.exe"
+        "codex/codex.exe" = "godex.exe"
         "codex/codex-command-runner.exe" = "codex-command-runner.exe"
         "codex/codex-windows-sandbox-setup.exe" = "codex-windows-sandbox-setup.exe"
         "path/rg.exe" = "rg.exe"
@@ -187,10 +189,10 @@ if (-not (Path-Contains -PathValue $userPath -Entry $installDir)) {
 }
 
 if ($pathNeedsNewShell) {
-    Write-Step ('Run now: $env:Path = "{0};$env:Path"; codex' -f $installDir)
-    Write-Step "Or open a new PowerShell window and run: codex"
+    Write-Step ('Run now: $env:Path = "{0};$env:Path"; godex' -f $installDir)
+    Write-Step "Or open a new PowerShell window and run: godex"
 } else {
-    Write-Step "Run: codex"
+    Write-Step "Run: godex"
 }
 
-Write-Host "Codex CLI $resolvedVersion installed successfully."
+Write-Host "godex CLI $resolvedVersion installed successfully."
