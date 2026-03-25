@@ -61,6 +61,18 @@ def preflight(repo: Path) -> None:
     subprocess.run(["bash", "scripts/godex-maintain.sh", "release-preflight"], cwd=repo, check=True)
 
 
+def preflight_result(repo: Path) -> tuple[bool, str]:
+    completed = subprocess.run(
+        ["bash", "scripts/godex-maintain.sh", "release-preflight"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    detail = (completed.stdout + completed.stderr).strip()
+    return completed.returncode == 0, detail
+
+
 def ensure_clean_main(repo: Path) -> None:
     status = git_status(repo)
     if status["dirty"]:
@@ -73,6 +85,7 @@ def cmd_status(repo: Path, package_name: str, release_repo: str) -> int:
     repo_status = git_status(repo)
     current_version = version(repo)
     tag_name = release_tag_name(current_version)
+    preflight_ok, preflight_detail = preflight_result(repo)
     npm_ok, npm_detail = npm_version(repo, package_name)
     gh_ok, gh_detail = gh_release_state(repo, release_repo, tag_name)
     payload = {
@@ -81,6 +94,8 @@ def cmd_status(repo: Path, package_name: str, release_repo: str) -> int:
         "dirty": repo_status["dirty"],
         "version": current_version,
         "release_tag": tag_name,
+        "release_preflight_ok": preflight_ok,
+        "release_preflight_detail": preflight_detail,
         "npm_package": package_name,
         "npm_present": npm_ok,
         "npm_detail": npm_detail,

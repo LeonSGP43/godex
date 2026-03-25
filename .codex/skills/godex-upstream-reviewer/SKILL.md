@@ -7,6 +7,13 @@ Use this skill when the user wants a read-only upstream review before deciding w
 
 Repo default: `/Users/leongong/Desktop/LeonProjects/codex`
 
+Binding governance:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/godex-fork-guidelines.md`
+- `docs/godex-fork-manifest.md`
+
 Core workflow:
 
 1. Confirm repo state first:
@@ -20,7 +27,13 @@ Core workflow:
    - summarize commit themes, diff stat, and fork-sensitive file overlap
    - write a Markdown report into `docs/reports/`
 4. Stop after the report. Do not merge or rebase upstream in this skill.
-5. If the user approves sync, hand off to normal repo maintenance commands:
+5. If the user approves sync, do not sync on `main`. Follow the constitutional branch model:
+   - create `sync/<upstream-sha-or-date>` from `main`
+   - run the sync only inside that `sync/...` branch
+   - validate there
+   - merge validated result back into `main`
+6. Hand off to repo maintenance commands only after the sync branch exists:
+   - `git checkout -b sync/<upstream-sha> main`
    - `bash scripts/godex-maintain.sh sync --dry-run`
    - `bash scripts/godex-maintain.sh sync`
    - `bash scripts/godex-maintain.sh check`
@@ -29,6 +42,7 @@ Core workflow:
 Important rules:
 
 - This skill is report-first, not sync-first.
+- Never recommend merging official upstream directly into `main`.
 - If the worktree is dirty, call it out clearly in the report.
 - Explicitly flag these hot files if upstream touches them:
   - `codex-rs/core/src/branding.rs`

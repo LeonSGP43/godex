@@ -140,6 +140,7 @@ def main() -> int:
     top_buckets = buckets.most_common(8)
     decision, reason = recommendation(behind, hot_file_hits, worktree_dirty)
     risk = "high-risk" if worktree_dirty or hot_file_hits else ("routine" if behind <= 5 else "medium-risk")
+    sync_branch = f"sync/{upstream_head}"
 
     output_path = args.output
     if output_path is None:
@@ -216,6 +217,7 @@ def main() -> int:
             "",
             "## If Approved, Next Commands",
             "```bash",
+            f"git checkout -b {sync_branch} main",
             "bash scripts/godex-maintain.sh sync --dry-run",
             "bash scripts/godex-maintain.sh sync",
             "bash scripts/godex-maintain.sh check",
