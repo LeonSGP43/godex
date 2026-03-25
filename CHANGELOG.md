@@ -4,6 +4,24 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-25
+
+### Added
+
+- What changed: added two repo-local Codex skills for `godex` maintenance, one to fetch and review official Codex upstream changes into a Markdown decision report and one to inspect/publish fork releases.
+- Why: maintaining `godex` as an upstream-first fork needed reusable in-repo automation instead of relying on ad hoc terminal memory for upstream review and release distribution.
+- Impact: future maintenance can start from `.codex/skills/godex-upstream-reviewer` and `.codex/skills/godex-release-distributor`, making upstream analysis, release verification, npm readiness checks, and operator handoff more repeatable.
+- Verification: `python3 -m py_compile .codex/skills/godex-upstream-reviewer/scripts/godex_upstream_report.py .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`, `bash .codex/skills/godex-upstream-reviewer/scripts/run.sh --no-fetch --output /tmp/godex-upstream-review-repo-test.md`, and `bash .codex/skills/godex-release-distributor/scripts/run.sh status`.
+- Files: `.codex/skills/godex-upstream-reviewer/SKILL.md`, `.codex/skills/godex-upstream-reviewer/scripts/godex_upstream_report.py`, `.codex/skills/godex-upstream-reviewer/scripts/run.sh`, `.codex/skills/godex-release-distributor/SKILL.md`, `.codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`, `.codex/skills/godex-release-distributor/scripts/run.sh`
+
+### Changed
+
+- What changed: tightened both skills so they follow the repository constitution, including `sync/<upstream-sha-or-date>` integration branches and release gating on validated `main`.
+- Why: the new automation would be dangerous if it allowed direct upstream merge advice on `main` or hid release gate failures from the operator.
+- Impact: the upstream review skill now recommends creating a sync branch before any merge, and the release skill surfaces `release-preflight` status so push and publish flows stay consistent with `AGENTS.md` and `CLAUDE.md`.
+- Verification: `bash .codex/skills/godex-upstream-reviewer/scripts/run.sh --no-fetch --output /tmp/godex-upstream-review-repo-test.md && rg -n 'git checkout -b sync/' /tmp/godex-upstream-review-repo-test.md` and `bash .codex/skills/godex-release-distributor/scripts/run.sh status`.
+- Files: `.codex/skills/godex-upstream-reviewer/SKILL.md`, `.codex/skills/godex-upstream-reviewer/scripts/godex_upstream_report.py`, `.codex/skills/godex-release-distributor/SKILL.md`, `.codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`
+
 ## [0.2.0] - 2026-03-25
 
 ### Added
