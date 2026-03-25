@@ -6,6 +6,12 @@ All notable changes to this fork are documented in this file.
 
 ### Changed
 
+- What changed: changed startup announcement loading to synchronously initialize the remote announcement cache on first tooltip use while keeping the prewarm path.
+- Why: the previous async-only path could miss a freshly updated repository announcement on the first rendered startup screen.
+- Impact: a fresh `godex` process now shows the latest public announcement tip from `LeonSGP43/godex` on first launch instead of falling back to a random local promo.
+- Verification: `cargo check -p codex-cli --bin godex --message-format short` passed, and a fresh launch of `target/debug/godex` displayed `REMOTE SYNC VERIFIED 2026-03-25 from LeonSGP43/godex main`.
+- Files: `codex-rs/tui/src/tooltips.rs`, `codex-rs/tui_app_server/src/tooltips.rs`, `CHANGELOG.md`
+
 - What changed: refreshed the public `announcement_tip.toml` marker for a live godex remote-tip sync verification.
 - Why: the fork now serves startup announcements from `LeonSGP43/godex`, so a fresh remote marker makes it easy to verify that new launches pick up the latest repository content instead of stale assumptions.
 - Impact: new `godex` processes should resolve the updated public tip text from the fork repository on startup.

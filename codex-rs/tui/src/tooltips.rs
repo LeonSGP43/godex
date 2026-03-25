@@ -137,12 +137,11 @@ pub(crate) mod announcement {
         let _ = thread::spawn(|| ANNOUNCEMENT_TIP.get_or_init(init_announcement_tip_in_thread));
     }
 
-    /// Fetch the announcement tip, return None if the prewarm is not done yet.
+    /// Fetch the cached announcement tip, initializing it synchronously on first use if needed.
     pub(crate) fn fetch_announcement_tip() -> Option<String> {
         ANNOUNCEMENT_TIP
-            .get()
-            .cloned()
-            .flatten()
+            .get_or_init(blocking_init_announcement_tip)
+            .clone()
             .and_then(|raw| parse_announcement_tip_toml(&raw))
     }
 
