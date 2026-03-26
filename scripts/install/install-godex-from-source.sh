@@ -10,6 +10,18 @@ BUILD_PROFILE="release"
 LINK_MODE="copy"
 DRY_RUN=0
 UPDATE_PATH=1
+TEMP_FILES=()
+
+cleanup() {
+  local path
+  for path in "${TEMP_FILES[@]}"; do
+    if [[ -n "$path" && -e "$path" ]]; then
+      rm -f "$path"
+    fi
+  done
+}
+
+trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
@@ -76,6 +88,55 @@ ensure_repo() {
   [[ -d "$REPO_ROOT/.git" ]] || die "not a git repo: $REPO_ROOT"
   [[ -d "$WORKSPACE_ROOT" ]] || die "missing codex-rs workspace under: $REPO_ROOT"
   command -v cargo >/dev/null 2>&1 || die "cargo is required"
+}
+
+prepare_release_build_prefix() {
+  RELEASE_BUILD_PREFIX=()
+
+  if [[ "$BUILD_PROFILE" != "release" ]] || [[ "$(uname -s)" != "Darwin" ]]; then
+    return
+  fi
+
+  local llvm_clang="/opt/homebrew/opt/llvm/bin/clang"
+  if [[ ! -x "$llvm_clang" ]]; then
+    return
+  fi
+
+  local sdk_root
+  sdk_root="$(xcrun --show-sdk-path 2>/dev/null || true)"
+  if [[ -z "$sdk_root" || ! -d "$sdk_root" ]]; then
+    return
+  fi
+
+  local rust_sysroot
+  rust_sysroot="$(rustc --print sysroot 2>/dev/null || true)"
+  local rust_host
+  rust_host="$(rustc -vV 2>/dev/null | sed -n 's/^host: //p')"
+  if [[ -z "$rust_sysroot" || -z "$rust_host" ]]; then
+    return
+  fi
+
+  local lld_dir="$rust_sysroot/lib/rustlib/$rust_host/bin/gcc-ld"
+  if [[ ! -x "$lld_dir/ld64.lld" ]]; then
+    return
+  fi
+
+  local wrapper
+  wrapper="$(mktemp -t godex-clang-lld)"
+  TEMP_FILES+=("$wrapper")
+  cat >"$wrapper" <<EOF
+#!/bin/sh
+export PATH="$lld_dir:\$PATH"
+SDKROOT="$sdk_root"
+export SDKROOT
+exec "$llvm_clang" -isysroot "\$SDKROOT" -fuse-ld=lld "\$@"
+EOF
+  chmod 0755 "$wrapper"
+
+  local cargo_target_env
+  cargo_target_env="CARGO_TARGET_$(printf '%s' "$rust_host" | tr '[:lower:]-' '[:upper:]_')_LINKER"
+  step "Using Homebrew clang + Rust ld64.lld for macOS release compatibility"
+  RELEASE_BUILD_PREFIX=(env "$cargo_target_env=$wrapper")
 }
 
 add_to_path() {
@@ -159,6 +220,7 @@ INSTALL_DIR="$(choose_install_dir)"
 PROFILE_FILE="$(resolve_profile)"
 
 ensure_repo
+prepare_release_build_prefix
 
 SOURCE_BIN="$WORKSPACE_ROOT/target/$BUILD_PROFILE/godex"
 TARGET_BIN="$INSTALL_DIR/godex"
@@ -177,7 +239,11 @@ step "Install mode: $LINK_MODE"
 step "Official codex stays untouched because only $TARGET_BIN is managed"
 
 if [[ "$BUILD_PROFILE" == "release" ]]; then
-  run cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
+  if [[ "${#RELEASE_BUILD_PREFIX[@]}" -gt 0 ]]; then
+    run "${RELEASE_BUILD_PREFIX[@]}" cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
+  else
+    run cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
+  fi
 else
   run cargo build -p codex-cli --bin godex --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
 fi

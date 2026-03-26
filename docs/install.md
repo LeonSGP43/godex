@@ -71,6 +71,7 @@ bash scripts/install/install-godex-from-source.sh
 What the installer does:
 
 - builds `codex-rs` with `cargo build -p codex-cli --bin godex --release`
+- on macOS, automatically uses a local Homebrew-LLVM plus Rust-LLD wrapper when available so the default source install can stay on the standard `release` profile instead of falling back to a test profile
 - installs only `godex` into a user bin directory such as `~/.local/bin`
 - leaves the official `codex` command untouched
 - appends the install dir to your shell profile if it is not already on `PATH`

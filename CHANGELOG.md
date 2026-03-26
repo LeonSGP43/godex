@@ -12,6 +12,12 @@ All notable changes to this fork are documented in this file.
 - Verification: `bash scripts/godex-maintain.sh check` passed after the lockfile refresh, and `git diff -- codex-rs/Cargo.lock` now shows the workspace package versions aligned to `0.2.5`.
 - Files: `codex-rs/Cargo.lock`, `CHANGELOG.md`
 
+- What changed: taught the source installer to keep `release` as the default macOS build profile while automatically routing the linker through Homebrew `clang` plus Rust's bundled `ld64.lld` when that compatibility path is available.
+- Why: the fork should keep local source installs on the same `release` profile used for real distribution instead of requiring a fallback test profile on machines where Apple's default linker path chokes on the current Rust/LLVM LTO output.
+- Impact: local `godex` installs on compatible macOS machines keep using the standard `cargo build --release` path by default, while avoiding the linker mismatch that previously forced an ad hoc `snapshot-test` workaround.
+- Verification: the compatibility wrapper was exercised locally by running `cargo build -p codex-cli --bin godex --release --manifest-path codex-rs/Cargo.toml` with the generated linker wrapper, and the build advanced normally into the heavy `release` crate graph instead of failing immediately with the prior Apple linker / SDK mismatch errors.
+- Files: `scripts/install/install-godex-from-source.sh`, `docs/install.md`, `CHANGELOG.md`
+
 ## [0.2.5] - 2026-03-25
 
 ### Changed
