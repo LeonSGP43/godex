@@ -4,6 +4,8 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-03-26
+
 ### Fixed
 
 - What changed: synchronized `codex-rs/Cargo.lock` with the current workspace package version so the tracked workspace crates now resolve as `0.2.5` instead of the stale `0.2.0` entries left in the committed lockfile.
