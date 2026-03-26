@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- What changed: synchronized `codex-rs/Cargo.lock` with the current workspace package version so the tracked workspace crates now resolve as `0.2.5` instead of the stale `0.2.0` entries left in the committed lockfile.
+- Why: `VERSION` and `codex-rs/Cargo.toml` were already bumped to `0.2.5`, but the checked-in lockfile still described most workspace packages as `0.2.0`, which left the release metadata and the committed Rust lock state out of sync.
+- Impact: `cargo check` and future release verification now run against a lockfile that matches the declared fork version, reducing confusion during smoke checks and making the repository state release-ready again.
+- Verification: `bash scripts/godex-maintain.sh check` passed after the lockfile refresh, and `git diff -- codex-rs/Cargo.lock` now shows the workspace package versions aligned to `0.2.5`.
+- Files: `codex-rs/Cargo.lock`, `CHANGELOG.md`
+
 ## [0.2.5] - 2026-03-25
 
 ### Changed
