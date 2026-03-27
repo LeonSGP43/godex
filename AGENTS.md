@@ -250,6 +250,8 @@ The `codex-rs` workspace keeps the following engineering standards.
 - If you add compile-time file reads such as `include_str!`,
   `include_bytes!`, or `sqlx::migrate!`, update Bazel data declarations too.
 - Do not create small helper methods that are referenced only once.
+- When running Rust commands such as `just fix` or `cargo test`, be patient
+  and do not try to kill them by PID; Rust lock contention can make them slow.
 
 ## Module Size And Extraction Rules
 

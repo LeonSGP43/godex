@@ -248,10 +248,7 @@ pub fn resume_command(thread_name: Option<&str>, thread_id: Option<ThreadId>) ->
                 crate::branding::APP_EXECUTABLE_NAME
             )
         } else {
-            format!(
-                "{} resume {escaped}",
-                crate::branding::APP_EXECUTABLE_NAME
-            )
+            format!("{} resume {escaped}", crate::branding::APP_EXECUTABLE_NAME)
         }
     })
 }

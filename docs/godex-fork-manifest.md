@@ -60,7 +60,27 @@ default during conflict resolution.
   - `godex sync-upstream --dry-run`
   - targeted update-path smoke checks
 
-### 4. Distribution And Local Install
+### 4. Grok Research Integration
+
+- Purpose:
+  - preserve the fork-specific native `grok` research tool and related config
+    surface
+  - keep Grok-backed built-in agent roles and docs coherent when upstream
+    tooling changes
+- Owner files:
+  - `codex-rs/core/src/tools/handlers/mod.rs`
+  - `codex-rs/core/src/tools/spec.rs`
+  - `docs/config.md`
+- Required behavior:
+  - native `grok` remains registered as a tool
+  - Grok-focused built-in roles can rely on config-driven routing defaults
+  - docs describe the `[grok]` config surface
+- Verification:
+  - inspect tool spec for `grok`
+  - inspect effective config or schema for `[grok]`
+  - targeted smoke of Grok tool registration and config loading
+
+### 5. Distribution And Local Install
 
 - Purpose:
   - allow `godex` to coexist with official `codex`
@@ -78,7 +98,7 @@ default during conflict resolution.
   - `bash scripts/install/install-godex-from-source.sh --dry-run`
   - `bash scripts/godex-maintain.sh release-preflight`
 
-### 5. Maintenance Tooling
+### 6. Maintenance Tooling
 
 - Purpose:
   - make upstream sync and fork checks repeatable from this repo

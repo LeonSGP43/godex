@@ -36,7 +36,11 @@ impl UpdateAction {
             ),
             UpdateAction::BrewUpgrade => (
                 "brew",
-                &["upgrade", "--cask", codex_core::branding::APP_BREW_PACKAGE_NAME],
+                &[
+                    "upgrade",
+                    "--cask",
+                    codex_core::branding::APP_BREW_PACKAGE_NAME,
+                ],
             ),
             UpdateAction::SourceRepoSync => (
                 codex_core::branding::APP_EXECUTABLE_NAME,

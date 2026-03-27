@@ -477,6 +477,9 @@ mod tests {
             parse_github_repo("ssh://git@github.com/LeonSGP43/godex.git"),
             Some("LeonSGP43/godex".to_string())
         );
-        assert_eq!(parse_github_repo("https://gitlab.com/LeonSGP43/godex"), None);
+        assert_eq!(
+            parse_github_repo("https://gitlab.com/LeonSGP43/godex"),
+            None
+        );
     }
 }
