@@ -175,6 +175,8 @@ def main() -> int:
         f"in {workflow_repo}..."
     )
 
+    allow_missing_targets = workflow_repo != "openai/codex"
+
     with _gha_group(
         f"Download native artifacts from {workflow_repo} workflow {workflow_id}"
     ):
@@ -185,6 +187,7 @@ def main() -> int:
                 artifacts_dir,
                 vendor_dir,
                 [BINARY_COMPONENTS[name] for name in components if name in BINARY_COMPONENTS],
+                allow_missing_targets=allow_missing_targets,
             )
 
     if "rg" in components:
@@ -312,6 +315,8 @@ def install_binary_components(
     artifacts_dir: Path,
     vendor_dir: Path,
     selected_components: Sequence[BinaryComponent],
+    *,
+    allow_missing_targets: bool = False,
 ) -> None:
     if not selected_components:
         return
@@ -336,7 +341,14 @@ def install_binary_components(
                 for target in component_targets
             }
             for future in as_completed(futures):
-                installed_path = future.result()
+                target = futures[future]
+                try:
+                    installed_path = future.result()
+                except FileNotFoundError as exc:
+                    if allow_missing_targets:
+                        print(f"  skipped {target}: {exc}")
+                        continue
+                    raise
                 print(f"  installed {installed_path}")
 
 

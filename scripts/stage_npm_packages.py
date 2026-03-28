@@ -153,6 +153,7 @@ def main() -> int:
 
     vendor_temp_root: Path | None = None
     vendor_src: Path | None = None
+    available_vendor_targets: set[str] = set()
     resolved_head_sha: str | None = None
 
     final_messages = []
@@ -165,11 +166,24 @@ def main() -> int:
             vendor_temp_root = Path(tempfile.mkdtemp(prefix="npm-native-", dir=runner_temp))
             install_native_components(workflow_url, native_components, vendor_temp_root)
             vendor_src = vendor_temp_root / "vendor"
+            if vendor_src.exists():
+                available_vendor_targets = {
+                    entry.name for entry in vendor_src.iterdir() if entry.is_dir()
+                }
 
         if resolved_head_sha:
             print(f"should `git checkout {resolved_head_sha}`")
 
         for package in packages:
+            if package in CODEX_PLATFORM_PACKAGES and available_vendor_targets:
+                target_triple = CODEX_PLATFORM_PACKAGES[package]["target_triple"]
+                if target_triple not in available_vendor_targets:
+                    print(
+                        f"Skipping {package}: missing native target "
+                        f"{target_triple} in staged vendor."
+                    )
+                    continue
+
             staging_dir = Path(tempfile.mkdtemp(prefix=f"npm-stage-{package}-", dir=runner_temp))
             pack_output = output_dir / tarball_name_for_package(package, args.release_version)
 

@@ -613,10 +613,12 @@ jobs:
             "godex-npm-${version}.tgz"
             "godex-npm-linux-*-${version}.tgz"
             "godex-npm-darwin-*-${version}.tgz"
-            "godex-npm-win32-*-${version}.tgz"
             "codex-responses-api-proxy-npm-${version}.tgz"
             "codex-sdk-npm-${version}.tgz"
           )
+          if [[ "${GITHUB_REPOSITORY}" == "openai/codex" ]]; then
+            patterns+=("godex-npm-win32-*-${version}.tgz")
+          fi
           for pattern in "${patterns[@]}"; do
             gh release download "$tag" \
               --repo "${GITHUB_REPOSITORY}" \
