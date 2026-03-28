@@ -28,6 +28,7 @@ PACKAGE_NATIVE_COMPONENTS = getattr(_BUILD_MODULE, "PACKAGE_NATIVE_COMPONENTS", 
 PACKAGE_EXPANSIONS = getattr(_BUILD_MODULE, "PACKAGE_EXPANSIONS", {})
 CODEX_PLATFORM_PACKAGES = getattr(_BUILD_MODULE, "CODEX_PLATFORM_PACKAGES", {})
 CODEX_NPM_BASENAME = getattr(_BUILD_MODULE, "CODEX_NPM_BASENAME", "codex")
+COMPONENT_DEST_DIR = getattr(_BUILD_MODULE, "COMPONENT_DEST_DIR", {})
 
 
 def parse_args() -> argparse.Namespace:
@@ -140,6 +141,25 @@ def tarball_name_for_package(package: str, version: str) -> str:
     return f"{package}-npm-{version}.tgz"
 
 
+def missing_component_dirs_for_target(
+    package: str,
+    target_triple: str,
+    vendor_src: Path,
+) -> list[str]:
+    target_root = vendor_src / target_triple
+    if not target_root.is_dir():
+        return PACKAGE_NATIVE_COMPONENTS.get(package, [])
+
+    missing_components: list[str] = []
+    for component in PACKAGE_NATIVE_COMPONENTS.get(package, []):
+        component_dir = COMPONENT_DEST_DIR.get(component)
+        if component_dir is None:
+            continue
+        if not (target_root / component_dir).exists():
+            missing_components.append(component)
+    return missing_components
+
+
 def main() -> int:
     args = parse_args()
 
@@ -183,6 +203,17 @@ def main() -> int:
                         f"{target_triple} in staged vendor."
                     )
                     continue
+                if vendor_src is not None:
+                    missing_components = missing_component_dirs_for_target(
+                        package, target_triple, vendor_src
+                    )
+                    if missing_components:
+                        missing_str = ", ".join(sorted(set(missing_components)))
+                        print(
+                            f"Skipping {package}: missing native components "
+                            f"{missing_str} for target {target_triple}."
+                        )
+                        continue
 
             staging_dir = Path(tempfile.mkdtemp(prefix=f"npm-stage-{package}-", dir=runner_temp))
             pack_output = output_dir / tarball_name_for_package(package, args.release_version)
