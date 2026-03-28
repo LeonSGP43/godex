@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-03-28
+
+### Changed
+
+- What changed: merged the validated `rust-v0.117.0` upstream sync into `main`, including the upstream crate splitouts, plugin and app-server updates, tooling changes, and the fork-side conflict resolutions needed to keep `godex` coherent on top of that release.
+- Why: `godex` needs to stay close to official Codex releases while preserving the fork's versioning, config namespace behavior, update governance, and Grok integration.
+- Impact: `main` now follows the official `rust-v0.117.0` release line, keeps `godex 0.2.7` as the fork release identity, and remains compatible with both default Codex-style config paths and explicit `godex -g` isolation.
+- Verification: `cargo test -p codex-cli sync_upstream_subcommand_parses`, `cargo test -p codex-cli godex_home_flag_parses`, `cargo test -p codex-cli reject_remote_mode_for_non_interactive_subcommands`, `bash scripts/godex-maintain.sh check`, `bash scripts/godex-maintain.sh sync --dry-run`, `bash scripts/godex-maintain.sh release-preflight`, and `codex-rs/target/debug/godex --version`.
+- Files: `VERSION`, `codex-rs/Cargo.toml`, `CHANGELOG.md`
+
 ## [0.2.6] - 2026-03-26
 
 ### Fixed
