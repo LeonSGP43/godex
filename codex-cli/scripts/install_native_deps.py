@@ -169,13 +169,18 @@ def main() -> int:
     if not workflow_url:
         workflow_url = DEFAULT_WORKFLOW_URL
 
-    workflow_id = workflow_url.rstrip("/").split("/")[-1]
-    print(f"Downloading native artifacts from workflow {workflow_id}...")
+    workflow_repo, workflow_id = _resolve_workflow_ref(workflow_url)
+    print(
+        f"Downloading native artifacts from workflow {workflow_id} "
+        f"in {workflow_repo}..."
+    )
 
-    with _gha_group(f"Download native artifacts from workflow {workflow_id}"):
+    with _gha_group(
+        f"Download native artifacts from {workflow_repo} workflow {workflow_id}"
+    ):
         with tempfile.TemporaryDirectory(prefix="codex-native-artifacts-") as artifacts_dir_str:
             artifacts_dir = Path(artifacts_dir_str)
-            _download_artifacts(workflow_id, artifacts_dir)
+            _download_artifacts(workflow_repo, workflow_id, artifacts_dir)
             install_binary_components(
                 artifacts_dir,
                 vendor_dir,
@@ -259,7 +264,37 @@ def fetch_rg(
     return [results[target] for target in targets]
 
 
-def _download_artifacts(workflow_id: str, dest_dir: Path) -> None:
+def _resolve_workflow_ref(workflow_url: str) -> tuple[str, str]:
+    """
+    Resolve `owner/repo` and run id from a GitHub Actions workflow URL.
+
+    Supported URL forms:
+    - https://github.com/<owner>/<repo>/actions/runs/<run_id>
+    - https://api.github.com/repos/<owner>/<repo>/actions/runs/<run_id>
+    """
+
+    default_repo = os.environ.get("GITHUB_REPOSITORY", "openai/codex")
+    workflow_id = workflow_url.rstrip("/").split("/")[-1]
+    parsed = urlparse(workflow_url)
+    path_parts = [part for part in parsed.path.split("/") if part]
+
+    if len(path_parts) >= 5 and path_parts[2] == "actions" and path_parts[3] == "runs":
+        repo = f"{path_parts[0]}/{path_parts[1]}"
+        return repo, path_parts[4]
+
+    if (
+        len(path_parts) >= 6
+        and path_parts[0] == "repos"
+        and path_parts[3] == "actions"
+        and path_parts[4] == "runs"
+    ):
+        repo = f"{path_parts[1]}/{path_parts[2]}"
+        return repo, path_parts[5]
+
+    return default_repo, workflow_id
+
+
+def _download_artifacts(workflow_repo: str, workflow_id: str, dest_dir: Path) -> None:
     cmd = [
         "gh",
         "run",
@@ -267,7 +302,7 @@ def _download_artifacts(workflow_id: str, dest_dir: Path) -> None:
         "--dir",
         str(dest_dir),
         "--repo",
-        "openai/codex",
+        workflow_repo,
         workflow_id,
     ]
     subprocess.check_call(cmd)
