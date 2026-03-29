@@ -173,6 +173,7 @@ def main() -> int:
 
     vendor_temp_root: Path | None = None
     vendor_src: Path | None = None
+    filtered_vendor_roots: list[Path] = []
     available_vendor_targets: set[str] = set()
     resolved_head_sha: str | None = None
 
@@ -195,6 +196,8 @@ def main() -> int:
             print(f"should `git checkout {resolved_head_sha}`")
 
         for package in packages:
+            package_vendor_src = vendor_src
+
             if package in CODEX_PLATFORM_PACKAGES and available_vendor_targets:
                 target_triple = CODEX_PLATFORM_PACKAGES[package]["target_triple"]
                 if target_triple not in available_vendor_targets:
@@ -214,6 +217,42 @@ def main() -> int:
                             f"{missing_str} for target {target_triple}."
                         )
                         continue
+            elif vendor_src is not None and PACKAGE_NATIVE_COMPONENTS.get(package):
+                compatible_targets: list[str] = []
+                for entry in sorted(vendor_src.iterdir(), key=lambda path: path.name):
+                    if not entry.is_dir():
+                        continue
+                    missing_components = missing_component_dirs_for_target(
+                        package, entry.name, vendor_src
+                    )
+                    if missing_components:
+                        continue
+                    compatible_targets.append(entry.name)
+
+                if not compatible_targets:
+                    print(
+                        f"Skipping {package}: no vendor targets include all required "
+                        "native components."
+                    )
+                    continue
+
+                filtered_root = Path(
+                    tempfile.mkdtemp(prefix=f"npm-vendor-{package}-", dir=runner_temp)
+                )
+                filtered_vendor_src = filtered_root / "vendor"
+                filtered_vendor_src.mkdir(parents=True, exist_ok=True)
+                for target in compatible_targets:
+                    os.symlink(
+                        vendor_src / target,
+                        filtered_vendor_src / target,
+                        target_is_directory=True,
+                    )
+                filtered_vendor_roots.append(filtered_root)
+                package_vendor_src = filtered_vendor_src
+                print(
+                    f"Filtering vendor targets for {package}: "
+                    + ", ".join(compatible_targets)
+                )
 
             staging_dir = Path(tempfile.mkdtemp(prefix=f"npm-stage-{package}-", dir=runner_temp))
             pack_output = output_dir / tarball_name_for_package(package, args.release_version)
@@ -230,8 +269,8 @@ def main() -> int:
                 str(pack_output),
             ]
 
-            if vendor_src is not None:
-                cmd.extend(["--vendor-src", str(vendor_src)])
+            if package_vendor_src is not None:
+                cmd.extend(["--vendor-src", str(package_vendor_src)])
 
             try:
                 run_command(cmd)
@@ -241,6 +280,9 @@ def main() -> int:
 
             final_messages.append(f"Staged {package} at {pack_output}")
     finally:
+        for filtered_root in filtered_vendor_roots:
+            if not args.keep_staging_dirs:
+                shutil.rmtree(filtered_root, ignore_errors=True)
         if vendor_temp_root is not None and not args.keep_staging_dirs:
             shutil.rmtree(vendor_temp_root, ignore_errors=True)
 
