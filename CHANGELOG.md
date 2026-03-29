@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-03-29
+
+### Fixed
+
+- What changed: hardened the fork release pipeline by switching zsh macOS builds to standard runners, resolving native artifact downloads from the actual workflow repository, skipping unavailable fork Windows npm artifacts, filtering staged npm targets by required native components, and adding fork npm publish token fallback.
+- Why: `0.2.7` publishing repeatedly failed due upstream-only release assumptions, missing fork Windows artifacts, and npm auth path mismatches.
+- Impact: tagged fork releases can now complete GitHub release packaging and npm publishing for `@leonsgp43/godex` without depending on upstream-only release infrastructure.
+- Verification: GitHub Actions run `23702070015` completed with `release=success` and `publish-npm=success`; `npm view @leonsgp43/godex version` returns `0.2.7`.
+- Files: `.github/workflows/rust-release-zsh.yml`, `.github/workflows/rust-release.yml`, `codex-cli/scripts/install_native_deps.py`, `scripts/stage_npm_packages.py`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`.
+
 ## [0.2.7] - 2026-03-28
 
 ### Changed
