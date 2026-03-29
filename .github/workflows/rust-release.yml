@@ -613,10 +613,10 @@ jobs:
             "godex-npm-${version}.tgz"
             "godex-npm-linux-*-${version}.tgz"
             "godex-npm-darwin-*-${version}.tgz"
-            "codex-responses-api-proxy-npm-${version}.tgz"
-            "codex-sdk-npm-${version}.tgz"
           )
           if [[ "${GITHUB_REPOSITORY}" == "openai/codex" ]]; then
+            patterns+=("codex-responses-api-proxy-npm-${version}.tgz")
+            patterns+=("codex-sdk-npm-${version}.tgz")
             patterns+=("godex-npm-win32-*-${version}.tgz")
           fi
           for pattern in "${patterns[@]}"; do
@@ -631,11 +631,16 @@ jobs:
         env:
           VERSION: ${{ needs.release.outputs.version }}
           NPM_TAG: ${{ needs.release.outputs.npm_tag }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           prefix=""
           if [[ -n "${NPM_TAG}" ]]; then
             prefix="${NPM_TAG}-"
+          fi
+
+          if [[ "${GITHUB_REPOSITORY}" != "openai/codex" && -n "${NPM_TOKEN:-}" ]]; then
+            export NODE_AUTH_TOKEN="${NPM_TOKEN}"
           fi
 
           shopt -s nullglob
