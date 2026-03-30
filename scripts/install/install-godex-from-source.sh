@@ -14,7 +14,9 @@ TEMP_FILES=()
 
 cleanup() {
   local path
-  for path in "${TEMP_FILES[@]}"; do
+  # Bash 3 + `set -u` treats empty arrays as unbound in "${arr[@]}".
+  # Use the default expansion to keep cleanup no-op when TEMP_FILES is empty.
+  for path in "${TEMP_FILES[@]:-}"; do
     if [[ -n "$path" && -e "$path" ]]; then
       rm -f "$path"
     fi
