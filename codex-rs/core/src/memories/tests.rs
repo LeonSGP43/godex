@@ -7,6 +7,8 @@ use crate::memories::memory_qmd_file;
 use crate::memories::memory_root;
 use crate::memories::raw_memories_file;
 use crate::memories::rollout_summaries_dir;
+use crate::memories::semantic_index::SemanticRecallOptions;
+use crate::memories::semantic_index::semantic_recall;
 use crate::memories::vector_index_file;
 use chrono::TimeZone;
 use chrono::Utc;
@@ -22,6 +24,66 @@ fn memory_root_uses_shared_global_path() {
     let dir = tempdir().expect("tempdir");
     let codex_home = dir.path().join("codex");
     assert_eq!(memory_root(&codex_home), codex_home.join("memories"));
+}
+
+#[tokio::test]
+async fn semantic_recall_hybrid_matches_bm25_without_vector_signal() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().join("memory");
+    ensure_layout(&root).await.expect("ensure layout");
+
+    let vector_index = serde_json::json!({
+        "version": 2,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "dimension": 256,
+        "metric": "cosine",
+        "engine": "qmd-hybrid-lite",
+        "retrieval_pipeline": "bm25+vector+rrf+rerank",
+        "embedding_backend": "local-hash-256",
+        "bm25": {
+            "k1": 1.2,
+            "b": 0.75,
+            "avg_doc_len": 12.0,
+            "idf": {"memory": 1.9}
+        },
+        "entries": [
+            {
+                "thread_id": "0194f5a6-89ab-7cde-8123-456789abcdef",
+                "source_updated_at": "2026-01-01T00:00:00Z",
+                "rollout_summary_file": "rollout_summaries/2026-01-01T00-00-00-abcd-test.md",
+                "cwd": "/tmp/workspace",
+                "git_branch": "feat/memory",
+                "keywords": ["memory", "pipeline"],
+                "summary_preview": "memory pipeline summary",
+                "top_terms": [{"term": "memory", "count": 4}],
+                "doc_len": 14,
+                "embedding": vec![0.0_f32; 256]
+            }
+        ]
+    });
+    tokio::fs::write(
+        vector_index_file(&root),
+        serde_json::to_string_pretty(&vector_index).expect("serialize vector index fixture"),
+    )
+    .await
+    .expect("write vector index fixture");
+
+    let matches = semantic_recall(
+        &root,
+        "memory regression in phase2",
+        SemanticRecallOptions {
+            limit: 3,
+            hybrid_enabled: true,
+            query_expansion_enabled: false,
+            rerank_limit: 10,
+        },
+    )
+    .await
+    .expect("semantic recall");
+
+    assert_eq!(matches.len(), 1);
+    assert!(matches[0].signals.contains(&"bm25".to_string()));
+    assert!(!matches[0].signals.contains(&"vector".to_string()));
 }
 
 #[test]
@@ -205,6 +267,8 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
         .await
         .expect("read memory_index.qmd");
     assert!(memory_qmd.contains("# Memory Index"));
+    assert!(memory_qmd.contains("engine: qmd-hybrid-lite"));
+    assert!(memory_qmd.contains("retrieval_pipeline: bm25+vector+rrf+rerank"));
     assert!(memory_qmd.contains(&format!("- thread_id: {keep_id}")));
     assert!(memory_qmd.contains(&format!(
         "- rollout_summary_file: rollout_summaries/{canonical_rollout_summary_file}"
@@ -215,11 +279,25 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
         .expect("read vector_index.json");
     let vector_index_json: Value =
         serde_json::from_str(&vector_index).expect("parse vector_index.json");
-    assert_eq!(vector_index_json.get("version"), Some(&Value::from(1)));
+    assert_eq!(vector_index_json.get("version"), Some(&Value::from(2)));
     assert_eq!(
         vector_index_json.get("metric"),
         Some(&Value::from("cosine"))
     );
+    assert_eq!(
+        vector_index_json.get("engine"),
+        Some(&Value::from("qmd-hybrid-lite"))
+    );
+    assert_eq!(
+        vector_index_json.get("retrieval_pipeline"),
+        Some(&Value::from("bm25+vector+rrf+rerank"))
+    );
+    let bm25 = vector_index_json
+        .get("bm25")
+        .and_then(Value::as_object)
+        .expect("bm25 object");
+    assert!(bm25.get("avg_doc_len").is_some());
+    assert!(bm25.get("idf").is_some());
     let entries = vector_index_json
         .get("entries")
         .and_then(Value::as_array)
@@ -238,6 +316,12 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
         .and_then(Value::as_array)
         .expect("embedding array");
     assert_eq!(embedding.len(), 256);
+    let top_terms = entry
+        .get("top_terms")
+        .and_then(Value::as_array)
+        .expect("top_terms array");
+    assert!(!top_terms.is_empty());
+    assert!(entry.get("doc_len").and_then(Value::as_u64).unwrap_or(0) > 0);
 
     let raw_memories = tokio::fs::read_to_string(raw_memories_file(&root))
         .await

@@ -84,7 +84,7 @@ What it does:
   - `raw_memories.md` (merged raw memories, latest first)
   - `rollout_summaries/` (one summary file per retained rollout)
   - `memory_index.qmd` (quick index with keywords and summary previews)
-  - `vector_index.json` (local embedding-lite semantic index for fallback ranking)
+  - `vector_index.json` (QMD-hybrid-lite metadata with local embedding vectors + BM25 stats for hybrid recall)
 - prunes stale rollout summaries that are no longer retained
 - if there are no inputs, marks the job successful and exits
 

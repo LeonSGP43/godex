@@ -2,6 +2,7 @@ use crate::config::types::MemoriesConfig;
 use crate::memories::memory_root;
 use crate::memories::phase_one;
 use crate::memories::semantic_index::SemanticRecallMatch;
+use crate::memories::semantic_index::SemanticRecallOptions;
 use crate::memories::semantic_index::semantic_recall;
 use crate::memories::storage::rollout_summary_file_stem_from_parts;
 use codex_protocol::openai_models::ModelInfo;
@@ -196,7 +197,12 @@ pub(crate) async fn build_memory_tool_developer_instructions(
         && let Ok(matches) = semantic_recall(
             &base_path,
             &normalized_query,
-            memories.semantic_recall_limit,
+            SemanticRecallOptions {
+                limit: memories.semantic_recall_limit,
+                hybrid_enabled: memories.qmd_hybrid_enabled,
+                query_expansion_enabled: memories.qmd_query_expansion_enabled,
+                rerank_limit: memories.qmd_rerank_limit,
+            },
         )
         .await
         && !matches.is_empty()
@@ -244,15 +250,21 @@ fn append_semantic_recall_hints(
         } else {
             item.keywords.join(", ")
         };
+        let signals = if item.signals.is_empty() {
+            "vector".to_string()
+        } else {
+            item.signals.join("+")
+        };
         let summary_preview = if item.summary_preview.trim().is_empty() {
             "(empty summary)".to_string()
         } else {
             item.summary_preview.replace('\n', " ")
         };
         buffer.push_str(&format!(
-            "- [{}] score={:.3}, thread_id={}, file={}, keywords={}\n",
+            "- [{}] score={:.3}, signals={}, thread_id={}, file={}, keywords={}\n",
             idx + 1,
             item.score,
+            signals,
             item.thread_id,
             item.rollout_summary_file,
             keywords

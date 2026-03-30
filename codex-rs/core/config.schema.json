@@ -923,6 +923,20 @@
           "description": "When `true`, web searches and MCP tool calls mark the thread `memory_mode` as `\"polluted\"`.",
           "type": "boolean"
         },
+        "qmd_hybrid_enabled": {
+          "description": "Enable OpenClaw-style hybrid ranking (BM25 + vector + RRF + rerank) for memory recall.",
+          "type": "boolean"
+        },
+        "qmd_query_expansion_enabled": {
+          "description": "Enable lightweight query expansion for hybrid QMD recall.",
+          "type": "boolean"
+        },
+        "qmd_rerank_limit": {
+          "description": "Maximum number of candidates to rerank in the hybrid QMD recall pass.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "semantic_index_enabled": {
           "description": "When `false`, skip generating and consuming semantic memory helper indexes (`memory_index.qmd` and `vector_index.json`).",
           "type": "boolean"

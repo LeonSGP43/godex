@@ -150,6 +150,7 @@ async fn build_memory_tool_developer_instructions_appends_semantic_recall_hints(
     assert!(instructions.contains("## Semantic Recall Hints"));
     assert!(instructions.contains("memory migration failure in stage2"));
     assert!(instructions.contains("rollout_summaries/2026-01-01T00-00-00-abcd-test.md"));
+    assert!(instructions.contains("signals="));
 }
 
 #[tokio::test]

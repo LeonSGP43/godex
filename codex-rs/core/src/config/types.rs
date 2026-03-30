@@ -31,6 +31,7 @@ pub const DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS: i64 = 6;
 pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION: usize = 256;
 pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
 pub const DEFAULT_MEMORIES_SEMANTIC_RECALL_LIMIT: usize = 5;
+pub const DEFAULT_MEMORIES_QMD_RERANK_LIMIT: usize = 30;
 pub const DEFAULT_GROK_BASE_ORIGIN: &str = "https://apileon.leonai.top";
 pub const DEFAULT_GROK_API_KEY_ENV: &str = "GROK_API_KEY";
 pub const DEFAULT_GROK_DYNAMIC_MODEL: &str = "grok-4.20-beta";
@@ -602,6 +603,12 @@ pub struct MemoriesToml {
     pub semantic_index_enabled: Option<bool>,
     /// Maximum number of semantic recall hints injected into memory developer instructions.
     pub semantic_recall_limit: Option<usize>,
+    /// Enable OpenClaw-style hybrid ranking (BM25 + vector + RRF + rerank) for memory recall.
+    pub qmd_hybrid_enabled: Option<bool>,
+    /// Enable lightweight query expansion for hybrid QMD recall.
+    pub qmd_query_expansion_enabled: Option<bool>,
+    /// Maximum number of candidates to rerank in the hybrid QMD recall pass.
+    pub qmd_rerank_limit: Option<usize>,
     /// Model used for thread summarisation.
     pub extract_model: Option<String>,
     /// Model used for memory consolidation.
@@ -621,6 +628,9 @@ pub struct MemoriesConfig {
     pub min_rollout_idle_hours: i64,
     pub semantic_index_enabled: bool,
     pub semantic_recall_limit: usize,
+    pub qmd_hybrid_enabled: bool,
+    pub qmd_query_expansion_enabled: bool,
+    pub qmd_rerank_limit: usize,
     pub extract_model: Option<String>,
     pub consolidation_model: Option<String>,
 }
@@ -638,6 +648,9 @@ impl Default for MemoriesConfig {
             min_rollout_idle_hours: DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS,
             semantic_index_enabled: true,
             semantic_recall_limit: DEFAULT_MEMORIES_SEMANTIC_RECALL_LIMIT,
+            qmd_hybrid_enabled: true,
+            qmd_query_expansion_enabled: true,
+            qmd_rerank_limit: DEFAULT_MEMORIES_QMD_RERANK_LIMIT,
             extract_model: None,
             consolidation_model: None,
         }
@@ -680,6 +693,16 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .semantic_recall_limit
                 .unwrap_or(defaults.semantic_recall_limit)
                 .clamp(1, 20),
+            qmd_hybrid_enabled: toml
+                .qmd_hybrid_enabled
+                .unwrap_or(defaults.qmd_hybrid_enabled),
+            qmd_query_expansion_enabled: toml
+                .qmd_query_expansion_enabled
+                .unwrap_or(defaults.qmd_query_expansion_enabled),
+            qmd_rerank_limit: toml
+                .qmd_rerank_limit
+                .unwrap_or(defaults.qmd_rerank_limit)
+                .clamp(1, 100),
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
         }

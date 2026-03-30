@@ -145,6 +145,9 @@ max_rollouts_per_startup = 9
 min_rollout_idle_hours = 24
 semantic_index_enabled = false
 semantic_recall_limit = 7
+qmd_hybrid_enabled = true
+qmd_query_expansion_enabled = false
+qmd_rerank_limit = 16
 extract_model = "gpt-5-mini"
 consolidation_model = "gpt-5"
 "#;
@@ -162,6 +165,9 @@ consolidation_model = "gpt-5"
             min_rollout_idle_hours: Some(24),
             semantic_index_enabled: Some(false),
             semantic_recall_limit: Some(7),
+            qmd_hybrid_enabled: Some(true),
+            qmd_query_expansion_enabled: Some(false),
+            qmd_rerank_limit: Some(16),
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5".to_string()),
         }),
@@ -187,6 +193,9 @@ consolidation_model = "gpt-5"
             min_rollout_idle_hours: 24,
             semantic_index_enabled: false,
             semantic_recall_limit: 7,
+            qmd_hybrid_enabled: true,
+            qmd_query_expansion_enabled: false,
+            qmd_rerank_limit: 16,
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5".to_string()),
         }

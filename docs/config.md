@@ -85,12 +85,18 @@ fixed_model = "grok-4.1-thinking"
 ## Memories semantic helpers
 
 The `[memories]` section supports semantic helper controls for the generated
-memory indexes:
+memory indexes and hybrid QMD recall:
 
 - `semantic_index_enabled`: enable or disable generation/usage of
   `memory_index.qmd` and `vector_index.json` (default `true`)
 - `semantic_recall_limit`: max number of semantic recall hints injected into
   memory developer instructions per turn (default `5`, clamped to `1..20`)
+- `qmd_hybrid_enabled`: enable BM25 + vector + RRF + rerank fusion in semantic
+  recall (default `true`)
+- `qmd_query_expansion_enabled`: enable lightweight query expansion for hybrid
+  recall (default `true`)
+- `qmd_rerank_limit`: max candidates reranked in hybrid recall (default `30`,
+  clamped to `1..100`)
 
 Example:
 
@@ -98,6 +104,9 @@ Example:
 [memories]
 semantic_index_enabled = true
 semantic_recall_limit = 8
+qmd_hybrid_enabled = true
+qmd_query_expansion_enabled = true
+qmd_rerank_limit = 24
 ```
 
 ## MCP tool approvals
