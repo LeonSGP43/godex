@@ -3454,6 +3454,15 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) -> Vec<ResponseItem> {
+        self.build_initial_context_with_memory_query(turn_context, None)
+            .await
+    }
+
+    async fn build_initial_context_with_memory_query(
+        &self,
+        turn_context: &TurnContext,
+        memory_query: Option<&str>,
+    ) -> Vec<ResponseItem> {
         let mut developer_sections = Vec::<String>::with_capacity(8);
         let mut contextual_user_sections = Vec::<String>::with_capacity(2);
         let shell = self.user_shell();
@@ -3509,8 +3518,12 @@ impl Session {
         // Add developer instructions for memories.
         if turn_context.features.enabled(Feature::MemoryTool)
             && turn_context.config.memories.use_memories
-            && let Some(memory_prompt) =
-                build_memory_tool_developer_instructions(&turn_context.config.codex_home).await
+            && let Some(memory_prompt) = build_memory_tool_developer_instructions(
+                &turn_context.config.codex_home,
+                &turn_context.config.memories,
+                memory_query,
+            )
+            .await
         {
             developer_sections.push(memory_prompt);
         }
@@ -3663,14 +3676,17 @@ impl Session {
     pub(crate) async fn record_context_updates_and_set_reference_context_item(
         &self,
         turn_context: &TurnContext,
+        input: &[UserInput],
     ) {
         let reference_context_item = {
             let state = self.state.lock().await;
             state.reference_context_item()
         };
         let should_inject_full_context = reference_context_item.is_none();
+        let memory_query = extract_memory_query_from_user_input(input);
         let context_items = if should_inject_full_context {
-            self.build_initial_context(turn_context).await
+            self.build_initial_context_with_memory_query(turn_context, memory_query.as_deref())
+                .await
         } else {
             // Steady-state path: append only context diffs to minimize token overhead.
             self.build_settings_update_items(reference_context_item.as_ref(), turn_context)
@@ -5568,6 +5584,35 @@ fn errors_to_info(errors: &[SkillError]) -> Vec<SkillErrorInfo> {
         .collect()
 }
 
+fn extract_memory_query_from_user_input(input: &[UserInput]) -> Option<String> {
+    const MEMORY_QUERY_MAX_CHARS: usize = 1_200;
+    let mut collected = String::new();
+    for item in input {
+        let UserInput::Text { text, .. } = item else {
+            continue;
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if !collected.is_empty() {
+            collected.push('\n');
+        }
+        collected.push_str(text);
+        if collected.chars().count() >= MEMORY_QUERY_MAX_CHARS {
+            break;
+        }
+    }
+    let compact = collected.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    if compact.chars().count() <= MEMORY_QUERY_MAX_CHARS {
+        return Some(compact);
+    }
+    Some(compact.chars().take(MEMORY_QUERY_MAX_CHARS).collect())
+}
+
 /// Takes a user message as input and runs a loop where, at each sampling request, the model
 /// replies with either:
 ///
@@ -5609,7 +5654,7 @@ pub(crate) async fn run_turn(
 
     let skills_outcome = Some(turn_context.turn_skills.outcome.as_ref());
 
-    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
+    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref(), &input)
         .await;
 
     let loaded_plugins = sess

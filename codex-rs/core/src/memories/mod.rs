@@ -9,6 +9,7 @@ mod control;
 mod phase1;
 mod phase2;
 pub(crate) mod prompts;
+mod semantic_index;
 mod start;
 mod storage;
 #[cfg(test)]
@@ -27,6 +28,8 @@ pub(crate) use start::start_memories_startup_task;
 mod artifacts {
     pub(super) const ROLLOUT_SUMMARIES_SUBDIR: &str = "rollout_summaries";
     pub(super) const RAW_MEMORIES_FILENAME: &str = "raw_memories.md";
+    pub(super) const MEMORY_QMD_FILENAME: &str = "memory_index.qmd";
+    pub(super) const VECTOR_INDEX_FILENAME: &str = "vector_index.json";
 }
 
 /// Phase 1 (startup extraction).
@@ -108,6 +111,14 @@ fn rollout_summaries_dir(root: &Path) -> PathBuf {
 
 fn raw_memories_file(root: &Path) -> PathBuf {
     root.join(artifacts::RAW_MEMORIES_FILENAME)
+}
+
+pub(super) fn memory_qmd_file(root: &Path) -> PathBuf {
+    root.join(artifacts::MEMORY_QMD_FILENAME)
+}
+
+pub(super) fn vector_index_file(root: &Path) -> PathBuf {
+    root.join(artifacts::VECTOR_INDEX_FILENAME)
 }
 
 async fn ensure_layout(root: &Path) -> std::io::Result<()> {

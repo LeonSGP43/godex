@@ -143,6 +143,8 @@ max_unused_days = 21
 max_rollout_age_days = 42
 max_rollouts_per_startup = 9
 min_rollout_idle_hours = 24
+semantic_index_enabled = false
+semantic_recall_limit = 7
 extract_model = "gpt-5-mini"
 consolidation_model = "gpt-5"
 "#;
@@ -158,6 +160,8 @@ consolidation_model = "gpt-5"
             max_rollout_age_days: Some(42),
             max_rollouts_per_startup: Some(9),
             min_rollout_idle_hours: Some(24),
+            semantic_index_enabled: Some(false),
+            semantic_recall_limit: Some(7),
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5".to_string()),
         }),
@@ -181,6 +185,8 @@ consolidation_model = "gpt-5"
             max_rollout_age_days: 42,
             max_rollouts_per_startup: 9,
             min_rollout_idle_hours: 24,
+            semantic_index_enabled: false,
+            semantic_recall_limit: 7,
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5".to_string()),
         }

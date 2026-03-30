@@ -36,6 +36,15 @@
         "$ref": "#/definitions/AgentRoleToml"
       },
       "properties": {
+        "claude_code": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ClaudeCodeBackendToml"
+            }
+          ],
+          "default": null,
+          "description": "Runtime command prefix for the external Claude Code backend."
+        },
         "job_max_runtime_seconds": {
           "description": "Default maximum runtime in seconds for agent job workers.",
           "format": "uint64",
@@ -298,6 +307,19 @@
         "enabled": {
           "default": true,
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ClaudeCodeBackendToml": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "Command argv prefix used before required Claude backend args are appended. Example: [\"cps\", \"claude\", \"--dangerously-skip-permissions\"]",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -900,6 +922,16 @@
         "no_memories_if_mcp_or_web_search": {
           "description": "When `true`, web searches and MCP tool calls mark the thread `memory_mode` as `\"polluted\"`.",
           "type": "boolean"
+        },
+        "semantic_index_enabled": {
+          "description": "When `false`, skip generating and consuming semantic memory helper indexes (`memory_index.qmd` and `vector_index.json`).",
+          "type": "boolean"
+        },
+        "semantic_recall_limit": {
+          "description": "Maximum number of semantic recall hints injected into memory developer instructions.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "use_memories": {
           "description": "When `false`, skip injecting memory usage instructions into developer prompts.",

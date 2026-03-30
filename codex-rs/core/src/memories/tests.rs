@@ -3,9 +3,11 @@ use super::storage::sync_rollout_summaries_from_memories;
 use crate::config::types::DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION;
 use crate::memories::clear_memory_root_contents;
 use crate::memories::ensure_layout;
+use crate::memories::memory_qmd_file;
 use crate::memories::memory_root;
 use crate::memories::raw_memories_file;
 use crate::memories::rollout_summaries_dir;
+use crate::memories::vector_index_file;
 use chrono::TimeZone;
 use chrono::Utc;
 use codex_protocol::ThreadId;
@@ -163,6 +165,7 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
+        true,
     )
     .await
     .expect("sync rollout summaries");
@@ -197,6 +200,44 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
     files.sort_unstable();
     assert_eq!(files.len(), 1);
     let canonical_rollout_summary_file = &files[0];
+
+    let memory_qmd = tokio::fs::read_to_string(memory_qmd_file(&root))
+        .await
+        .expect("read memory_index.qmd");
+    assert!(memory_qmd.contains("# Memory Index"));
+    assert!(memory_qmd.contains(&format!("- thread_id: {keep_id}")));
+    assert!(memory_qmd.contains(&format!(
+        "- rollout_summary_file: rollout_summaries/{canonical_rollout_summary_file}"
+    )));
+
+    let vector_index = tokio::fs::read_to_string(vector_index_file(&root))
+        .await
+        .expect("read vector_index.json");
+    let vector_index_json: Value =
+        serde_json::from_str(&vector_index).expect("parse vector_index.json");
+    assert_eq!(vector_index_json.get("version"), Some(&Value::from(1)));
+    assert_eq!(
+        vector_index_json.get("metric"),
+        Some(&Value::from("cosine"))
+    );
+    let entries = vector_index_json
+        .get("entries")
+        .and_then(Value::as_array)
+        .expect("vector entries array");
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry.get("thread_id"), Some(&Value::from(keep_id.clone())));
+    assert_eq!(
+        entry.get("rollout_summary_file"),
+        Some(&Value::from(format!(
+            "rollout_summaries/{canonical_rollout_summary_file}"
+        )))
+    );
+    let embedding = entry
+        .get("embedding")
+        .and_then(Value::as_array)
+        .expect("embedding array");
+    assert_eq!(embedding.len(), 256);
 
     let raw_memories = tokio::fs::read_to_string(raw_memories_file(&root))
         .await
@@ -269,6 +310,7 @@ async fn sync_rollout_summaries_uses_timestamp_hash_and_sanitized_slug_filename(
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
+        true,
     )
     .await
     .expect("sync rollout summaries");
@@ -333,6 +375,63 @@ async fn sync_rollout_summaries_uses_timestamp_hash_and_sanitized_slug_filename(
 }
 
 #[tokio::test]
+async fn sync_rollout_summaries_clears_semantic_indexes_when_semantic_index_disabled() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().join("memory");
+    ensure_layout(&root).await.expect("ensure layout");
+
+    tokio::fs::write(memory_qmd_file(&root), "stale qmd\n")
+        .await
+        .expect("write stale qmd");
+    tokio::fs::write(vector_index_file(&root), "{\"stale\":true}\n")
+        .await
+        .expect("write stale vector index");
+
+    let thread_id = ThreadId::new();
+    let memories = vec![Stage1Output {
+        thread_id,
+        source_updated_at: Utc.timestamp_opt(300, 0).single().expect("timestamp"),
+        raw_memory: "raw memory".to_string(),
+        rollout_summary: "short summary".to_string(),
+        rollout_slug: None,
+        rollout_path: PathBuf::from("/tmp/rollout-300.jsonl"),
+        cwd: PathBuf::from("/tmp/workspace"),
+        git_branch: None,
+        generated_at: Utc.timestamp_opt(301, 0).single().expect("timestamp"),
+    }];
+
+    sync_rollout_summaries_from_memories(
+        &root,
+        &memories,
+        DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
+        false,
+    )
+    .await
+    .expect("sync rollout summaries");
+
+    let mut dir = tokio::fs::read_dir(rollout_summaries_dir(&root))
+        .await
+        .expect("open rollout summaries dir");
+    let mut file_count = 0;
+    while dir.next_entry().await.expect("read dir entry").is_some() {
+        file_count += 1;
+    }
+    assert_eq!(file_count, 1);
+    assert!(
+        !tokio::fs::try_exists(memory_qmd_file(&root))
+            .await
+            .expect("check memory qmd existence"),
+        "semantic index disabled should remove memory_index.qmd"
+    );
+    assert!(
+        !tokio::fs::try_exists(vector_index_file(&root))
+            .await
+            .expect("check vector index existence"),
+        "semantic index disabled should remove vector_index.json"
+    );
+}
+
+#[tokio::test]
 async fn rebuild_raw_memories_file_adds_canonical_rollout_summary_file_header() {
     let dir = tempdir().expect("tempdir");
     let root = dir.path().join("memory");
@@ -372,6 +471,7 @@ task_outcome: success
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
+        true,
     )
     .await
     .expect("sync rollout summaries");
@@ -421,10 +521,12 @@ mod phase2 {
     use crate::codex::make_session_and_context;
     use crate::config::Config;
     use crate::config::test_config;
+    use crate::memories::memory_qmd_file;
     use crate::memories::memory_root;
     use crate::memories::phase2;
     use crate::memories::raw_memories_file;
     use crate::memories::rollout_summaries_dir;
+    use crate::memories::vector_index_file;
     use chrono::Utc;
     use codex_config::Constrained;
     use codex_protocol::ThreadId;
@@ -745,6 +847,14 @@ mod phase2 {
         tokio::fs::write(&memory_summary_path, "stale memory summary\n")
             .await
             .expect("write stale memory summary");
+        let memory_qmd_path = memory_qmd_file(&root);
+        tokio::fs::write(&memory_qmd_path, "stale memory qmd\n")
+            .await
+            .expect("write stale memory qmd");
+        let vector_index_path = vector_index_file(&root);
+        tokio::fs::write(&vector_index_path, "{\"stale\":true}\n")
+            .await
+            .expect("write stale vector index");
         let stale_skill_file = root.join("skills/demo/SKILL.md");
         tokio::fs::create_dir_all(
             stale_skill_file
@@ -786,6 +896,18 @@ mod phase2 {
                 .await
                 .expect("check memory summary existence"),
             "empty consolidation should remove stale memory_summary.md"
+        );
+        assert!(
+            !tokio::fs::try_exists(&memory_qmd_path)
+                .await
+                .expect("check memory qmd existence"),
+            "empty consolidation should remove stale memory_index.qmd"
+        );
+        assert!(
+            !tokio::fs::try_exists(&vector_index_path)
+                .await
+                .expect("check vector index existence"),
+            "empty consolidation should remove stale vector_index.json"
         );
         assert!(
             !tokio::fs::try_exists(&stale_skill_file)

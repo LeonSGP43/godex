@@ -95,9 +95,13 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     // 4. Update the file system by syncing the raw memories with the one extracted from DB at
     //    step 3
     // [`rollout_summaries/`]
-    if let Err(err) =
-        sync_rollout_summaries_from_memories(&root, &artifact_memories, artifact_memories.len())
-            .await
+    if let Err(err) = sync_rollout_summaries_from_memories(
+        &root,
+        &artifact_memories,
+        artifact_memories.len(),
+        config.memories.semantic_index_enabled,
+    )
+    .await
     {
         tracing::error!("failed syncing local memory artifacts for global consolidation: {err}");
         job::failed(session, db, &claim, "failed_sync_artifacts").await;

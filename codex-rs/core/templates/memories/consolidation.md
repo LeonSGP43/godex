@@ -27,6 +27,10 @@ Folder structure (under {{ memory_root }}/):
     pointers to rollout summaries if certain past rollouts are very relevant.
 - raw_memories.md
   - Temporary file: merged raw memories from Phase 1. Input for Phase 2.
+- memory_index.qmd
+  - Generated quick index over retained stage-1 memories, including keywords and summary previews.
+- vector_index.json
+  - Generated local semantic index for lightweight fallback ranking of relevant memory entries.
 - skills/<skill-name>/
   - Reusable procedures. Entrypoint: SKILL.md; may include scripts/, templates/, examples/.
 - rollout_summaries/<rollout_slug>.md
@@ -133,6 +137,10 @@ Under `{{ memory_root }}/`:
 - `rollout_summaries/*.md`
 - `memory_summary.md`
   - read the existing summary so updates stay consistent
+- `memory_index.qmd`
+  - use for quick semantic orientation when MEMORY.md keyword lookup is noisy
+- `vector_index.json`
+  - use as lightweight semantic fallback evidence source before broad scans
 - `skills/*`
   - read existing skills so updates are incremental and non-duplicative
 

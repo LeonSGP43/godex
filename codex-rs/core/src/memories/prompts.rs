@@ -1,5 +1,8 @@
+use crate::config::types::MemoriesConfig;
 use crate::memories::memory_root;
 use crate::memories::phase_one;
+use crate::memories::semantic_index::SemanticRecallMatch;
+use crate::memories::semantic_index::semantic_recall;
 use crate::memories::storage::rollout_summary_file_stem_from_parts;
 use codex_protocol::openai_models::ModelInfo;
 use codex_state::Phase2InputSelection;
@@ -31,6 +34,7 @@ static MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_TEMPLATE: LazyLock<Template> = LazyLoc
         "memories/read_path.md",
     )
 });
+const MEMORY_TOOL_QUERY_PREVIEW_CHAR_LIMIT: usize = 240;
 
 fn parse_embedded_template(source: &'static str, template_name: &str) -> Template {
     match Template::parse(source) {
@@ -160,7 +164,11 @@ pub(super) fn build_stage_one_input_message(
 /// Build prompt used for read path. This prompt must be added to the developer instructions. In
 /// case of large memory files, the `memory_summary.md` is truncated at
 /// [phase_one::MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_SUMMARY_TOKEN_LIMIT].
-pub(crate) async fn build_memory_tool_developer_instructions(codex_home: &Path) -> Option<String> {
+pub(crate) async fn build_memory_tool_developer_instructions(
+    codex_home: &Path,
+    memories: &MemoriesConfig,
+    turn_query: Option<&str>,
+) -> Option<String> {
     let base_path = memory_root(codex_home);
     let memory_summary_path = base_path.join("memory_summary.md");
     let memory_summary = fs::read_to_string(&memory_summary_path)
@@ -175,13 +183,82 @@ pub(crate) async fn build_memory_tool_developer_instructions(codex_home: &Path) 
     if memory_summary.is_empty() {
         return None;
     }
-    let base_path = base_path.display().to_string();
-    MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_TEMPLATE
+    let base_path_display = base_path.display().to_string();
+    let mut rendered = MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_TEMPLATE
         .render([
-            ("base_path", base_path.as_str()),
+            ("base_path", base_path_display.as_str()),
             ("memory_summary", memory_summary.as_str()),
         ])
-        .ok()
+        .ok()?;
+
+    if memories.semantic_index_enabled
+        && let Some(normalized_query) = normalize_turn_query(turn_query)
+        && let Ok(matches) = semantic_recall(
+            &base_path,
+            &normalized_query,
+            memories.semantic_recall_limit,
+        )
+        .await
+        && !matches.is_empty()
+    {
+        append_semantic_recall_hints(&mut rendered, &normalized_query, &matches);
+    }
+
+    Some(rendered)
+}
+
+fn normalize_turn_query(turn_query: Option<&str>) -> Option<String> {
+    let query = turn_query?.trim();
+    if query.is_empty() {
+        return None;
+    }
+    Some(truncate_query_preview(
+        &query.split_whitespace().collect::<Vec<_>>().join(" "),
+    ))
+}
+
+fn truncate_query_preview(query: &str) -> String {
+    if query.chars().count() <= MEMORY_TOOL_QUERY_PREVIEW_CHAR_LIMIT {
+        return query.to_string();
+    }
+    let truncated = query
+        .chars()
+        .take(MEMORY_TOOL_QUERY_PREVIEW_CHAR_LIMIT)
+        .collect::<String>();
+    format!("{truncated}...")
+}
+
+fn append_semantic_recall_hints(
+    buffer: &mut String,
+    normalized_query: &str,
+    matches: &[SemanticRecallMatch],
+) {
+    buffer.push_str("\n\n## Semantic Recall Hints\n");
+    buffer.push_str(
+        "Use this shortlist as a semantic fallback before broad scans when MEMORY.md keyword hits are weak.\n",
+    );
+    buffer.push_str(&format!("- query: {normalized_query}\n"));
+    for (idx, item) in matches.iter().enumerate() {
+        let keywords = if item.keywords.is_empty() {
+            "n/a".to_string()
+        } else {
+            item.keywords.join(", ")
+        };
+        let summary_preview = if item.summary_preview.trim().is_empty() {
+            "(empty summary)".to_string()
+        } else {
+            item.summary_preview.replace('\n', " ")
+        };
+        buffer.push_str(&format!(
+            "- [{}] score={:.3}, thread_id={}, file={}, keywords={}\n",
+            idx + 1,
+            item.score,
+            item.thread_id,
+            item.rollout_summary_file,
+            keywords
+        ));
+        buffer.push_str(&format!("  summary: {summary_preview}\n"));
+    }
 }
 
 #[cfg(test)]

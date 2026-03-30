@@ -30,6 +30,7 @@ pub const DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS: i64 = 30;
 pub const DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS: i64 = 6;
 pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION: usize = 256;
 pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
+pub const DEFAULT_MEMORIES_SEMANTIC_RECALL_LIMIT: usize = 5;
 pub const DEFAULT_GROK_BASE_ORIGIN: &str = "https://apileon.leonai.top";
 pub const DEFAULT_GROK_API_KEY_ENV: &str = "GROK_API_KEY";
 pub const DEFAULT_GROK_DYNAMIC_MODEL: &str = "grok-4.20-beta";
@@ -597,6 +598,10 @@ pub struct MemoriesToml {
     pub max_rollouts_per_startup: Option<usize>,
     /// Minimum idle time between last thread activity and memory creation (hours). > 12h recommended.
     pub min_rollout_idle_hours: Option<i64>,
+    /// When `false`, skip generating and consuming semantic memory helper indexes (`memory_index.qmd` and `vector_index.json`).
+    pub semantic_index_enabled: Option<bool>,
+    /// Maximum number of semantic recall hints injected into memory developer instructions.
+    pub semantic_recall_limit: Option<usize>,
     /// Model used for thread summarisation.
     pub extract_model: Option<String>,
     /// Model used for memory consolidation.
@@ -614,6 +619,8 @@ pub struct MemoriesConfig {
     pub max_rollout_age_days: i64,
     pub max_rollouts_per_startup: usize,
     pub min_rollout_idle_hours: i64,
+    pub semantic_index_enabled: bool,
+    pub semantic_recall_limit: usize,
     pub extract_model: Option<String>,
     pub consolidation_model: Option<String>,
 }
@@ -629,6 +636,8 @@ impl Default for MemoriesConfig {
             max_rollout_age_days: DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS,
             max_rollouts_per_startup: DEFAULT_MEMORIES_MAX_ROLLOUTS_PER_STARTUP,
             min_rollout_idle_hours: DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS,
+            semantic_index_enabled: true,
+            semantic_recall_limit: DEFAULT_MEMORIES_SEMANTIC_RECALL_LIMIT,
             extract_model: None,
             consolidation_model: None,
         }
@@ -664,6 +673,13 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .min_rollout_idle_hours
                 .unwrap_or(defaults.min_rollout_idle_hours)
                 .clamp(1, 48),
+            semantic_index_enabled: toml
+                .semantic_index_enabled
+                .unwrap_or(defaults.semantic_index_enabled),
+            semantic_recall_limit: toml
+                .semantic_recall_limit
+                .unwrap_or(defaults.semantic_recall_limit)
+                .clamp(1, 20),
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
         }

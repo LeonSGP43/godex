@@ -82,6 +82,24 @@ path = "/grokcodex41thinking"
 fixed_model = "grok-4.1-thinking"
 ```
 
+## Memories semantic helpers
+
+The `[memories]` section supports semantic helper controls for the generated
+memory indexes:
+
+- `semantic_index_enabled`: enable or disable generation/usage of
+  `memory_index.qmd` and `vector_index.json` (default `true`)
+- `semantic_recall_limit`: max number of semantic recall hints injected into
+  memory developer instructions per turn (default `5`, clamped to `1..20`)
+
+Example:
+
+```toml
+[memories]
+semantic_index_enabled = true
+semantic_recall_limit = 8
+```
+
 ## MCP tool approvals
 
 Codex stores per-tool approval overrides for custom MCP servers under

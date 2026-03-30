@@ -958,14 +958,14 @@ async fn resumed_history_injects_initial_context_on_first_context_update_only() 
     assert_eq!(expected, history_before_seed.raw_items());
 
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
     expected.extend(session.build_initial_context(&turn_context).await);
     let history_after_seed = session.clone_history().await;
     assert_eq!(expected, history_after_seed.raw_items());
 
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
     let history_after_second_seed = session.clone_history().await;
     assert_eq!(
@@ -4085,7 +4085,7 @@ async fn record_context_updates_and_set_reference_context_item_injects_full_cont
  {
     let (session, turn_context) = make_session_and_context().await;
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
     let history = session.clone_history().await;
     let initial_context = session.build_initial_context(&turn_context).await;
@@ -4116,7 +4116,7 @@ async fn record_context_updates_and_set_reference_context_item_reinjects_full_co
         .record_into_history(std::slice::from_ref(&compacted_summary), &turn_context)
         .await;
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
     {
         let mut state = session.state.lock().await;
@@ -4127,7 +4127,7 @@ async fn record_context_updates_and_set_reference_context_item_reinjects_full_co
         .await;
 
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
 
     let history = session.clone_history().await;
@@ -4181,7 +4181,7 @@ async fn record_context_updates_and_set_reference_context_item_persists_baseline
     assert_eq!(update_items, Vec::new());
 
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
 
     assert_eq!(
@@ -4294,7 +4294,7 @@ async fn record_context_updates_and_set_reference_context_item_persists_full_rei
         }))
         .await;
     session
-        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .record_context_updates_and_set_reference_context_item(&turn_context, &[])
         .await;
     session.ensure_rollout_materialized().await;
     session.flush_rollout().await;

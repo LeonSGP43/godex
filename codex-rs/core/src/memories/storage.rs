@@ -8,6 +8,9 @@ use uuid::Uuid;
 use crate::memories::ensure_layout;
 use crate::memories::raw_memories_file;
 use crate::memories::rollout_summaries_dir;
+use crate::memories::semantic_index::clear_auxiliary_indexes;
+use crate::memories::semantic_index::write_memory_index_qmd;
+use crate::memories::semantic_index::write_vector_index_json;
 
 /// Rebuild `raw_memories.md` from DB-backed stage-1 outputs.
 pub(super) async fn rebuild_raw_memories_file_from_memories(
@@ -24,6 +27,7 @@ pub(super) async fn sync_rollout_summaries_from_memories(
     root: &Path,
     memories: &[Stage1Output],
     max_raw_memories_for_consolidation: usize,
+    semantic_index_enabled: bool,
 ) -> std::io::Result<()> {
     ensure_layout(root).await?;
 
@@ -39,6 +43,7 @@ pub(super) async fn sync_rollout_summaries_from_memories(
     }
 
     if retained.is_empty() {
+        clear_auxiliary_indexes(root).await?;
         for file_name in ["MEMORY.md", "memory_summary.md"] {
             let path = root.join(file_name);
             if let Err(err) = tokio::fs::remove_file(path).await
@@ -54,6 +59,11 @@ pub(super) async fn sync_rollout_summaries_from_memories(
         {
             return Err(err);
         }
+    } else if semantic_index_enabled {
+        write_memory_index_qmd(root, retained).await?;
+        write_vector_index_json(root, retained).await?;
+    } else {
+        clear_auxiliary_indexes(root).await?;
     }
 
     Ok(())

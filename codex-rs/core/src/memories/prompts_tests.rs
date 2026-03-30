@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::types::MemoriesConfig;
 use crate::models_manager::model_info::model_info_from_slug;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -59,6 +60,8 @@ fn build_consolidation_prompt_renders_embedded_template() {
         build_consolidation_prompt(Path::new("/tmp/memories"), &Phase2InputSelection::default());
 
     assert!(prompt.contains("Folder structure (under /tmp/memories/):"));
+    assert!(prompt.contains("memory_index.qmd"));
+    assert!(prompt.contains("vector_index.json"));
     assert!(prompt.contains("**Diff since last consolidation:**"));
     assert!(prompt.contains("- selected inputs this run: 0"));
 }
@@ -76,9 +79,10 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
     .await
     .unwrap();
 
-    let instructions = build_memory_tool_developer_instructions(codex_home)
-        .await
-        .unwrap();
+    let instructions =
+        build_memory_tool_developer_instructions(codex_home, &MemoriesConfig::default(), None)
+            .await
+            .unwrap();
 
     assert!(instructions.contains(&format!(
         "- {}/memory_summary.md (already provided below; do NOT open again)",
@@ -91,4 +95,93 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn build_memory_tool_developer_instructions_appends_semantic_recall_hints() {
+    let temp = tempdir().unwrap();
+    let codex_home = temp.path();
+    let memories_dir = codex_home.join("memories");
+    tokio_fs::create_dir_all(&memories_dir).await.unwrap();
+    tokio_fs::write(
+        memories_dir.join("memory_summary.md"),
+        "Short memory summary for tests.",
+    )
+    .await
+    .unwrap();
+
+    let vector_index = serde_json::json!({
+        "version": 1,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "dimension": 256,
+        "metric": "cosine",
+        "entries": [
+            {
+                "thread_id": "0194f5a6-89ab-7cde-8123-456789abcdef",
+                "source_updated_at": "2026-01-01T00:00:00Z",
+                "rollout_summary_file": "rollout_summaries/2026-01-01T00-00-00-abcd-test.md",
+                "cwd": "/tmp/workspace",
+                "git_branch": "feat/memory",
+                "keywords": ["memory", "migration"],
+                "summary_preview": "migration summary",
+                "embedding": vec![0.0625_f32; 256]
+            }
+        ]
+    });
+    tokio_fs::write(
+        memories_dir.join("vector_index.json"),
+        serde_json::to_string_pretty(&vector_index).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let instructions = build_memory_tool_developer_instructions(
+        codex_home,
+        &MemoriesConfig::default(),
+        Some("memory migration failure in stage2"),
+    )
+    .await
+    .unwrap();
+
+    assert!(instructions.contains(&format!(
+        "- {}/memory_summary.md (already provided below; do NOT open again)",
+        memories_dir.display()
+    )));
+    assert!(instructions.contains("## Semantic Recall Hints"));
+    assert!(instructions.contains("memory migration failure in stage2"));
+    assert!(instructions.contains("rollout_summaries/2026-01-01T00-00-00-abcd-test.md"));
+}
+
+#[tokio::test]
+async fn build_memory_tool_developer_instructions_skips_semantic_hints_when_disabled() {
+    let temp = tempdir().unwrap();
+    let codex_home = temp.path();
+    let memories_dir = codex_home.join("memories");
+    tokio_fs::create_dir_all(&memories_dir).await.unwrap();
+    tokio_fs::write(
+        memories_dir.join("memory_summary.md"),
+        "Short memory summary for tests.",
+    )
+    .await
+    .unwrap();
+    tokio_fs::write(
+        memories_dir.join("vector_index.json"),
+        r#"{"dimension":256,"entries":[]}"#,
+    )
+    .await
+    .unwrap();
+
+    let config = MemoriesConfig {
+        semantic_index_enabled: false,
+        ..MemoriesConfig::default()
+    };
+    let instructions = build_memory_tool_developer_instructions(
+        codex_home,
+        &config,
+        Some("memory migration failure in stage2"),
+    )
+    .await
+    .unwrap();
+
+    assert!(!instructions.contains("## Semantic Recall Hints"));
 }
