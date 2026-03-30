@@ -1,5 +1,7 @@
+use std::ffi::OsString;
 use std::fs::File;
 use std::future::Future;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -16,6 +18,36 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 const EXECVE_WRAPPER_ARG0: &str = "codex-execve-wrapper";
 const LOCK_FILENAME: &str = ".lock";
 const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
+
+#[cfg(target_os = "macos")]
+const DEFAULT_EXEC_PATHS: &[&str] = &[
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const DEFAULT_EXEC_PATHS: &[&str] = &[
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+];
+
+#[cfg(windows)]
+const DEFAULT_EXEC_PATHS: &[&str] = &[
+    r"C:\Windows\System32",
+    r"C:\Windows",
+    r"C:\Windows\System32\Wbem",
+    r"C:\Windows\System32\WindowsPowerShell\v1.0",
+];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Arg0DispatchPaths {
@@ -228,6 +260,55 @@ where
     }
 }
 
+fn path_entries_equal(existing: &Path, expected: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        existing
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected.as_os_str().to_string_lossy())
+    }
+
+    #[cfg(not(windows))]
+    {
+        existing == expected
+    }
+}
+
+fn append_missing_default_exec_paths(path_entries: &mut Vec<PathBuf>) {
+    for default_path in DEFAULT_EXEC_PATHS {
+        let default_path = PathBuf::from(default_path);
+        let exists = path_entries
+            .iter()
+            .any(|entry| path_entries_equal(entry, &default_path));
+        if !exists {
+            path_entries.push(default_path);
+        }
+    }
+}
+
+fn build_updated_path_env(
+    path_entry: &Path,
+    existing_path: Option<OsString>,
+) -> std::io::Result<OsString> {
+    let mut merged_entries = Vec::new();
+    merged_entries.push(path_entry.to_path_buf());
+
+    let mut existing_entries = match existing_path {
+        Some(path) => std::env::split_paths(&path).collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+    append_missing_default_exec_paths(&mut existing_entries);
+    merged_entries.extend(existing_entries);
+
+    std::env::join_paths(merged_entries).map_err(|err| {
+        std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("failed to build PATH for arg0 aliases: {err}"),
+        )
+    })
+}
+
 /// Creates a temporary directory with either:
 ///
 /// - UNIX: `apply_patch` symlink to the current executable
@@ -320,23 +401,7 @@ pub fn prepend_path_entry_for_codex_aliases() -> std::io::Result<Arg0PathEntryGu
         }
     }
 
-    #[cfg(unix)]
-    const PATH_SEPARATOR: &str = ":";
-
-    #[cfg(windows)]
-    const PATH_SEPARATOR: &str = ";";
-
-    let updated_path_env_var = match std::env::var_os("PATH") {
-        Some(existing_path) => {
-            let mut path_env_var =
-                std::ffi::OsString::with_capacity(path.as_os_str().len() + 1 + existing_path.len());
-            path_env_var.push(path);
-            path_env_var.push(PATH_SEPARATOR);
-            path_env_var.push(existing_path);
-            path_env_var
-        }
-        None => path.as_os_str().to_owned(),
-    };
+    let updated_path_env_var = build_updated_path_env(path, std::env::var_os("PATH"))?;
 
     unsafe {
         std::env::set_var("PATH", updated_path_env_var);
@@ -417,9 +482,12 @@ fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
 mod tests {
     use super::Arg0DispatchPaths;
     use super::Arg0PathEntryGuard;
+    use super::DEFAULT_EXEC_PATHS;
     use super::LOCK_FILENAME;
+    use super::build_updated_path_env;
     use super::janitor_cleanup;
     use super::linux_sandbox_exe_path;
+    use std::ffi::OsString;
     use std::fs;
     use std::fs::File;
     use std::path::Path;
@@ -494,6 +562,68 @@ mod tests {
         janitor_cleanup(root.path())?;
 
         assert!(!dir.exists());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_updated_path_env_includes_default_exec_paths_when_missing() -> std::io::Result<()> {
+        let alias_path = Path::new("/tmp/codex-arg0-alias");
+        let updated = build_updated_path_env(alias_path, Some(OsString::from("/custom/bin")))?;
+        let entries = std::env::split_paths(&updated).collect::<Vec<_>>();
+
+        assert_eq!(entries.first(), Some(&alias_path.to_path_buf()));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry == Path::new("/custom/bin"))
+        );
+        for default_exec_path in DEFAULT_EXEC_PATHS {
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry == Path::new(default_exec_path)),
+                "missing default path entry: {default_exec_path}",
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_updated_path_env_preserves_existing_order_before_appending_defaults()
+    -> std::io::Result<()> {
+        let alias_path = Path::new("/tmp/codex-arg0-alias");
+        let existing = std::env::join_paths([
+            Path::new("/custom/first"),
+            Path::new("/custom/second"),
+            Path::new(DEFAULT_EXEC_PATHS[0]),
+        ])
+        .map_err(std::io::Error::other)?;
+
+        let updated = build_updated_path_env(alias_path, Some(existing))?;
+        let entries = std::env::split_paths(&updated).collect::<Vec<_>>();
+
+        assert_eq!(entries.first(), Some(&alias_path.to_path_buf()));
+        assert_eq!(entries.get(1), Some(&PathBuf::from("/custom/first")));
+        assert_eq!(entries.get(2), Some(&PathBuf::from("/custom/second")));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_updated_path_env_does_not_duplicate_existing_default_path() -> std::io::Result<()> {
+        let alias_path = Path::new("/tmp/codex-arg0-alias");
+        let existing = std::env::join_paths([Path::new(DEFAULT_EXEC_PATHS[0])])
+            .map_err(std::io::Error::other)?;
+        let updated = build_updated_path_env(alias_path, Some(existing))?;
+        let entries = std::env::split_paths(&updated).collect::<Vec<_>>();
+        let duplicates = entries
+            .iter()
+            .filter(|entry| *entry == Path::new(DEFAULT_EXEC_PATHS[0]))
+            .count();
+
+        assert_eq!(duplicates, 1);
         Ok(())
     }
 }
