@@ -2069,6 +2069,7 @@ async fn close_agent_persists_closed_edge_for_claude_code_backend() {
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth: 1,
+                agent_path: None,
                 agent_nickname: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -2187,6 +2188,7 @@ async fn spawn_agent_with_fork_context_bridges_parent_history_for_claude_code_ba
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth: 1,
+                agent_path: None,
                 agent_nickname: None,
                 agent_role: Some("explorer".to_string()),
             })),

@@ -22,6 +22,24 @@ Codex supports built-in and user-defined agent roles for `spawn_agent`.
   `claude-style.toml`.
 - Built-in roles currently still run on the native Codex spawned-agent runtime.
 
+## External Claude backend command prefix
+
+When using `spawn_agent(backend = "claude_code")`, you can configure the
+launcher argv prefix in `config.toml`:
+
+```toml
+[agents.claude_code]
+command = ["cps", "claude", "--dangerously-skip-permissions"]
+```
+
+This `command` value is only the prefix. Codex always appends the required
+non-interactive JSON output flags automatically:
+
+- `-p`
+- `--output-format json`
+- `--no-session-persistence`
+- `--tools ""`
+
 ## Grok research config
 
 The native Grok research tools and Grok-focused built-in agent roles now read

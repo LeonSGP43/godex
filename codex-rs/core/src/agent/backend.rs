@@ -68,12 +68,13 @@ impl SpawnedAgentHandle {
         config_snapshot: ThreadConfigSnapshot,
         developer_instructions: Option<String>,
         items: Vec<UserInput>,
+        command: ClaudeCodeCommand,
     ) -> CodexResult<Self> {
         let handle = ClaudeCodeSpawnedAgentHandle::new(
             agent_id,
             config_snapshot,
             developer_instructions,
-            ClaudeCodeCommand::default_command(),
+            command,
             AgentStatus::PendingInit,
             /*session_id*/ None,
             /*total_token_usage*/ None,
@@ -624,22 +625,47 @@ impl ClaudeCodeCommand {
             }
         }
 
+        Self::from_prefix(["cps", "claude"].into_iter().map(str::to_owned).collect())
+    }
+
+    pub(crate) fn from_config(config: &crate::config::Config) -> Self {
+        if let Some(command) = config.claude_code_backend_command.clone() {
+            return Self::from_prefix(command);
+        }
+        Self::default_command()
+    }
+
+    fn from_prefix(mut command_prefix: Vec<String>) -> Self {
+        let program = command_prefix
+            .drain(..1)
+            .next()
+            .unwrap_or_else(|| "cps".to_string());
+        let mut args = command_prefix;
+        args.extend(
+            Self::required_suffix_args()
+                .iter()
+                .map(|part| (*part).to_string()),
+        );
+
         Self {
-            program: "cps".to_string(),
-            args: vec![
-                "claude".to_string(),
-                "-p".to_string(),
-                "--output-format".to_string(),
-                "json".to_string(),
-                "--no-session-persistence".to_string(),
-                "--tools".to_string(),
-                String::new(),
-            ],
+            program,
+            args,
             clear_env_keys: vec![
                 "ENV_PREFIX_TARGET_CMD".to_string(),
                 "ENV_PREFIX_DEFAULT_ARGS".to_string(),
             ],
         }
+    }
+
+    fn required_suffix_args() -> &'static [&'static str] {
+        &[
+            "-p",
+            "--output-format",
+            "json",
+            "--no-session-persistence",
+            "--tools",
+            "",
+        ]
     }
 
     #[cfg(test)]

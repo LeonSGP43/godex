@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::backend::SpawnedAgentBackendKind;
 use crate::agent::control::SpawnAgentOptions;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
@@ -30,6 +31,8 @@ impl ToolHandler for Handler {
         } = invocation;
         let arguments = function_arguments(payload)?;
         let args: SpawnAgentArgs = parse_arguments(&arguments)?;
+        let backend_kind = SpawnedAgentBackendKind::parse(args.backend.as_deref())
+            .map_err(FunctionCallError::RespondToModel)?;
         let role_name = args
             .agent_type
             .as_deref()
@@ -52,7 +55,7 @@ impl ToolHandler for Handler {
                     call_id: call_id.clone(),
                     sender_thread_id: session.conversation_id,
                     prompt: prompt.clone(),
-                    model: args.model.clone().unwrap_or_default(),
+                    model: spawn_request_model_label(backend_kind, args.model.as_deref()),
                     reasoning_effort: args.reasoning_effort.unwrap_or_default(),
                 }
                 .into(),
@@ -60,14 +63,26 @@ impl ToolHandler for Handler {
             .await;
         let mut config =
             build_agent_spawn_config(&session.get_base_instructions().await, turn.as_ref())?;
-        apply_requested_spawn_agent_model_overrides(
-            &session,
-            turn.as_ref(),
-            &mut config,
-            args.model.as_deref(),
-            args.reasoning_effort,
-        )
-        .await?;
+        match backend_kind {
+            SpawnedAgentBackendKind::Codex => {
+                apply_requested_spawn_agent_model_overrides(
+                    &session,
+                    turn.as_ref(),
+                    &mut config,
+                    args.model.as_deref(),
+                    args.reasoning_effort,
+                )
+                .await?;
+            }
+            SpawnedAgentBackendKind::ClaudeCode => {
+                apply_requested_external_backend_overrides(
+                    &mut config,
+                    args.model.as_deref(),
+                    args.reasoning_effort,
+                    backend_kind,
+                )?;
+            }
+        }
         apply_role_to_config(&mut config, role_name)
             .await
             .map_err(FunctionCallError::RespondToModel)?;
@@ -89,6 +104,7 @@ impl ToolHandler for Handler {
                 )?),
                 SpawnAgentOptions {
                     fork_parent_spawn_call_id: args.fork_context.then(|| call_id.clone()),
+                    backend_kind,
                 },
             )
             .await
@@ -128,7 +144,7 @@ impl ToolHandler for Handler {
         let effective_model = agent_snapshot
             .as_ref()
             .map(|snapshot| snapshot.model.clone())
-            .unwrap_or_else(|| args.model.clone().unwrap_or_default());
+            .unwrap_or_else(|| spawn_request_model_label(backend_kind, args.model.as_deref()));
         let effective_reasoning_effort = agent_snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.reasoning_effort)
@@ -171,6 +187,7 @@ struct SpawnAgentArgs {
     message: Option<String>,
     items: Option<Vec<UserInput>>,
     agent_type: Option<String>,
+    backend: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
     #[serde(default)]

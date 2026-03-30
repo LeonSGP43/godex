@@ -451,6 +451,9 @@ pub struct Config {
     /// User-defined role declarations keyed by role name.
     pub agent_roles: BTreeMap<String, AgentRoleConfig>,
 
+    /// Optional command argv prefix for `spawn_agent(backend = "claude_code")`.
+    pub claude_code_backend_command: Option<Vec<String>>,
+
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
 
@@ -1719,6 +1722,10 @@ pub struct AgentsToml {
     /// ```
     #[serde(default, flatten)]
     pub roles: BTreeMap<String, AgentRoleToml>,
+
+    /// Runtime command prefix for the external Claude Code backend.
+    #[serde(default)]
+    pub claude_code: Option<ClaudeCodeBackendToml>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1730,6 +1737,14 @@ pub struct AgentRoleConfig {
     pub config_file: Option<PathBuf>,
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ClaudeCodeBackendToml {
+    /// Command argv prefix used before required Claude backend args are appended.
+    /// Example: ["cps", "claude", "--dangerously-skip-permissions"]
+    pub command: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
@@ -2483,6 +2498,29 @@ impl Config {
                 "agents.job_max_runtime_seconds must fit within a 64-bit signed integer",
             ));
         }
+
+        let claude_code_backend_command = if let Some(command_parts) = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.claude_code.as_ref())
+            .and_then(|claude_code| claude_code.command.clone())
+        {
+            let sanitized = command_parts
+                .into_iter()
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>();
+            if sanitized.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "agents.claude_code.command must include at least one non-empty argv part",
+                ));
+            }
+            Some(sanitized)
+        } else {
+            None
+        };
+
         let background_terminal_max_timeout = cfg
             .background_terminal_max_timeout
             .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
@@ -2812,6 +2850,7 @@ impl Config {
             agent_max_threads,
             agent_max_depth,
             agent_roles,
+            claude_code_backend_command,
             memories: cfg.memories.unwrap_or_default().into(),
             agent_job_max_runtime_seconds,
             codex_home,

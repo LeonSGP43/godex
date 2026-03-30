@@ -1,5 +1,4 @@
 pub(crate) mod agent_resolver;
-#[cfg(test)]
 pub(crate) mod backend;
 pub(crate) mod control;
 mod registry;

@@ -3344,6 +3344,7 @@ fn load_config_rejects_missing_agent_role_config_file() -> std::io::Result<()> {
                     nickname_candidates: None,
                 },
             )]),
+            claude_code: None,
         }),
         ..Default::default()
     };
@@ -4212,6 +4213,7 @@ fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()
                     ]),
                 },
             )]),
+            claude_code: None,
         }),
         ..Default::default()
     };
@@ -4250,6 +4252,7 @@ fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::Result
                     nickname_candidates: Some(Vec::new()),
                 },
             )]),
+            claude_code: None,
         }),
         ..Default::default()
     };
@@ -4285,6 +4288,7 @@ fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::io::Re
                     nickname_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
                 },
             )]),
+            claude_code: None,
         }),
         ..Default::default()
     };
@@ -4320,6 +4324,7 @@ fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io::Resul
                     nickname_candidates: Some(vec!["Agent <One>".to_string()]),
                 },
             )]),
+            claude_code: None,
         }),
         ..Default::default()
     };
@@ -4334,6 +4339,67 @@ fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io::Resul
     assert!(err.to_string().contains(
             "agents.researcher.nickname_candidates may only contain ASCII letters, digits, spaces, hyphens, and underscores"
         ));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_config_reads_claude_code_backend_command_prefix_from_agents_table()
+-> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    tokio::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[agents.claude_code]
+command = ["cps", "claude", "--dangerously-skip-permissions"]
+"#,
+    )
+    .await?;
+
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await?;
+
+    assert_eq!(
+        config.claude_code_backend_command,
+        Some(vec![
+            "cps".to_string(),
+            "claude".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ])
+    );
+
+    Ok(())
+}
+
+#[test]
+fn load_config_rejects_empty_claude_code_backend_command_prefix() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        agents: Some(AgentsToml {
+            max_threads: None,
+            max_depth: None,
+            job_max_runtime_seconds: None,
+            roles: BTreeMap::new(),
+            claude_code: Some(ClaudeCodeBackendToml {
+                command: Some(vec!["  ".to_string(), "\n".to_string()]),
+            }),
+        }),
+        ..Default::default()
+    };
+
+    let result = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.path().to_path_buf(),
+    );
+    let err = result.expect_err("empty command prefix should be rejected");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        err.to_string()
+            .contains("agents.claude_code.command must include at least one non-empty argv part")
+    );
 
     Ok(())
 }
@@ -4560,6 +4626,7 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            claude_code_backend_command: None,
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),
@@ -4706,6 +4773,7 @@ fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
         agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
         agent_roles: BTreeMap::new(),
+        claude_code_backend_command: None,
         memories: MemoriesConfig::default(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         codex_home: fixture.codex_home(),
@@ -4850,6 +4918,7 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
         agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
         agent_roles: BTreeMap::new(),
+        claude_code_backend_command: None,
         memories: MemoriesConfig::default(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         codex_home: fixture.codex_home(),
@@ -4980,6 +5049,7 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
         agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
         agent_roles: BTreeMap::new(),
+        claude_code_backend_command: None,
         memories: MemoriesConfig::default(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         codex_home: fixture.codex_home(),
