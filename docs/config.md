@@ -87,6 +87,10 @@ fixed_model = "grok-4.1-thinking"
 The `[memories]` section supports semantic helper controls for the generated
 memory indexes and hybrid QMD recall:
 
+For full architecture, runtime flow, and complete parameter annotations, see:
+
+- `docs/godex-memory-system.md`
+
 - `semantic_index_enabled`: enable or disable generation/usage of
   `memory_index.qmd` and `vector_index.json` (default `true`)
 - `semantic_recall_limit`: max number of semantic recall hints injected into

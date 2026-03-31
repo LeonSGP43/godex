@@ -25,6 +25,8 @@
   ·
   <a href="./docs/install.md">Install</a>
   ·
+  <a href="./docs/godex-memory-system.md">Memory System</a>
+  ·
   <a href="./docs/godex-maintenance.md">Maintenance</a>
   ·
   <a href="./docs/godex-fork-guidelines.md">Fork Guidelines</a>
@@ -59,6 +61,7 @@
 | Upstream sync tooling | Repo-local sync helpers, constitutional docs, and `sync/<upstream-sha-or-date>` branch discipline are built into the repo. | Upstream absorption is standardized, repeatable, and safer to maintain. |
 | Local-first release flow | `scripts/godex-release.sh`, `scripts/godex-release-local.sh`, and the release skill default to local build and local packaging. | The fork can be released from the maintainer machine without treating GitHub Actions as the default compiler. |
 | Fork-owned maintenance layer | `scripts/godex-maintain.sh`, root constitutions, manifest rules, and acceptance gates are part of the repository. | Future updates are governed by repo law, not by memory or ad hoc shell habits. |
+| QMD hybrid memory system | Two-phase memory pipeline plus local BM25+vector+RRF+rerank recall with explicit knobs in `[memories]`. | Better memory recall quality and tunability without introducing external vector services. |
 
 The table above is the short version. The section below spells out the fork-owned additions one by one.
 
@@ -136,6 +139,25 @@ Relevant files:
 - `scripts/godex-release-remote.sh`
 - `.codex/skills/godex-release-distributor/`
 
+### 7. `godex` Includes a QMD Hybrid Memory Mechanism
+
+- Startup memory flow is split into Phase 1 extraction and Phase 2 consolidation.
+- Read-path memory hints use local hybrid retrieval:
+  - BM25 lexical score
+  - local hash-vector semantic score
+  - RRF fusion
+  - lightweight rerank
+- Core knobs are exposed in `[memories]`, including:
+  - `qmd_hybrid_enabled`
+  - `qmd_query_expansion_enabled`
+  - `qmd_rerank_limit`
+  - `semantic_recall_limit`
+  - `semantic_index_enabled`
+
+Detailed developer documentation:
+
+- `docs/godex-memory-system.md`
+
 ## Current Install Status
 
 The fork's release architecture is in transition from governance setup into stable distribution.
@@ -205,6 +227,7 @@ Run `godex` and select **Sign in with ChatGPT** if you want to use the same auth
 - [**Agent roles**](./docs/agent-roles.md)
 - [**Contributing**](./docs/contributing.md)
 - [**Installing & building**](./docs/install.md)
+- [**godex memory system (QMD hybrid)**](./docs/godex-memory-system.md)
 - [**godex maintenance**](./docs/godex-maintenance.md)
 - [**godex fork guidelines**](./docs/godex-fork-guidelines.md)
 - [**godex fork manifest**](./docs/godex-fork-manifest.md)
