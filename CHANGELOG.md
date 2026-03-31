@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-03-31
+
+### Changed
+
+- What changed: added a dedicated memory-system developer guide, linked it from the main README highlights, and added a direct docs/config entrypoint for memory tuning and runtime behavior reference.
+- Why: the new QMD hybrid memory path and related knobs needed a single canonical document so future contributors can operate and extend the memory stack without reverse-engineering scattered code paths.
+- Impact: maintainers now have an explicit operating manual for indexing, retrieval, configuration switches, and validation flow, reducing onboarding time and lowering regression risk during follow-up memory work.
+- Verification: reviewed document links and section references with `rg -n "godex-memory-system|Memory System" README.md docs/config.md CHANGELOG.md` and confirmed the guide file is tracked at `docs/godex-memory-system.md`.
+- Files: `docs/godex-memory-system.md`, `README.md`, `docs/config.md`
+
 ## [0.2.9] - 2026-03-31
 
 ### Added
