@@ -4,6 +4,32 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-03-31
+
+### Added
+
+- What changed: introduced a QMD-hybrid-lite memory recall pipeline that combines BM25 + vector + RRF + rerank, and wired new memory tuning knobs (`qmd_hybrid_enabled`, `qmd_query_expansion_enabled`, `qmd_rerank_limit`) through config types, schema, prompts, and memory artifacts.
+- Why: prior memory recall behavior depended on a simpler semantic path and needed a stronger retrieval foundation aligned with OpenClaw-style hybrid memory expectations while staying incremental on the existing framework.
+- Impact: memory retrieval now has explicit hybrid signals and richer index artifacts (`memory_index.qmd`, `vector_index.json`), improving recall resilience and future tunability without requiring external embedding services.
+- Verification: `cargo test -p codex-core memories:: -- --nocapture`, `cargo test -p codex-core config::tests::test_toml_parsing -- --exact --nocapture`, `cargo run -p codex-core --bin codex-write-config-schema`, `cargo check -p codex-core --lib`, and runtime validation with `c`-prefixed commands produced refreshed memory artifacts under `~/.codex/memories`.
+- Files: `codex-rs/core/src/memories/semantic_index.rs`, `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/tests.rs`, `codex-rs/core/src/memories/prompts_tests.rs`, `codex-rs/core/src/config/types.rs`, `codex-rs/core/src/config/config_tests.rs`, `codex-rs/core/config.schema.json`, `codex-rs/core/src/memories/README.md`, `codex-rs/core/templates/memories/read_path.md`, `docs/config.md`
+
+### Fixed
+
+- What changed: fixed source installer cleanup handling for Bash `set -u` by making empty `TEMP_FILES` cleanup safe.
+- Why: installer runs could complete installation successfully but still return exit code `1` on shells that treat empty arrays as unbound under strict mode.
+- Impact: local install script now exits cleanly after successful install, eliminating false-failure outcomes in automation and release-adjacent flows.
+- Verification: `bash scripts/install/install-godex-from-source.sh --debug --copy --no-path --dry-run` and `bash scripts/install/install-godex-from-source.sh --debug --copy --no-path`.
+- Files: `scripts/install/install-godex-from-source.sh`
+
+### Changed
+
+- What changed: added a required repository policy that local runnable `godex` must come from published npm distribution and must not be replaced by ad-hoc `target/*` binaries.
+- Why: maintainers requested a single release-grade runtime channel so local usage stays aligned with npm/release governance and avoids drift from unpublished binaries.
+- Impact: release discipline is now explicit in the project constitution, and future operational guidance must follow npm-first distribution rules.
+- Verification: policy text added and reviewed in repository governance document.
+- Files: `AGENTS.md`
+
 ## [0.2.8] - 2026-03-29
 
 ### Fixed
