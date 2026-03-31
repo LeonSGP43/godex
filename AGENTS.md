@@ -174,6 +174,18 @@ Version strategy:
 - `0.2.0` only when the fork adds clear user-facing capabilities or materially changes default behavior
 - `1.0.0` only when `godex` is being treated as a stable long-term personal distribution
 
+## Distribution Channel Policy (Required)
+
+Local runnable `godex` must come from the published npm package only.
+
+Required rules:
+
+1. Do not run or distribute a local source-built runtime as the normal local install target.
+2. Do not replace active runtime paths (for example `~/.local/bin/godex`) with ad-hoc binaries from `codex-rs/target/*`.
+3. Treat `scripts/install/install-godex-from-source.sh` as a development helper, not an accepted end-user installation channel.
+4. A version is considered installable for daily use only after all release gates pass, npm publish succeeds, and local installation is updated from npm.
+5. If release is blocked, fix the release path itself; do not bypass it by switching users to an unpublished local binary.
+
 ## Conflict Resolution Policy
 
 When resolving conflicts:
