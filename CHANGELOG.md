@@ -4,6 +4,8 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-04-02
+
 ### Changed
 
 - What changed: `godex -g` now initializes the isolated global config root before startup, so first-run invocations create `~/.godex` automatically instead of failing on a missing directory, while explicit bad config-home overrides still remain fatal on config-bearing commands.
