@@ -36,8 +36,10 @@ default during conflict resolution.
 - Required behavior:
   - `godex` uses `~/.codex` and project `.codex`
   - `godex -g` uses `~/.godex` and project `.godex`
+  - first-run `godex -g` initializes the global `~/.godex` directory automatically
 - Verification:
   - CLI parse tests
+  - CLI integration test for first-run `godex -g`
   - config loader tests
   - manual smoke with `godex` and `godex -g`
 

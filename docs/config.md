@@ -149,7 +149,8 @@ When Codex knows which client started the turn, the legacy notify JSON payload a
   - project: `.godex`
 
 That keeps `godex` parallel to official Codex by default, while still giving
-you an explicit isolated mode when needed.
+you an explicit isolated mode when needed. On first use, `godex -g` creates the
+global `~/.godex` directory automatically before loading config.
 
 Use `[godex_updates]` for the fork's own release tracking:
 

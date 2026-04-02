@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
@@ -746,24 +747,30 @@ fn config_namespace(use_godex_home: bool) -> ConfigNamespace {
     }
 }
 
-fn maybe_configure_isolated_home_from_args() {
+fn maybe_configure_isolated_home_from_args() -> anyhow::Result<()> {
     let use_godex_home = std::env::args_os()
         .skip(1)
         .any(|arg| arg == "-g" || arg == "--godex-home");
     if !use_godex_home {
-        return;
+        return Ok(());
     }
 
-    if let Ok(godex_home) = find_home(ConfigNamespace::GodexIsolated) {
-        unsafe {
-            std::env::set_var("GODEX_HOME", &godex_home);
-            std::env::set_var("CODEX_HOME", &godex_home);
-        }
+    let godex_home = find_home(ConfigNamespace::GodexIsolated)?;
+    std::fs::create_dir_all(&godex_home).with_context(|| {
+        format!(
+            "failed to initialize isolated godex home at {}",
+            godex_home.display()
+        )
+    })?;
+    unsafe {
+        std::env::set_var("GODEX_HOME", &godex_home);
+        std::env::set_var("CODEX_HOME", &godex_home);
     }
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
-    maybe_configure_isolated_home_from_args();
+    maybe_configure_isolated_home_from_args()?;
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         cli_main(arg0_paths).await?;
         Ok(())

@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- What changed: `godex -g` now initializes the isolated global config root before startup, so first-run invocations create `~/.godex` automatically instead of failing on a missing directory, while explicit bad config-home overrides still remain fatal on config-bearing commands.
+- Why: the fork's isolated config mode should be bootstrappable like the default `.codex` flow, but the CLI previously set `CODEX_HOME=~/.godex` before any directory creation and then immediately tripped over its own missing-path validation.
+- Impact: users can start `godex -g` on a clean machine without manually creating `~/.godex`, and incorrect manually supplied config-home environment variables still surface as hard errors instead of being silently rewritten when a command resolves config.
+- Verification: `cargo test -p codex-cli godex_home_flag_parses --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli --test godex_home --manifest-path codex-rs/Cargo.toml`
+- Files: `codex-rs/cli/src/main.rs`, `codex-rs/cli/tests/godex_home.rs`, `docs/config.md`, `docs/godex-fork-manifest.md`, `CHANGELOG.md`
+
 ## [0.2.11] - 2026-04-02
 
 ### Changed
