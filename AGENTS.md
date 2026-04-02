@@ -287,16 +287,24 @@ When you change Rust code in `codex-rs`:
 
 Do not re-run tests after `fix` or `fmt` unless there is a specific reason.
 
+## The `codex-core` crate
+
+Over time, the `codex-core` crate (defined in `codex-rs/core/`) has become bloated because it is the largest crate, so it is often easier to add something new to `codex-core` rather than refactor out the library code you need so your new code neither takes a dependency on, nor contributes to the size of, `codex-core`.
+
+To that end: **resist adding code to codex-core**!
+
+Particularly when introducing a new concept/feature/API, before adding to `codex-core`, consider whether:
+
+- There is an existing crate other than `codex-core` that is an appropriate place for your new code to live.
+- It is time to introduce a new crate to the Cargo workspace for your new functionality. Refactor existing code as necessary to make this happen.
+
+Likewise, when reviewing code, do not hesitate to push back on PRs that would unnecessarily add code to `codex-core`.
+
 ## TUI Rules
 
 - Follow `codex-rs/tui/styles.md`.
-- When behavior exists in both `codex-rs/tui` and `codex-rs/tui_app_server`,
-  keep them aligned unless there is a documented reason not to.
-- Prefer ratatui `Stylize` helpers over manual style construction where
-  practical.
+- Use concise styling helpers from ratatui’s `Stylize` trait when practical.
 - Always use the repository wrapping helpers for wrapped `Line` content.
-
-## Snapshot Test Rules
 
 Any intentional user-visible UI change must include snapshot coverage.
 

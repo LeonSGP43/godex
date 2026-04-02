@@ -5,7 +5,6 @@ use crate::CodexThread;
 use crate::ThreadManager;
 use crate::agent::agent_status_from_event;
 use crate::agent::backend::ClaudeCodeCommand;
-use crate::agent::backend::SpawnedAgentBackendKind;
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::ConfigBuilder;
@@ -39,7 +38,7 @@ struct ClaudeCodeCommandOverrideReset;
 
 impl Drop for ClaudeCodeCommandOverrideReset {
     fn drop(&mut self) {
-        crate::agent::backend::set_default_claude_code_command_for_test(None);
+        crate::agent::backend::set_default_claude_code_command_for_test(/*command*/ None);
     }
 }
 
@@ -66,11 +65,12 @@ async fn test_config() -> (TempDir, Config) {
     test_config_with_cli_overrides(Vec::new()).await
 }
 
-fn text_input(text: &str) -> Vec<UserInput> {
+fn text_input(text: &str) -> Op {
     vec![UserInput::Text {
         text: text.to_string(),
         text_elements: Vec::new(),
     }]
+    .into()
 }
 
 struct AgentControlHarness {
@@ -229,7 +229,8 @@ async fn send_input_errors_when_manager_dropped() {
             vec![UserInput::Text {
                 text: "hello".to_string(),
                 text_elements: Vec::new(),
-            }],
+            }]
+            .into(),
         )
         .await
         .expect_err("send_input should fail without a manager");
@@ -299,7 +300,7 @@ async fn spawn_agent_errors_when_manager_dropped() {
     let control = AgentControl::default();
     let (_home, config) = test_config().await;
     let err = control
-        .spawn_agent(config, text_input("hello"), None)
+        .spawn_agent(config, text_input("hello"), /*session_source*/ None)
         .await
         .expect_err("spawn_agent should fail without a manager");
     assert_eq!(
@@ -333,7 +334,8 @@ async fn send_input_errors_when_thread_missing() {
             vec![UserInput::Text {
                 text: "hello".to_string(),
                 text_elements: Vec::new(),
-            }],
+            }]
+            .into(),
         )
         .await
         .expect_err("send_input should fail for missing thread");
@@ -399,7 +401,8 @@ async fn send_input_submits_user_message() {
             vec![UserInput::Text {
                 text: "hello from tests".to_string(),
                 text_elements: Vec::new(),
-            }],
+            }]
+            .into(),
         )
         .await
         .expect("send_input should succeed");
@@ -431,7 +434,7 @@ async fn send_inter_agent_communication_without_turn_queues_message_without_trig
         AgentPath::try_from("/root/worker").expect("agent path"),
         Vec::new(),
         "hello from tests".to_string(),
-        false,
+        /*trigger_turn*/ false,
     );
 
     let submission_id = harness
@@ -456,12 +459,7 @@ async fn send_inter_agent_communication_without_turn_queues_message_without_trig
 
     timeout(Duration::from_secs(5), async {
         loop {
-            if thread
-                .codex
-                .session
-                .has_queued_response_items_for_next_turn()
-                .await
-            {
+            if thread.codex.session.has_pending_input().await {
                 break;
             }
             sleep(Duration::from_millis(10)).await;
@@ -543,7 +541,11 @@ async fn spawn_agent_creates_thread_and_sends_prompt() {
     let harness = AgentControlHarness::new().await;
     let thread_id = harness
         .control
-        .spawn_agent(harness.config.clone(), text_input("spawned"), None)
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("spawned"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed");
     let _thread = harness
@@ -611,7 +613,6 @@ async fn spawn_agent_can_fork_parent_thread_history() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id),
-                backend_kind: SpawnedAgentBackendKind::Codex,
             },
         )
         .await
@@ -697,7 +698,6 @@ async fn spawn_agent_fork_injects_output_for_parent_spawn_call() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id.clone()),
-                backend_kind: SpawnedAgentBackendKind::Codex,
             },
         )
         .await
@@ -770,7 +770,6 @@ async fn spawn_agent_fork_flushes_parent_rollout_before_loading_history() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id.clone()),
-                backend_kind: SpawnedAgentBackendKind::Codex,
             },
         )
         .await
@@ -841,12 +840,20 @@ async fn spawn_agent_respects_max_threads_limit() {
         .expect("start thread");
 
     let first_agent_id = control
-        .spawn_agent(config.clone(), text_input("hello"), None)
+        .spawn_agent(
+            config.clone(),
+            text_input("hello"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed");
 
     let err = control
-        .spawn_agent(config, text_input("hello again"), None)
+        .spawn_agent(
+            config,
+            text_input("hello again"),
+            /*session_source*/ None,
+        )
         .await
         .expect_err("spawn_agent should respect max threads");
     let CodexErr::AgentLimitReached {
@@ -882,7 +889,11 @@ async fn spawn_agent_releases_slot_after_shutdown() {
     let control = manager.agent_control();
 
     let first_agent_id = control
-        .spawn_agent(config.clone(), text_input("hello"), None)
+        .spawn_agent(
+            config.clone(),
+            text_input("hello"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed");
     let _ = control
@@ -891,7 +902,11 @@ async fn spawn_agent_releases_slot_after_shutdown() {
         .expect("shutdown agent");
 
     let second_agent_id = control
-        .spawn_agent(config.clone(), text_input("hello again"), None)
+        .spawn_agent(
+            config.clone(),
+            text_input("hello again"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed after shutdown");
     let _ = control
@@ -920,12 +935,20 @@ async fn spawn_agent_limit_shared_across_clones() {
     let cloned = control.clone();
 
     let first_agent_id = cloned
-        .spawn_agent(config.clone(), text_input("hello"), None)
+        .spawn_agent(
+            config.clone(),
+            text_input("hello"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed");
 
     let err = control
-        .spawn_agent(config, text_input("hello again"), None)
+        .spawn_agent(
+            config,
+            text_input("hello again"),
+            /*session_source*/ None,
+        )
         .await
         .expect_err("spawn_agent should respect shared guard");
     let CodexErr::AgentLimitReached { max_threads } = err else {
@@ -958,7 +981,11 @@ async fn resume_agent_respects_max_threads_limit() {
     let control = manager.agent_control();
 
     let resumable_id = control
-        .spawn_agent(config.clone(), text_input("hello"), None)
+        .spawn_agent(
+            config.clone(),
+            text_input("hello"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed");
     let _ = control
@@ -967,7 +994,11 @@ async fn resume_agent_respects_max_threads_limit() {
         .expect("shutdown resumable thread");
 
     let active_id = control
-        .spawn_agent(config.clone(), text_input("occupy"), None)
+        .spawn_agent(
+            config.clone(),
+            text_input("occupy"),
+            /*session_source*/ None,
+        )
         .await
         .expect("spawn_agent should succeed for active slot");
 
@@ -1013,7 +1044,7 @@ async fn resume_agent_releases_slot_after_resume_failure() {
         .expect_err("resume should fail for missing rollout path");
 
     let resumed_id = control
-        .spawn_agent(config, text_input("hello"), None)
+        .spawn_agent(config, text_input("hello"), /*session_source*/ None)
         .await
         .expect("spawn should succeed after failed resume");
     let _ = control
@@ -1151,7 +1182,7 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
             AgentPath::root(),
             Vec::new(),
             "done".to_string(),
-            true,
+            /*trigger_turn*/ true,
         )
     ));
     assert!(!has_subagent_notification(&root_history_items));
@@ -1214,7 +1245,7 @@ async fn multi_agent_v2_completion_queues_message_for_direct_parent() {
                 worker_path.clone(),
                 Vec::new(),
                 expected_message.clone(),
-                false,
+                /*trigger_turn*/ false,
             ),
         },
     );
@@ -1249,7 +1280,7 @@ async fn multi_agent_v2_completion_queues_message_for_direct_parent() {
             AgentPath::root(),
             Vec::new(),
             expected_message,
-            false,
+            /*trigger_turn*/ false,
         )
     ));
 }
@@ -1270,7 +1301,7 @@ async fn completion_watcher_notifies_parent_when_child_is_missing() {
             agent_role: Some("explorer".to_string()),
         })),
         child_thread_id.to_string(),
-        None,
+        /*child_agent_path*/ None,
     );
 
     assert_eq!(wait_for_subagent_notification(&parent_thread).await, true);
@@ -1531,7 +1562,11 @@ async fn resume_agent_from_rollout_reads_archived_rollout_path() {
     let harness = AgentControlHarness::new().await;
     let child_thread_id = harness
         .control
-        .spawn_agent(harness.config.clone(), text_input("hello"), None)
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("hello"),
+            /*session_source*/ None,
+        )
         .await
         .expect("child spawn should succeed");
 
@@ -2063,7 +2098,7 @@ async fn close_agent_persists_closed_edge_for_claude_code_backend() {
 
     let child_thread_id = harness
         .control
-        .spawn_agent_with_options(
+        .spawn_agent_with_metadata(
             harness.config.clone(),
             text_input("hello external child"),
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
@@ -2075,11 +2110,11 @@ async fn close_agent_persists_closed_edge_for_claude_code_backend() {
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: None,
-                backend_kind: SpawnedAgentBackendKind::ClaudeCode,
             },
         )
         .await
-        .expect("external child spawn should succeed");
+        .expect("external child spawn should succeed")
+        .thread_id;
 
     timeout(Duration::from_secs(5), async {
         loop {
@@ -2173,8 +2208,8 @@ async fn spawn_agent_with_fork_context_bridges_parent_history_for_claude_code_ba
                 }),
             ]),
             AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy")),
-            false,
-            None,
+            /*persist_extended_history*/ false,
+            /*parent_trace*/ None,
         )
         .await
         .expect("start parent thread with history");
@@ -2182,7 +2217,7 @@ async fn spawn_agent_with_fork_context_bridges_parent_history_for_claude_code_ba
 
     let child_thread_id = harness
         .control
-        .spawn_agent_with_options(
+        .spawn_agent_with_metadata(
             harness.config.clone(),
             text_input("child task"),
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
@@ -2194,11 +2229,11 @@ async fn spawn_agent_with_fork_context_bridges_parent_history_for_claude_code_ba
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some("call-fork".to_string()),
-                backend_kind: SpawnedAgentBackendKind::ClaudeCode,
             },
         )
         .await
-        .expect("external fork spawn should succeed");
+        .expect("external fork spawn should succeed")
+        .thread_id;
 
     let status = timeout(Duration::from_secs(5), async {
         loop {

@@ -227,7 +227,7 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
-        true,
+        /*semantic_index_enabled*/ true,
     )
     .await
     .expect("sync rollout summaries");
@@ -394,7 +394,7 @@ async fn sync_rollout_summaries_uses_timestamp_hash_and_sanitized_slug_filename(
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
-        true,
+        /*semantic_index_enabled*/ true,
     )
     .await
     .expect("sync rollout summaries");
@@ -488,7 +488,7 @@ async fn sync_rollout_summaries_clears_semantic_indexes_when_semantic_index_disa
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
-        false,
+        /*semantic_index_enabled*/ false,
     )
     .await
     .expect("sync rollout summaries");
@@ -555,7 +555,7 @@ task_outcome: success
         &root,
         &memories,
         DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
-        true,
+        /*semantic_index_enabled*/ true,
     )
     .await
     .expect("sync rollout summaries");
@@ -712,8 +712,8 @@ mod phase2 {
                     thread_id,
                     self.session.conversation_id,
                     source_updated_at,
-                    3_600,
-                    64,
+                    /*lease_seconds*/ 3_600,
+                    /*max_running_jobs*/ 64,
                 )
                 .await
                 .expect("claim stage-1 job");
@@ -729,7 +729,7 @@ mod phase2 {
                         source_updated_at,
                         "raw memory",
                         "rollout summary",
-                        None,
+                        /*rollout_slug*/ None,
                     )
                     .await
                     .expect("mark stage-1 success"),
@@ -757,24 +757,24 @@ mod phase2 {
 
     #[test]
     fn completion_watermark_never_regresses_below_claimed_input_watermark() {
-        let stage1_output = stage1_output_with_source_updated_at(123);
+        let stage1_output = stage1_output_with_source_updated_at(/*source_updated_at*/ 123);
 
-        let completion = phase2::get_watermark(1_000, &[stage1_output]);
+        let completion = phase2::get_watermark(/*claimed_watermark*/ 1_000, &[stage1_output]);
         pretty_assertions::assert_eq!(completion, 1_000);
     }
 
     #[test]
     fn completion_watermark_uses_claimed_watermark_when_there_are_no_memories() {
-        let completion = phase2::get_watermark(777, &[]);
+        let completion = phase2::get_watermark(/*claimed_watermark*/ 777, &[]);
         pretty_assertions::assert_eq!(completion, 777);
     }
 
     #[test]
     fn completion_watermark_uses_latest_memory_timestamp_when_it_is_newer() {
-        let older = stage1_output_with_source_updated_at(123);
-        let newer = stage1_output_with_source_updated_at(456);
+        let older = stage1_output_with_source_updated_at(/*source_updated_at*/ 123);
+        let newer = stage1_output_with_source_updated_at(/*source_updated_at*/ 456);
 
-        let completion = phase2::get_watermark(200, &[older, newer]);
+        let completion = phase2::get_watermark(/*claimed_watermark*/ 200, &[older, newer]);
         pretty_assertions::assert_eq!(completion, 456);
     }
 
@@ -794,12 +794,12 @@ mod phase2 {
         let harness = DispatchHarness::new().await;
         harness
             .state_db
-            .enqueue_global_consolidation(123)
+            .enqueue_global_consolidation(/*input_watermark*/ 123)
             .await
             .expect("enqueue global consolidation");
         let claimed = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim running global lock");
         assert!(
@@ -811,7 +811,7 @@ mod phase2 {
 
         let running_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim while lock is still running");
         pretty_assertions::assert_eq!(running_claim, Phase2JobClaimOutcome::SkippedRunning);
@@ -827,7 +827,7 @@ mod phase2 {
 
         let stale_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 0)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 0)
             .await
             .expect("claim stale global lock");
         assert!(
@@ -839,7 +839,7 @@ mod phase2 {
 
         let post_dispatch_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim after stale lock dispatch");
         assert!(
@@ -953,7 +953,7 @@ mod phase2 {
 
         harness
             .state_db
-            .enqueue_global_consolidation(999)
+            .enqueue_global_consolidation(/*input_watermark*/ 999)
             .await
             .expect("enqueue global consolidation");
 
@@ -1007,7 +1007,7 @@ mod phase2 {
         );
         let next_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim global job after empty consolidation success");
         pretty_assertions::assert_eq!(next_claim, Phase2JobClaimOutcome::SkippedNotDirty);
@@ -1023,7 +1023,7 @@ mod phase2 {
         let harness = DispatchHarness::new().await;
         harness
             .state_db
-            .enqueue_global_consolidation(99)
+            .enqueue_global_consolidation(/*input_watermark*/ 99)
             .await
             .expect("enqueue global consolidation");
         let mut constrained_config = harness.config.as_ref().clone();
@@ -1034,7 +1034,7 @@ mod phase2 {
 
         let retry_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim global job after sandbox policy failure");
         pretty_assertions::assert_eq!(retry_claim, Phase2JobClaimOutcome::SkippedNotDirty);
@@ -1046,7 +1046,7 @@ mod phase2 {
     #[tokio::test]
     async fn dispatch_marks_job_for_retry_when_syncing_artifacts_fails() {
         let harness = DispatchHarness::new().await;
-        harness.seed_stage1_output(100).await;
+        harness.seed_stage1_output(/*source_updated_at*/ 100).await;
         let root = memory_root(&harness.config.codex_home);
         tokio::fs::write(&root, "not a directory")
             .await
@@ -1056,7 +1056,7 @@ mod phase2 {
 
         let retry_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim global job after sync failure");
         pretty_assertions::assert_eq!(retry_claim, Phase2JobClaimOutcome::SkippedNotDirty);
@@ -1068,7 +1068,7 @@ mod phase2 {
     #[tokio::test]
     async fn dispatch_marks_job_for_retry_when_rebuilding_raw_memories_fails() {
         let harness = DispatchHarness::new().await;
-        harness.seed_stage1_output(100).await;
+        harness.seed_stage1_output(/*source_updated_at*/ 100).await;
         let root = memory_root(&harness.config.codex_home);
         tokio::fs::create_dir_all(raw_memories_file(&root))
             .await
@@ -1078,7 +1078,7 @@ mod phase2 {
 
         let retry_claim = harness
             .state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim global job after rebuild failure");
         pretty_assertions::assert_eq!(retry_claim, Phase2JobClaimOutcome::SkippedNotDirty);
@@ -1123,7 +1123,13 @@ mod phase2 {
             .expect("upsert thread metadata");
 
         let claim = state_db
-            .try_claim_stage1_job(thread_id, session.conversation_id, 100, 3_600, 64)
+            .try_claim_stage1_job(
+                thread_id,
+                session.conversation_id,
+                /*source_updated_at*/ 100,
+                /*lease_seconds*/ 3_600,
+                /*max_running_jobs*/ 64,
+            )
             .await
             .expect("claim stage-1 job");
         let ownership_token = match claim {
@@ -1135,10 +1141,10 @@ mod phase2 {
                 .mark_stage1_job_succeeded(
                     thread_id,
                     &ownership_token,
-                    100,
+                    /*source_updated_at*/ 100,
                     "raw memory",
                     "rollout summary",
-                    None,
+                    /*rollout_slug*/ None,
                 )
                 .await
                 .expect("mark stage-1 success"),
@@ -1148,7 +1154,7 @@ mod phase2 {
         phase2::run(&session, Arc::clone(&config)).await;
 
         let retry_claim = state_db
-            .try_claim_global_phase2_job(ThreadId::new(), 3_600)
+            .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)
             .await
             .expect("claim global job after spawn failure");
         pretty_assertions::assert_eq!(

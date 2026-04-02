@@ -101,8 +101,8 @@ impl SpawnedAgentHandle {
             developer_instructions,
             command,
             AgentStatus::PendingInit,
-            None,
-            None,
+            /*session_id*/ None,
+            /*total_token_usage*/ None,
         );
         handle.send_input(items).await?;
         Ok(Self::ClaudeCode(handle))
@@ -1026,7 +1026,7 @@ mod tests {
         let handle = SpawnedAgentHandle::claude_code_for_test(
             ThreadId::new(),
             test_snapshot(tempdir.path().to_path_buf()),
-            None,
+            /*developer_instructions*/ None,
             text_input("long task"),
             command,
         )
@@ -1068,7 +1068,7 @@ mod tests {
             SpawnedAgentBackendKind::ClaudeCode
         );
         assert_eq!(
-            SpawnedAgentBackendKind::parse(None).expect("backend"),
+            SpawnedAgentBackendKind::parse(/*value*/ None).expect("backend"),
             SpawnedAgentBackendKind::Codex
         );
     }

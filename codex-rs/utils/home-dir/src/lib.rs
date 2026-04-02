@@ -154,8 +154,11 @@ mod tests {
 
     #[test]
     fn find_codex_home_without_env_uses_default_home_dir() {
-        let resolved =
-            find_home_from_env(ConfigNamespace::CodexCompatible, None).expect("default CODEX_HOME");
+        let resolved = find_home_from_env(
+            ConfigNamespace::CodexCompatible,
+            /*configured_home_env*/ None,
+        )
+        .expect("default CODEX_HOME");
         let mut expected = home_dir().expect("home dir");
         expected.push(".codex");
         assert_eq!(resolved, expected);
@@ -163,8 +166,11 @@ mod tests {
 
     #[test]
     fn find_godex_home_without_env_uses_godex_dir() {
-        let resolved =
-            find_home_from_env(ConfigNamespace::GodexIsolated, None).expect("default GODEX_HOME");
+        let resolved = find_home_from_env(
+            ConfigNamespace::GodexIsolated,
+            /*configured_home_env*/ None,
+        )
+        .expect("default GODEX_HOME");
         let mut expected = home_dir().expect("home dir");
         expected.push(".godex");
         assert_eq!(resolved, expected);

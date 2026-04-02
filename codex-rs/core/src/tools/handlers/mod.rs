@@ -130,18 +130,14 @@ pub(crate) fn normalize_and_validate_additional_permissions(
         }
         let Some(additional_permissions) = additional_permissions else {
             return Err(
-                "missing `additional_permissions`; provide at least one of `network`, `file_system`, or `macos` when using `with_additional_permissions`"
+                "missing `additional_permissions`; provide at least one of `network` or `file_system` when using `with_additional_permissions`"
                     .to_string(),
             );
         };
-        #[cfg(not(target_os = "macos"))]
-        if additional_permissions.macos.is_some() {
-            return Err("`additional_permissions.macos` is only supported on macOS".to_string());
-        }
         let normalized = normalize_additional_permissions(additional_permissions)?;
         if normalized.is_empty() {
             return Err(
-                "`additional_permissions` must include at least one requested permission in `network`, `file_system`, or `macos`"
+                "`additional_permissions` must include at least one requested permission in `network` or `file_system`"
                     .to_string(),
             );
         }
@@ -268,7 +264,7 @@ mod tests {
         let cwd = tempdir().expect("tempdir");
 
         let normalized = normalize_and_validate_additional_permissions(
-            false,
+            /*additional_permissions_allowed*/ false,
             AskForApproval::Granular(GranularApprovalConfig {
                 sandbox_approval: true,
                 rules: true,
@@ -278,7 +274,7 @@ mod tests {
             }),
             SandboxPermissions::WithAdditionalPermissions,
             Some(network_permissions()),
-            true,
+            /*permissions_preapproved*/ true,
             cwd.path(),
         )
         .expect("preapproved permissions should be allowed");
@@ -291,11 +287,11 @@ mod tests {
         let cwd = tempdir().expect("tempdir");
 
         let err = normalize_and_validate_additional_permissions(
-            false,
+            /*additional_permissions_allowed*/ false,
             AskForApproval::OnRequest,
             SandboxPermissions::WithAdditionalPermissions,
             Some(network_permissions()),
-            false,
+            /*permissions_preapproved*/ false,
             cwd.path(),
         )
         .expect_err("fresh inline permission requests should remain disabled");
@@ -312,7 +308,7 @@ mod tests {
         let granted_permissions = file_system_permissions(cwd.path());
         let implicit_permissions = implicit_granted_permissions(
             SandboxPermissions::UseDefault,
-            None,
+            /*additional_permissions*/ None,
             &EffectiveAdditionalPermissions {
                 sandbox_permissions: SandboxPermissions::WithAdditionalPermissions,
                 additional_permissions: Some(granted_permissions.clone()),

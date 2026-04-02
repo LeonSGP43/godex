@@ -79,10 +79,13 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
     .await
     .unwrap();
 
-    let instructions =
-        build_memory_tool_developer_instructions(codex_home, &MemoriesConfig::default(), None)
-            .await
-            .unwrap();
+    let instructions = build_memory_tool_developer_instructions(
+        codex_home,
+        &MemoriesConfig::default(),
+        /*turn_query*/ None,
+    )
+    .await
+    .unwrap();
 
     assert!(instructions.contains(&format!(
         "- {}/memory_summary.md (already provided below; do NOT open again)",
