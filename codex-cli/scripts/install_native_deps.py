@@ -479,9 +479,17 @@ def extract_archive(
                 raise RuntimeError(
                     f"Entry '{archive_member}' not found in archive {archive_path}."
                 ) from exc
-            tar.extract(member, path=archive_path.parent, filter="data")
-        extracted = archive_path.parent / archive_member
-        shutil.move(str(extracted), dest)
+            if not member.isfile():
+                raise RuntimeError(
+                    f"Entry '{archive_member}' in archive {archive_path} is not a regular file."
+                )
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                raise RuntimeError(
+                    f"Failed to read '{archive_member}' from archive {archive_path}."
+                )
+            with extracted, open(dest, "wb") as out:
+                shutil.copyfileobj(extracted, out)
         return
 
     if archive_format == "zip":

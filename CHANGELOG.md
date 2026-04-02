@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- What changed: the local `godex` release packaging helper now reads single-file `tar.gz` payloads directly instead of relying on `TarFile.extract(..., filter="data")`, and it adds a focused Python unittest for the ripgrep staging path.
+- Why: local release staging was crashing under the maintainer machine's Python 3.10 runtime because that stdlib API does not accept the `filter` keyword, which blocked `godex 0.2.12` tarball staging until the extraction path was made interpreter-compatible.
+- Impact: local stage/publish flows can vendor ripgrep successfully on Python 3.10 and still reject non-regular tar members, making future GitHub release uploads more reliable from this machine.
+- Verification: `python3 codex-cli/scripts/test_install_native_deps.py`, `HTTP_PROXY=http://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10808 ALL_PROXY=http://127.0.0.1:10808 bash .codex/skills/godex-release-distributor/scripts/run.sh local-stage`
+- Files: `codex-cli/scripts/install_native_deps.py`, `codex-cli/scripts/test_install_native_deps.py`, `CHANGELOG.md`
+
 ## [0.2.12] - 2026-04-02
 
 ### Changed
