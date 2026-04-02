@@ -4,6 +4,8 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-04-03
+
 ### Fixed
 
 - What changed: the local `godex` release packaging helper now reads single-file `tar.gz` payloads directly instead of relying on `TarFile.extract(..., filter="data")`, and it adds a focused Python unittest for the ripgrep staging path.
