@@ -4,6 +4,22 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-04-02
+
+### Changed
+
+- What changed: merged official Codex upstream `rust-v0.118.0` into `godex`, resolved the fork hot-file conflicts against the new `tui` layout, preserved the fork-specific config/update surfaces, and fixed the follow-up compile, test, and lint compatibility issues uncovered during verification.
+- Why: the fork is governed as an upstream-first release line, so the `rust-v0.118.0` baseline needed to be absorbed promptly without reintroducing broad divergence in runtime or UI internals.
+- Impact: `godex` now carries the official `rust-v0.118.0` workspace updates while still preserving the manifest-listed fork behavior for config namespace split, fork update source, and source-repo sync handling.
+- Verification: `cargo test -p codex-cli godex_home_flag_parses --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli sync_upstream_subcommand_parses --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli reject_remote_mode_for_non_interactive_subcommands --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-tui detects_update_action_without_env_mutation --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-utils-home-dir find_godex_home_without_env_uses_godex_dir --manifest-path codex-rs/Cargo.toml`, `bash scripts/godex-maintain.sh status`, `bash scripts/godex-maintain.sh sync --dry-run`, `bash scripts/godex-maintain.sh check`, `bash scripts/godex-maintain.sh smoke`, `bash scripts/godex-maintain.sh release-preflight`, `cargo fmt --all --manifest-path codex-rs/Cargo.toml`, and `python3 tools/argument-comment-lint/run.py --workspace`.
+- Files: `codex-rs/cli/src/main.rs`, `codex-rs/core/src/tools/spec.rs`, `codex-rs/core/src/tools/handlers/multi_agents/spawn.rs`, `codex-rs/core/src/tools/handlers/multi_agents_v2/spawn.rs`, `codex-rs/tui/src/update_action.rs`, `codex-rs/utils/home-dir/src/lib.rs`, `codex-rs/core/src/agent/backend.rs`, `codex-rs/core/src/agent/control_tests.rs`, `codex-rs/core/src/codex.rs`
+
+- What changed: bumped the fork release metadata to `0.2.11` and updated the main README install guidance to state that daily-use `godex` should come from the published npm package, while source install remains a maintainer/development helper.
+- Why: `main` is not allowed to advance under the same version, and the README still implied that source install was the primary recommended runtime path even though the repository policy requires the published npm channel for normal local use.
+- Impact: the release line is now push-eligible again, and the top-level project documentation matches the enforced distribution and release-governance rules.
+- Verification: reviewed `README.md`, `CHANGELOG.md`, `VERSION`, and `codex-rs/Cargo.toml` together, then reran `bash scripts/godex-maintain.sh check`, `bash scripts/godex-maintain.sh smoke`, and `bash scripts/godex-maintain.sh release-preflight`.
+- Files: `README.md`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`
+
 ## [0.2.10] - 2026-03-31
 
 ### Changed

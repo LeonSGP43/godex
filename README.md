@@ -83,7 +83,8 @@ Relevant files:
 ### 2. `godex` Can Coexist With Official Codex
 
 - This fork is designed to live next to official `codex`, not overwrite it.
-- Source install uses `bash scripts/install/install-godex-from-source.sh`.
+- Release-grade installs should come from the published npm package `@leonsgp43/godex`.
+- Source install uses `bash scripts/install/install-godex-from-source.sh` as a development helper.
 - The install flow is fork-specific and keeps `godex` isolated as its own command.
 
 Relevant files:
@@ -160,13 +161,21 @@ Detailed developer documentation:
 
 ## Current Install Status
 
-The fork's release architecture is in transition from governance setup into stable distribution.
+This release line is now synced through official upstream `rust-v0.118.0`.
 
-- Reliable today: build and install from your local checkout.
+- Daily-use local runtime channel: the published npm package `@leonsgp43/godex`.
+- Current fork release line in this repository: `0.2.11`.
 - GitHub Release: used as the fork's public release signal and release history.
-- npm and managed installers: supported by the fork's release design, but only treat them as live when the current package or release asset is actually published.
+- Source install: keep it for maintainer validation, development, and release preparation, not as the normal daily-use distribution path.
 
 ### Recommended Install Right Now
+
+```bash
+# Use the published package when the matching release is available.
+npm install -g @leonsgp43/godex@latest
+```
+
+### Development / Maintainer Source Install
 
 ```bash
 git clone https://github.com/LeonSGP43/godex.git
@@ -201,7 +210,7 @@ Use `godex` if you want a personal modded fork with fork-owned release governanc
 
 ### Run `godex`
 
-After installing from source:
+After installing `godex`:
 
 ```bash
 godex
