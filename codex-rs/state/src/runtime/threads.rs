@@ -18,6 +18,8 @@ SELECT
     model,
     reasoning_effort,
     cwd,
+    memory_scope_kind,
+    memory_scope_key,
     cli_version,
     title,
     sandbox_policy,
@@ -355,6 +357,8 @@ SELECT
     model,
     reasoning_effort,
     cwd,
+    memory_scope_kind,
+    memory_scope_key,
     cli_version,
     title,
     sandbox_policy,
@@ -467,8 +471,10 @@ INSERT INTO threads (
     git_sha,
     git_branch,
     git_origin_url,
-    memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    memory_mode,
+    memory_scope_kind,
+    memory_scope_key
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -501,6 +507,8 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
         .bind("enabled")
+        .bind(metadata.memory_scope_kind.as_str())
+        .bind(metadata.memory_scope_key.as_str())
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
@@ -594,8 +602,10 @@ INSERT INTO threads (
     git_sha,
     git_branch,
     git_origin_url,
-    memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    memory_mode,
+    memory_scope_kind,
+    memory_scope_key
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -608,6 +618,8 @@ ON CONFLICT(id) DO UPDATE SET
     model = excluded.model,
     reasoning_effort = excluded.reasoning_effort,
     cwd = excluded.cwd,
+    memory_scope_kind = excluded.memory_scope_kind,
+    memory_scope_key = excluded.memory_scope_key,
     cli_version = excluded.cli_version,
     title = excluded.title,
     sandbox_policy = excluded.sandbox_policy,
@@ -650,6 +662,8 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
         .bind(creation_memory_mode.unwrap_or("enabled"))
+        .bind(metadata.memory_scope_kind.as_str())
+        .bind(metadata.memory_scope_key.as_str())
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
@@ -1032,6 +1046,8 @@ mod tests {
                 base_instructions: None,
                 dynamic_tools: None,
                 memory_mode: Some("polluted".to_string()),
+                memory_scope_kind: None,
+                memory_scope_key: None,
             },
             git: None,
         })];
@@ -1090,6 +1106,8 @@ mod tests {
                 base_instructions: None,
                 dynamic_tools: None,
                 memory_mode: None,
+                memory_scope_kind: None,
+                memory_scope_key: None,
             },
             git: Some(GitInfo {
                 commit_hash: Some(codex_git_utils::GitSha::new("rollout-sha")),

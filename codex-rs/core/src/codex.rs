@@ -3535,6 +3535,8 @@ impl Session {
             && let Some(memory_prompt) = build_memory_tool_developer_instructions(
                 &turn_context.config.codex_home,
                 &turn_context.config.memories,
+                &turn_context.config.memory_scope_kind,
+                &turn_context.config.memory_scope_key,
                 memory_query,
             )
             .await

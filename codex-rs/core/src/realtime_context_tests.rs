@@ -34,6 +34,8 @@ fn thread_metadata(cwd: &str, title: &str, first_user_message: &str) -> ThreadMe
         title: title.to_string(),
         sandbox_policy: "workspace-write".to_string(),
         approval_mode: "never".to_string(),
+        memory_scope_kind: "global".to_string(),
+        memory_scope_key: "global".to_string(),
         tokens_used: 0,
         first_user_message: Some(first_user_message.to_string()),
         archived_at: None,

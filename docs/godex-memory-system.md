@@ -52,12 +52,13 @@ Code:
 - `codex-rs/core/src/memories/phase1.rs`
 - `codex-rs/state/src/runtime/memories.rs` (`claim_stage1_jobs_for_startup`)
 
-### Phase 2 (Global Consolidation)
+### Phase 2 (Scoped Consolidation)
 
-Phase 2 is globally serialized (single claimed job) and performs:
+Phase 2 is serialized per memory scope (single claimed job per selected scope)
+and performs:
 
 1. Select stage-1 inputs (usage-aware and freshness-aware)
-2. Sync local artifacts under `~/.codex/memories` (or `~/.godex/memories` in `-g`)
+2. Sync local artifacts under the selected memory root
 3. Spawn one internal consolidation sub-agent (no network, no approvals)
 4. Commit job watermark and selected snapshot metadata
 
@@ -69,6 +70,9 @@ Key behavior:
   - `COALESCE(last_usage, source_updated_at) DESC`
   - `source_updated_at DESC`
 - `selected_for_phase2` snapshot is tracked to produce `added/retained/removed`.
+- The selected scope root is:
+  - global scope: `~/.codex/memories` (or `~/.godex/memories` in `-g`)
+  - project scope: `~/.codex/memories/scopes/project/<project-scope-dir>`
 
 Code:
 
@@ -156,11 +160,13 @@ All parameters below are in `config.toml`.
 | `no_memories_if_mcp_or_web_search` | `false` | bool | If `true`, MCP tool calls and web search calls mark thread `memory_mode` as `polluted`, removing it from memory eligibility. |
 | `generate_memories` | `true` | bool | If `false`, new threads are created with `memory_mode=disabled`; startup memory extraction for those threads is skipped. |
 | `use_memories` | `true` | bool | If `false`, memory developer instructions are not injected into turn context. |
+| `scope` | `global` | `global`, `project` | Selects whether memory reads/writes use the shared legacy root or a project-partitioned scope derived from the current project root. |
 | `max_raw_memories_for_consolidation` | `256` | `<= 4096` | Upper bound of retained stage-1 memories for consolidation/materialization. |
 | `max_unused_days` | `30` | `0..365` | Recency window for retention/pruning and phase-2 input selection. |
 | `max_rollout_age_days` | `30` | `0..90` | Max thread age for phase-1 startup claim window. |
 | `max_rollouts_per_startup` | `16` | `<= 128` | Max number of rollout jobs claimed per startup run. |
 | `min_rollout_idle_hours` | `6` | `1..48` | Minimum idle gap before a thread is eligible for phase-1 extraction. |
+| `summary_token_limit` | `5000` | `256..20000` | Max tokens read from `memory_summary.md` when injecting memory guidance into developer instructions. |
 | `semantic_index_enabled` | `true` | bool | Enables `memory_index.qmd` / `vector_index.json` generation and semantic recall consumption. |
 | `semantic_recall_limit` | `5` | `1..20` | Max number of semantic recall hints appended to developer instructions. |
 | `qmd_hybrid_enabled` | `true` | bool | Enables BM25 + vector + RRF + rerank hybrid fusion. |
@@ -175,7 +181,12 @@ Source:
 
 ## Artifact Contract
 
-Under memory root (`<CODEX_HOME>/memories`):
+Under memory root:
+
+- global scope: `<CODEX_HOME>/memories`
+- project scope: `<CODEX_HOME>/memories/scopes/project/<project-scope-dir>`
+
+Within the selected scope root:
 
 - `raw_memories.md`
   - merged stage-1 raw memories (latest first)
@@ -238,4 +249,3 @@ Likely causes:
   `no_memories_if_mcp_or_web_search=true`
 - thread was `disabled` at creation (`generate_memories=false`)
 - thread is outside `max_unused_days` / age / idle windows
-

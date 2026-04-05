@@ -11,6 +11,7 @@ use crate::config::types::McpServerToolConfig;
 use crate::config::types::McpServerTransportConfig;
 use crate::config::types::MemoriesConfig;
 use crate::config::types::MemoriesToml;
+use crate::config::types::MemoryScopeMode;
 use crate::config::types::ModelAvailabilityNuxConfig;
 use crate::config::types::NotificationMethod;
 use crate::config::types::Notifications;
@@ -143,6 +144,8 @@ max_unused_days = 21
 max_rollout_age_days = 42
 max_rollouts_per_startup = 9
 min_rollout_idle_hours = 24
+scope = "project"
+summary_token_limit = 3000
 semantic_index_enabled = false
 semantic_recall_limit = 7
 qmd_hybrid_enabled = true
@@ -163,6 +166,8 @@ consolidation_model = "gpt-5"
             max_rollout_age_days: Some(42),
             max_rollouts_per_startup: Some(9),
             min_rollout_idle_hours: Some(24),
+            scope: Some(MemoryScopeMode::Project),
+            summary_token_limit: Some(3000),
             semantic_index_enabled: Some(false),
             semantic_recall_limit: Some(7),
             qmd_hybrid_enabled: Some(true),
@@ -191,6 +196,8 @@ consolidation_model = "gpt-5"
             max_rollout_age_days: 42,
             max_rollouts_per_startup: 9,
             min_rollout_idle_hours: 24,
+            scope: MemoryScopeMode::Project,
+            summary_token_limit: 3000,
             semantic_index_enabled: false,
             semantic_recall_limit: 7,
             qmd_hybrid_enabled: true,
@@ -4678,6 +4685,9 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             agent_roles: BTreeMap::new(),
             claude_code_backend_command: None,
             memories: MemoriesConfig::default(),
+            project_root_markers: crate::config_loader::default_project_root_markers(),
+            memory_scope_kind: "global".to_string(),
+            memory_scope_key: "global".to_string(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),
             sqlite_home: fixture.codex_home(),
@@ -4824,6 +4834,9 @@ fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         agent_roles: BTreeMap::new(),
         claude_code_backend_command: None,
         memories: MemoriesConfig::default(),
+        project_root_markers: crate::config_loader::default_project_root_markers(),
+        memory_scope_kind: "global".to_string(),
+        memory_scope_key: "global".to_string(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         codex_home: fixture.codex_home(),
         sqlite_home: fixture.codex_home(),
@@ -4968,6 +4981,9 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         agent_roles: BTreeMap::new(),
         claude_code_backend_command: None,
         memories: MemoriesConfig::default(),
+        project_root_markers: crate::config_loader::default_project_root_markers(),
+        memory_scope_kind: "global".to_string(),
+        memory_scope_key: "global".to_string(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         codex_home: fixture.codex_home(),
         sqlite_home: fixture.codex_home(),
@@ -5098,6 +5114,9 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         agent_roles: BTreeMap::new(),
         claude_code_backend_command: None,
         memories: MemoriesConfig::default(),
+        project_root_markers: crate::config_loader::default_project_root_markers(),
+        memory_scope_kind: "global".to_string(),
+        memory_scope_key: "global".to_string(),
         agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
         codex_home: fixture.codex_home(),
         sqlite_home: fixture.codex_home(),

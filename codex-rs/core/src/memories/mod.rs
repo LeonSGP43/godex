@@ -9,6 +9,7 @@ mod control;
 mod phase1;
 mod phase2;
 pub(crate) mod prompts;
+mod scope;
 mod semantic_index;
 mod start;
 mod storage;
@@ -19,6 +20,13 @@ pub(crate) mod usage;
 use codex_protocol::openai_models::ReasoningEffort;
 
 pub(crate) use control::clear_memory_root_contents;
+#[cfg(test)]
+pub(crate) use scope::GLOBAL_MEMORY_SCOPE_KEY;
+#[cfg(test)]
+pub(crate) use scope::GLOBAL_MEMORY_SCOPE_KIND;
+pub(crate) use scope::MemoryScope;
+pub(crate) use scope::resolve_memory_scope;
+pub(crate) use scope::scoped_memory_root;
 /// Starts the memory startup pipeline for eligible root sessions.
 /// This is the single entrypoint that `codex` uses to trigger memory startup.
 ///
@@ -45,9 +53,6 @@ mod phase_one {
     /// Fallback stage-1 rollout truncation limit (tokens) when model metadata
     /// does not include a valid context window.
     pub(super) const DEFAULT_STAGE_ONE_ROLLOUT_TOKEN_LIMIT: usize = 150_000;
-    /// Maximum number of tokens from `memory_summary.md` injected into memory
-    /// tool developer instructions.
-    pub(super) const MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_SUMMARY_TOKEN_LIMIT: usize = 5_000;
     /// Portion of the model effective input window reserved for the stage-1
     /// rollout input.
     ///

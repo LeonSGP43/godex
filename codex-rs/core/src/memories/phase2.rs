@@ -2,10 +2,11 @@ use crate::agent::AgentStatus;
 use crate::agent::status::is_final as is_final_agent_status;
 use crate::codex::Session;
 use crate::config::Config;
-use crate::memories::memory_root;
+use crate::memories::MemoryScope;
 use crate::memories::metrics;
 use crate::memories::phase_two;
 use crate::memories::prompts::build_consolidation_prompt;
+use crate::memories::scoped_memory_root;
 use crate::memories::storage::rebuild_raw_memories_file_from_memories;
 use crate::memories::storage::rollout_summary_file_stem;
 use crate::memories::storage::sync_rollout_summaries_from_memories;
@@ -31,6 +32,8 @@ use tracing::warn;
 struct Claim {
     token: String,
     watermark: i64,
+    memory_scope_kind: String,
+    memory_scope_key: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -51,12 +54,23 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
         // This should not happen.
         return;
     };
-    let root = memory_root(&config.codex_home);
+    let memory_scope = MemoryScope {
+        kind: config.memory_scope_kind.clone(),
+        key: config.memory_scope_key.clone(),
+    };
+    let root = scoped_memory_root(&config.codex_home, &memory_scope);
     let max_raw_memories = config.memories.max_raw_memories_for_consolidation;
     let max_unused_days = config.memories.max_unused_days;
 
     // 1. Claim the job.
-    let claim = match job::claim(session, db).await {
+    let claim = match job::claim(
+        session,
+        db,
+        memory_scope.kind.as_str(),
+        memory_scope.key.as_str(),
+    )
+    .await
+    {
         Ok(claim) => claim,
         Err(e) => {
             session.services.session_telemetry.counter(
@@ -69,7 +83,7 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     };
 
     // 2. Get the config for the agent
-    let Some(agent_config) = agent::get_config(config.clone()) else {
+    let Some(agent_config) = agent::get_config(config.clone(), &root) else {
         // If we can't get the config, we can't consolidate.
         tracing::error!("failed to get agent config");
         job::failed(session, db, &claim, "failed_sandbox_policy").await;
@@ -78,12 +92,20 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
 
     // 3. Query the memories
     let selection = match db
-        .get_phase2_input_selection(max_raw_memories, max_unused_days)
+        .get_phase2_input_selection_in_scope(
+            max_raw_memories,
+            max_unused_days,
+            claim.memory_scope_kind.as_str(),
+            claim.memory_scope_key.as_str(),
+        )
         .await
     {
         Ok(selection) => selection,
         Err(err) => {
-            tracing::error!("failed to list stage1 outputs from global: {}", err);
+            tracing::error!(
+                "failed to list stage1 outputs for scoped consolidation: {}",
+                err
+            );
             job::failed(session, db, &claim, "failed_load_stage1_outputs").await;
             return;
         }
@@ -103,7 +125,7 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     )
     .await
     {
-        tracing::error!("failed syncing local memory artifacts for global consolidation: {err}");
+        tracing::error!("failed syncing local memory artifacts for scoped consolidation: {err}");
         job::failed(session, db, &claim, "failed_sync_artifacts").await;
         return;
     }
@@ -112,7 +134,7 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
         rebuild_raw_memories_file_from_memories(&root, &artifact_memories, artifact_memories.len())
             .await
     {
-        tracing::error!("failed syncing local memory artifacts for global consolidation: {err}");
+        tracing::error!("failed syncing local memory artifacts for scoped consolidation: {err}");
         job::failed(session, db, &claim, "failed_rebuild_raw_memories").await;
         return;
     }
@@ -131,7 +153,7 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     }
 
     // 5. Spawn the agent
-    let prompt = agent::get_prompt(config, &selection);
+    let prompt = agent::get_prompt(&root, &selection);
     let source = SessionSource::SubAgent(SubAgentSource::MemoryConsolidation);
     let thread_id = match session
         .services
@@ -141,7 +163,7 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     {
         Ok(thread_id) => thread_id,
         Err(err) => {
-            tracing::error!("failed to spawn global memory consolidation agent: {err}");
+            tracing::error!("failed to spawn scoped memory consolidation agent: {err}");
             job::failed(session, db, &claim, "failed_spawn_agent").await;
             return;
         }
@@ -186,10 +208,17 @@ mod job {
     pub(super) async fn claim(
         session: &Arc<Session>,
         db: &StateRuntime,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
     ) -> Result<Claim, &'static str> {
         let session_telemetry = &session.services.session_telemetry;
         let claim = db
-            .try_claim_global_phase2_job(session.conversation_id, phase_two::JOB_LEASE_SECONDS)
+            .try_claim_phase2_job(
+                memory_scope_kind,
+                memory_scope_key,
+                session.conversation_id,
+                phase_two::JOB_LEASE_SECONDS,
+            )
             .await
             .map_err(|e| {
                 tracing::error!("failed to claim job: {}", e);
@@ -211,7 +240,12 @@ mod job {
             codex_state::Phase2JobClaimOutcome::SkippedRunning => return Err("skipped_running"),
         };
 
-        Ok(Claim { token, watermark })
+        Ok(Claim {
+            token,
+            watermark,
+            memory_scope_kind: memory_scope_kind.to_string(),
+            memory_scope_key: memory_scope_key.to_string(),
+        })
     }
 
     pub(super) async fn failed(
@@ -226,7 +260,9 @@ mod job {
             &[("status", reason)],
         );
         if matches!(
-            db.mark_global_phase2_job_failed(
+            db.mark_phase2_job_failed(
+                claim.memory_scope_kind.as_str(),
+                claim.memory_scope_key.as_str(),
                 &claim.token,
                 reason,
                 phase_two::JOB_RETRY_DELAY_SECONDS,
@@ -235,7 +271,9 @@ mod job {
             Ok(false)
         ) {
             let _ = db
-                .mark_global_phase2_job_failed_if_unowned(
+                .mark_phase2_job_failed_if_unowned(
+                    claim.memory_scope_kind.as_str(),
+                    claim.memory_scope_key.as_str(),
                     &claim.token,
                     reason,
                     phase_two::JOB_RETRY_DELAY_SECONDS,
@@ -258,7 +296,13 @@ mod job {
             &[("status", reason)],
         );
         let _ = db
-            .mark_global_phase2_job_succeeded(&claim.token, completion_watermark, selected_outputs)
+            .mark_phase2_job_succeeded(
+                claim.memory_scope_kind.as_str(),
+                claim.memory_scope_key.as_str(),
+                &claim.token,
+                completion_watermark,
+                selected_outputs,
+            )
             .await;
     }
 }
@@ -266,11 +310,10 @@ mod job {
 mod agent {
     use super::*;
 
-    pub(super) fn get_config(config: Arc<Config>) -> Option<Config> {
-        let root = memory_root(&config.codex_home);
+    pub(super) fn get_config(config: Arc<Config>, root: &std::path::Path) -> Option<Config> {
         let mut agent_config = config.as_ref().clone();
 
-        match AbsolutePathBuf::from_absolute_path(root) {
+        match AbsolutePathBuf::from_absolute_path(root.to_path_buf()) {
             Ok(root) => agent_config.cwd = root,
             Err(err) => {
                 warn!(
@@ -325,11 +368,10 @@ mod agent {
     }
 
     pub(super) fn get_prompt(
-        config: Arc<Config>,
+        root: &std::path::Path,
         selection: &codex_state::Phase2InputSelection,
     ) -> Vec<UserInput> {
-        let root = memory_root(&config.codex_home);
-        let prompt = build_consolidation_prompt(&root, selection);
+        let prompt = build_consolidation_prompt(root, selection);
         vec![UserInput::Text {
             text: prompt,
             text_elements: vec![],
@@ -368,6 +410,8 @@ mod agent {
             let final_status = loop_agent(
                 db.clone(),
                 claim.token.clone(),
+                claim.memory_scope_kind.clone(),
+                claim.memory_scope_key.clone(),
                 new_watermark,
                 thread_id,
                 rx,
@@ -396,7 +440,7 @@ mod agent {
                 tokio::spawn(async move {
                     if let Err(err) = agent_control.shutdown_live_agent(thread_id).await {
                         warn!(
-                            "failed to auto-close global memory consolidation agent {thread_id}: {err}"
+                            "failed to auto-close scoped memory consolidation agent {thread_id}: {err}"
                         );
                     }
                 });
@@ -409,6 +453,8 @@ mod agent {
     async fn loop_agent(
         db: Arc<StateRuntime>,
         token: String,
+        memory_scope_kind: String,
+        memory_scope_key: String,
         _new_watermark: i64,
         thread_id: ThreadId,
         mut rx: watch::Receiver<AgentStatus>,
@@ -434,7 +480,9 @@ mod agent {
                 }
                 _ = heartbeat_interval.tick() => {
                     match db
-                        .heartbeat_global_phase2_job(
+                        .heartbeat_phase2_job(
+                            memory_scope_kind.as_str(),
+                            memory_scope_key.as_str(),
                             &token,
                             phase_two::JOB_LEASE_SECONDS,
                         )
@@ -443,7 +491,7 @@ mod agent {
                         Ok(true) => {}
                         Ok(false) => {
                             break AgentStatus::Errored(
-                                "lost global phase-2 ownership during heartbeat".to_string(),
+                                "lost scoped phase-2 ownership during heartbeat".to_string(),
                             );
                         }
                         Err(err) => {

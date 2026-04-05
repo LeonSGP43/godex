@@ -6,6 +6,8 @@ use crate::tools::handlers::unified_exec::ExecCommandArgs;
 use codex_protocol::models::ShellCommandToolCallParams;
 use codex_protocol::models::ShellToolCallParams;
 use codex_protocol::parse_command::ParsedCommand;
+use std::path::Component;
+use std::path::Path;
 use std::path::PathBuf;
 
 const MEMORIES_USAGE_METRIC: &str = "codex.memories.usage";
@@ -113,17 +115,83 @@ fn shell_command_for_invocation(invocation: &ToolInvocation) -> Option<(Vec<Stri
 }
 
 fn get_memory_kind(path: String) -> Option<MemoriesUsageKind> {
-    if path.contains("memories/MEMORY.md") {
-        Some(MemoriesUsageKind::MemoryMd)
-    } else if path.contains("memories/memory_summary.md") {
-        Some(MemoriesUsageKind::MemorySummary)
-    } else if path.contains("memories/raw_memories.md") {
-        Some(MemoriesUsageKind::RawMemories)
-    } else if path.contains("memories/rollout_summaries/") {
-        Some(MemoriesUsageKind::RolloutSummaries)
-    } else if path.contains("memories/skills/") {
-        Some(MemoriesUsageKind::Skills)
-    } else {
-        None
+    let components = Path::new(path.as_str())
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(component) => component.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let memories_idx = components
+        .iter()
+        .position(|component| *component == "memories")?;
+    let artifact = match components.get(memories_idx + 1).copied()? {
+        "scopes" => components.get(memories_idx + 4).copied()?,
+        artifact => artifact,
+    };
+
+    match artifact {
+        "MEMORY.md" => Some(MemoriesUsageKind::MemoryMd),
+        "memory_summary.md" => Some(MemoriesUsageKind::MemorySummary),
+        "raw_memories.md" => Some(MemoriesUsageKind::RawMemories),
+        "rollout_summaries" => Some(MemoriesUsageKind::RolloutSummaries),
+        "skills" => Some(MemoriesUsageKind::Skills),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MemoriesUsageKind;
+    use super::get_memory_kind;
+
+    #[test]
+    fn classifies_global_memory_artifacts() {
+        assert_eq!(
+            get_memory_kind("/tmp/.codex/memories/MEMORY.md".to_string()),
+            Some(MemoriesUsageKind::MemoryMd)
+        );
+        assert_eq!(
+            get_memory_kind("/tmp/.codex/memories/memory_summary.md".to_string()),
+            Some(MemoriesUsageKind::MemorySummary)
+        );
+        assert_eq!(
+            get_memory_kind("/tmp/.codex/memories/raw_memories.md".to_string()),
+            Some(MemoriesUsageKind::RawMemories)
+        );
+        assert_eq!(
+            get_memory_kind("/tmp/.codex/memories/rollout_summaries/one.md".to_string()),
+            Some(MemoriesUsageKind::RolloutSummaries)
+        );
+        assert_eq!(
+            get_memory_kind("/tmp/.codex/memories/skills/foo/SKILL.md".to_string()),
+            Some(MemoriesUsageKind::Skills)
+        );
+    }
+
+    #[test]
+    fn classifies_scoped_memory_artifacts() {
+        let scoped_root = "/tmp/.codex/memories/scopes/project/codex-deadbeef";
+        assert_eq!(
+            get_memory_kind(format!("{scoped_root}/MEMORY.md")),
+            Some(MemoriesUsageKind::MemoryMd)
+        );
+        assert_eq!(
+            get_memory_kind(format!("{scoped_root}/memory_summary.md")),
+            Some(MemoriesUsageKind::MemorySummary)
+        );
+        assert_eq!(
+            get_memory_kind(format!("{scoped_root}/raw_memories.md")),
+            Some(MemoriesUsageKind::RawMemories)
+        );
+        assert_eq!(
+            get_memory_kind(format!("{scoped_root}/rollout_summaries/one.md")),
+            Some(MemoriesUsageKind::RolloutSummaries)
+        );
+        assert_eq!(
+            get_memory_kind(format!("{scoped_root}/skills/foo/SKILL.md")),
+            Some(MemoriesUsageKind::Skills)
+        );
     }
 }

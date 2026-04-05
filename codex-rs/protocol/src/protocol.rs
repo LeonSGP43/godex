@@ -2531,6 +2531,10 @@ pub struct SessionMeta {
     pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_scope_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_scope_key: Option<String>,
 }
 
 impl Default for SessionMeta {
@@ -2550,6 +2554,8 @@ impl Default for SessionMeta {
             base_instructions: None,
             dynamic_tools: None,
             memory_mode: None,
+            memory_scope_kind: None,
+            memory_scope_key: None,
         }
     }
 }

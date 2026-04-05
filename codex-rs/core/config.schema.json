@@ -934,6 +934,14 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "scope": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MemoryScopeMode"
+            }
+          ],
+          "description": "Which memory partition to read/write for the current session."
+        },
         "semantic_index_enabled": {
           "description": "When `false`, skip generating and consuming semantic memory helper indexes (`memory_index.qmd` and `vector_index.json`).",
           "type": "boolean"
@@ -944,12 +952,25 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "summary_token_limit": {
+          "description": "Maximum number of tokens from `memory_summary.md` injected into developer instructions.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "use_memories": {
           "description": "When `false`, skip injecting memory usage instructions into developer prompts.",
           "type": "boolean"
         }
       },
       "type": "object"
+    },
+    "MemoryScopeMode": {
+      "enum": [
+        "global",
+        "project"
+      ],
+      "type": "string"
     },
     "ModelAvailabilityNuxConfig": {
       "additionalProperties": {

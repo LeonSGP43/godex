@@ -34,6 +34,14 @@ impl codex_rollout::RolloutConfigView for Config {
     fn generate_memories(&self) -> bool {
         self.memories.generate_memories
     }
+
+    fn memory_scope_kind(&self) -> &str {
+        self.memory_scope_kind.as_str()
+    }
+
+    fn memory_scope_key(&self) -> &str {
+        self.memory_scope_key.as_str()
+    }
 }
 
 pub mod list {

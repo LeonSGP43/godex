@@ -82,6 +82,8 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
     let instructions = build_memory_tool_developer_instructions(
         codex_home,
         &MemoriesConfig::default(),
+        GLOBAL_MEMORY_SCOPE_KIND,
+        GLOBAL_MEMORY_SCOPE_KEY,
         /*turn_query*/ None,
     )
     .await
@@ -141,6 +143,8 @@ async fn build_memory_tool_developer_instructions_appends_semantic_recall_hints(
     let instructions = build_memory_tool_developer_instructions(
         codex_home,
         &MemoriesConfig::default(),
+        GLOBAL_MEMORY_SCOPE_KIND,
+        GLOBAL_MEMORY_SCOPE_KEY,
         Some("memory migration failure in stage2"),
     )
     .await
@@ -182,6 +186,8 @@ async fn build_memory_tool_developer_instructions_skips_semantic_hints_when_disa
     let instructions = build_memory_tool_developer_instructions(
         codex_home,
         &config,
+        GLOBAL_MEMORY_SCOPE_KIND,
+        GLOBAL_MEMORY_SCOPE_KEY,
         Some("memory migration failure in stage2"),
     )
     .await

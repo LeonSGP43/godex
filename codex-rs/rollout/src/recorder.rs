@@ -416,6 +416,8 @@ impl RolloutRecorder {
                         },
                         memory_mode: (!config.generate_memories())
                             .then_some("disabled".to_string()),
+                        memory_scope_kind: Some(config.memory_scope_kind().to_string()),
+                        memory_scope_key: Some(config.memory_scope_key().to_string()),
                     };
 
                     (

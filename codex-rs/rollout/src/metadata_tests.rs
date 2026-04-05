@@ -31,6 +31,8 @@ fn test_config(codex_home: PathBuf) -> RolloutConfig {
         codex_home,
         model_provider_id: "test-provider".to_string(),
         generate_memories: true,
+        memory_scope_kind: "global".to_string(),
+        memory_scope_key: "global".to_string(),
     }
 }
 
@@ -58,6 +60,8 @@ async fn extract_metadata_from_rollout_uses_session_meta() {
         base_instructions: None,
         dynamic_tools: None,
         memory_mode: None,
+        memory_scope_kind: None,
+        memory_scope_key: None,
     };
     let session_meta_line = SessionMetaLine {
         meta: session_meta,
@@ -109,6 +113,8 @@ async fn extract_metadata_from_rollout_returns_latest_memory_mode() {
         base_instructions: None,
         dynamic_tools: None,
         memory_mode: None,
+        memory_scope_kind: None,
+        memory_scope_key: None,
     };
     let polluted_meta = SessionMeta {
         memory_mode: Some("polluted".to_string()),
@@ -371,6 +377,8 @@ fn write_rollout_in_sessions_with_cwd(
         base_instructions: None,
         dynamic_tools: None,
         memory_mode: None,
+        memory_scope_kind: None,
+        memory_scope_key: None,
     };
     let session_meta_line = SessionMetaLine {
         meta: session_meta,

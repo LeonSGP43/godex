@@ -8,6 +8,8 @@ pub trait RolloutConfigView {
     fn cwd(&self) -> &Path;
     fn model_provider_id(&self) -> &str;
     fn generate_memories(&self) -> bool;
+    fn memory_scope_kind(&self) -> &str;
+    fn memory_scope_key(&self) -> &str;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +19,8 @@ pub struct RolloutConfig {
     pub cwd: PathBuf,
     pub model_provider_id: String,
     pub generate_memories: bool,
+    pub memory_scope_kind: String,
+    pub memory_scope_key: String,
 }
 
 pub type Config = RolloutConfig;
@@ -29,6 +33,8 @@ impl RolloutConfig {
             cwd: view.cwd().to_path_buf(),
             model_provider_id: view.model_provider_id().to_string(),
             generate_memories: view.generate_memories(),
+            memory_scope_kind: view.memory_scope_kind().to_string(),
+            memory_scope_key: view.memory_scope_key().to_string(),
         }
     }
 }
@@ -53,6 +59,14 @@ impl RolloutConfigView for RolloutConfig {
     fn generate_memories(&self) -> bool {
         self.generate_memories
     }
+
+    fn memory_scope_kind(&self) -> &str {
+        self.memory_scope_kind.as_str()
+    }
+
+    fn memory_scope_key(&self) -> &str {
+        self.memory_scope_key.as_str()
+    }
 }
 
 impl<T: RolloutConfigView + ?Sized> RolloutConfigView for &T {
@@ -75,6 +89,14 @@ impl<T: RolloutConfigView + ?Sized> RolloutConfigView for &T {
     fn generate_memories(&self) -> bool {
         (*self).generate_memories()
     }
+
+    fn memory_scope_kind(&self) -> &str {
+        (*self).memory_scope_kind()
+    }
+
+    fn memory_scope_key(&self) -> &str {
+        (*self).memory_scope_key()
+    }
 }
 
 impl<T: RolloutConfigView + ?Sized> RolloutConfigView for Arc<T> {
@@ -96,5 +118,13 @@ impl<T: RolloutConfigView + ?Sized> RolloutConfigView for Arc<T> {
 
     fn generate_memories(&self) -> bool {
         self.as_ref().generate_memories()
+    }
+
+    fn memory_scope_kind(&self) -> &str {
+        self.as_ref().memory_scope_kind()
+    }
+
+    fn memory_scope_key(&self) -> &str {
+        self.as_ref().memory_scope_key()
     }
 }

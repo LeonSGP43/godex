@@ -46,6 +46,7 @@ use crate::config_loader::McpServerIdentity;
 use crate::config_loader::McpServerRequirement;
 use crate::config_loader::ResidencyRequirement;
 use crate::config_loader::Sourced;
+use crate::config_loader::default_project_root_markers;
 use crate::config_loader::load_config_layers_state;
 use crate::memories::memory_root;
 use crate::model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
@@ -434,6 +435,15 @@ pub struct Config {
 
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
+
+    /// Markers used to detect the project root for scope-aware memory partitioning.
+    pub project_root_markers: Vec<String>,
+
+    /// Effective memory scope kind for the current session.
+    pub memory_scope_kind: String,
+
+    /// Effective memory scope key for the current session.
+    pub memory_scope_key: String,
 
     /// Directory containing all Codex state (defaults to `~/.codex` but can be
     /// overridden by the `CODEX_HOME` environment variable).
@@ -2446,6 +2456,16 @@ impl Config {
         let allow_login_shell = cfg.allow_login_shell.unwrap_or(true);
 
         let history = cfg.history.unwrap_or_default();
+        let project_root_markers = cfg
+            .project_root_markers
+            .clone()
+            .unwrap_or_else(default_project_root_markers);
+        let memories: MemoriesConfig = cfg.memories.clone().unwrap_or_default().into();
+        let memory_scope = crate::memories::resolve_memory_scope(
+            resolved_cwd.as_path(),
+            &project_root_markers,
+            &memories,
+        );
 
         let agent_max_threads = cfg
             .agents
@@ -2840,7 +2860,10 @@ impl Config {
             agent_max_depth,
             agent_roles,
             claude_code_backend_command,
-            memories: cfg.memories.unwrap_or_default().into(),
+            memories,
+            project_root_markers,
+            memory_scope_kind: memory_scope.kind,
+            memory_scope_key: memory_scope.key,
             agent_job_max_runtime_seconds,
             codex_home,
             sqlite_home,

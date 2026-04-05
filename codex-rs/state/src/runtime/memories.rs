@@ -18,8 +18,9 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 const JOB_KIND_MEMORY_STAGE1: &str = "memory_stage1";
-const JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL: &str = "memory_consolidate_global";
-const MEMORY_CONSOLIDATION_JOB_KEY: &str = "global";
+const JOB_KIND_MEMORY_CONSOLIDATE: &str = "memory_consolidate_global";
+const GLOBAL_MEMORY_SCOPE_KIND: &str = "global";
+const GLOBAL_MEMORY_SCOPE_KEY: &str = "global";
 
 const DEFAULT_RETRY_REMAINING: i64 = 3;
 
@@ -62,7 +63,7 @@ WHERE kind = ? OR kind = ?
             "#,
         )
         .bind(JOB_KIND_MEMORY_STAGE1)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
         .execute(&mut *tx)
         .await?;
 
@@ -141,6 +142,22 @@ WHERE thread_id = ?
         current_thread_id: ThreadId,
         params: Stage1StartupClaimParams<'_>,
     ) -> anyhow::Result<Vec<Stage1JobClaim>> {
+        self.claim_stage1_jobs_for_startup_in_scope(
+            current_thread_id,
+            params,
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+        )
+        .await
+    }
+
+    pub async fn claim_stage1_jobs_for_startup_in_scope(
+        &self,
+        current_thread_id: ThreadId,
+        params: Stage1StartupClaimParams<'_>,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+    ) -> anyhow::Result<Vec<Stage1JobClaim>> {
         let Stage1StartupClaimParams {
             scan_limit,
             max_claimed,
@@ -173,6 +190,8 @@ SELECT
     model,
     reasoning_effort,
     cwd,
+    memory_scope_kind,
+    memory_scope_key,
     cli_version,
     title,
     sandbox_policy,
@@ -206,6 +225,12 @@ LEFT JOIN jobs
             /*search_term*/ None,
         );
         builder.push(" AND threads.memory_mode = 'enabled'");
+        builder
+            .push(" AND threads.memory_scope_kind = ")
+            .push_bind(memory_scope_kind);
+        builder
+            .push(" AND threads.memory_scope_key = ")
+            .push_bind(memory_scope_key);
         builder
             .push(" AND id != ")
             .push_bind(current_thread_id.as_str());
@@ -263,6 +288,16 @@ LEFT JOIN jobs
         &self,
         n: usize,
     ) -> anyhow::Result<Vec<Stage1Output>> {
+        self.list_stage1_outputs_for_scope(n, GLOBAL_MEMORY_SCOPE_KIND, GLOBAL_MEMORY_SCOPE_KEY)
+            .await
+    }
+
+    pub async fn list_stage1_outputs_for_scope(
+        &self,
+        n: usize,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+    ) -> anyhow::Result<Vec<Stage1Output>> {
         if n == 0 {
             return Ok(Vec::new());
         }
@@ -283,11 +318,15 @@ FROM stage1_outputs AS so
 LEFT JOIN threads AS t
     ON t.id = so.thread_id
 WHERE t.memory_mode = 'enabled'
+  AND t.memory_scope_kind = ?
+  AND t.memory_scope_key = ?
   AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
 ORDER BY so.source_updated_at DESC, so.thread_id DESC
 LIMIT ?
             "#,
         )
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .bind(n as i64)
         .fetch_all(self.pool.as_ref())
         .await?;
@@ -310,6 +349,22 @@ LIMIT ?
         max_unused_days: i64,
         limit: usize,
     ) -> anyhow::Result<usize> {
+        self.prune_stage1_outputs_for_retention_in_scope(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            max_unused_days,
+            limit,
+        )
+        .await
+    }
+
+    pub async fn prune_stage1_outputs_for_retention_in_scope(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        max_unused_days: i64,
+        limit: usize,
+    ) -> anyhow::Result<usize> {
         if limit == 0 {
             return Ok(0);
         }
@@ -319,9 +374,13 @@ LIMIT ?
             r#"
 DELETE FROM stage1_outputs
 WHERE thread_id IN (
-    SELECT thread_id
-    FROM stage1_outputs
+    SELECT so.thread_id
+    FROM stage1_outputs AS so
+    JOIN threads AS t
+        ON t.id = so.thread_id
     WHERE selected_for_phase2 = 0
+      AND t.memory_scope_kind = ?
+      AND t.memory_scope_key = ?
       AND COALESCE(last_usage, source_updated_at) < ?
     ORDER BY
       COALESCE(last_usage, source_updated_at) ASC,
@@ -331,6 +390,8 @@ WHERE thread_id IN (
 )
             "#,
         )
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .bind(cutoff)
         .bind(limit as i64)
         .execute(self.pool.as_ref())
@@ -365,6 +426,22 @@ WHERE thread_id IN (
         n: usize,
         max_unused_days: i64,
     ) -> anyhow::Result<Phase2InputSelection> {
+        self.get_phase2_input_selection_in_scope(
+            n,
+            max_unused_days,
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+        )
+        .await
+    }
+
+    pub async fn get_phase2_input_selection_in_scope(
+        &self,
+        n: usize,
+        max_unused_days: i64,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+    ) -> anyhow::Result<Phase2InputSelection> {
         if n == 0 {
             return Ok(Phase2InputSelection::default());
         }
@@ -388,6 +465,8 @@ FROM stage1_outputs AS so
 LEFT JOIN threads AS t
     ON t.id = so.thread_id
 WHERE t.memory_mode = 'enabled'
+  AND t.memory_scope_kind = ?
+  AND t.memory_scope_key = ?
   AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
   AND (
         (so.last_usage IS NOT NULL AND so.last_usage >= ?)
@@ -401,6 +480,8 @@ ORDER BY
 LIMIT ?
             "#,
         )
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .bind(cutoff)
         .bind(cutoff)
         .bind(n as i64)
@@ -441,9 +522,13 @@ FROM stage1_outputs AS so
 LEFT JOIN threads AS t
     ON t.id = so.thread_id
 WHERE so.selected_for_phase2 = 1
+  AND t.memory_scope_kind = ?
+  AND t.memory_scope_key = ?
 ORDER BY so.source_updated_at DESC, so.thread_id DESC
             "#,
         )
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .fetch_all(self.pool.as_ref())
         .await?;
 
@@ -501,9 +586,11 @@ WHERE id = ? AND memory_mode != 'polluted'
 
         let selected_for_phase2 = sqlx::query_scalar::<_, i64>(
             r#"
-SELECT selected_for_phase2
-FROM stage1_outputs
-WHERE thread_id = ?
+SELECT so.selected_for_phase2
+FROM stage1_outputs AS so
+JOIN threads AS t
+    ON t.id = so.thread_id
+WHERE so.thread_id = ?
             "#,
         )
         .bind(thread_id.as_str())
@@ -511,7 +598,25 @@ WHERE thread_id = ?
         .await?
         .unwrap_or(0);
         if selected_for_phase2 != 0 {
-            enqueue_global_consolidation_with_executor(&mut *tx, now).await?;
+            let scope = sqlx::query(
+                r#"
+SELECT memory_scope_kind, memory_scope_key
+FROM threads
+WHERE id = ?
+                "#,
+            )
+            .bind(thread_id.as_str())
+            .fetch_one(&mut *tx)
+            .await?;
+            let memory_scope_kind: String = scope.try_get("memory_scope_kind")?;
+            let memory_scope_key: String = scope.try_get("memory_scope_key")?;
+            enqueue_phase2_consolidation_with_executor(
+                &mut *tx,
+                memory_scope_kind.as_str(),
+                memory_scope_key.as_str(),
+                now,
+            )
+            .await?;
         }
 
         tx.commit().await?;
@@ -788,7 +893,25 @@ WHERE excluded.source_updated_at >= stage1_outputs.source_updated_at
         .execute(&mut *tx)
         .await?;
 
-        enqueue_global_consolidation_with_executor(&mut *tx, source_updated_at).await?;
+        let scope = sqlx::query(
+            r#"
+SELECT memory_scope_kind, memory_scope_key
+FROM threads
+WHERE id = ?
+            "#,
+        )
+        .bind(thread_id.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
+        let memory_scope_kind: String = scope.try_get("memory_scope_kind")?;
+        let memory_scope_key: String = scope.try_get("memory_scope_key")?;
+        enqueue_phase2_consolidation_with_executor(
+            &mut *tx,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+            source_updated_at,
+        )
+        .await?;
 
         tx.commit().await?;
         Ok(true)
@@ -863,7 +986,25 @@ WHERE thread_id = ?
         .rows_affected();
 
         if deleted_rows > 0 {
-            enqueue_global_consolidation_with_executor(&mut *tx, source_updated_at).await?;
+            let scope = sqlx::query(
+                r#"
+SELECT memory_scope_kind, memory_scope_key
+FROM threads
+WHERE id = ?
+                "#,
+            )
+            .bind(thread_id.as_str())
+            .fetch_one(&mut *tx)
+            .await?;
+            let memory_scope_kind: String = scope.try_get("memory_scope_kind")?;
+            let memory_scope_key: String = scope.try_get("memory_scope_key")?;
+            enqueue_phase2_consolidation_with_executor(
+                &mut *tx,
+                memory_scope_kind.as_str(),
+                memory_scope_key.as_str(),
+                source_updated_at,
+            )
+            .await?;
         }
 
         tx.commit().await?;
@@ -922,7 +1063,27 @@ WHERE kind = ? AND job_key = ?
     /// enqueue marks new consolidation work even when `source_updated_at` is
     /// older than prior maxima.
     pub async fn enqueue_global_consolidation(&self, input_watermark: i64) -> anyhow::Result<()> {
-        enqueue_global_consolidation_with_executor(self.pool.as_ref(), input_watermark).await
+        self.enqueue_phase2_consolidation(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            input_watermark,
+        )
+        .await
+    }
+
+    pub async fn enqueue_phase2_consolidation(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        input_watermark: i64,
+    ) -> anyhow::Result<()> {
+        enqueue_phase2_consolidation_with_executor(
+            self.pool.as_ref(),
+            memory_scope_kind,
+            memory_scope_key,
+            input_watermark,
+        )
+        .await
     }
 
     /// Attempts to claim the global phase-2 consolidation job.
@@ -939,10 +1100,27 @@ WHERE kind = ? AND job_key = ?
         worker_id: ThreadId,
         lease_seconds: i64,
     ) -> anyhow::Result<Phase2JobClaimOutcome> {
+        self.try_claim_phase2_job(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            worker_id,
+            lease_seconds,
+        )
+        .await
+    }
+
+    pub async fn try_claim_phase2_job(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        worker_id: ThreadId,
+        lease_seconds: i64,
+    ) -> anyhow::Result<Phase2JobClaimOutcome> {
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
         let ownership_token = Uuid::new_v4().to_string();
         let worker_id = worker_id.to_string();
+        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
 
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
@@ -953,8 +1131,8 @@ FROM jobs
 WHERE kind = ? AND job_key = ?
             "#,
         )
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-        .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+        .bind(job_key.as_str())
         .fetch_optional(&mut *tx)
         .await?;
 
@@ -1013,8 +1191,8 @@ WHERE kind = ? AND job_key = ?
         .bind(ownership_token.as_str())
         .bind(now)
         .bind(lease_until)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-        .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+        .bind(job_key.as_str())
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -1042,8 +1220,25 @@ WHERE kind = ? AND job_key = ?
         ownership_token: &str,
         lease_seconds: i64,
     ) -> anyhow::Result<bool> {
+        self.heartbeat_phase2_job(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            ownership_token,
+            lease_seconds,
+        )
+        .await
+    }
+
+    pub async fn heartbeat_phase2_job(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        ownership_token: &str,
+        lease_seconds: i64,
+    ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
+        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1053,8 +1248,8 @@ WHERE kind = ? AND job_key = ?
             "#,
         )
         .bind(lease_until)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-        .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(self.pool.as_ref())
         .await?
@@ -1080,8 +1275,27 @@ WHERE kind = ? AND job_key = ?
         completed_watermark: i64,
         selected_outputs: &[Stage1Output],
     ) -> anyhow::Result<bool> {
+        self.mark_phase2_job_succeeded(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            ownership_token,
+            completed_watermark,
+            selected_outputs,
+        )
+        .await
+    }
+
+    pub async fn mark_phase2_job_succeeded(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        ownership_token: &str,
+        completed_watermark: i64,
+        selected_outputs: &[Stage1Output],
+    ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let mut tx = self.pool.begin().await?;
+        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1097,8 +1311,8 @@ WHERE kind = ? AND job_key = ?
         )
         .bind(now)
         .bind(completed_watermark)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-        .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(&mut *tx)
         .await?
@@ -1115,9 +1329,17 @@ UPDATE stage1_outputs
 SET
     selected_for_phase2 = 0,
     selected_for_phase2_source_updated_at = NULL
-WHERE selected_for_phase2 != 0 OR selected_for_phase2_source_updated_at IS NOT NULL
+WHERE thread_id IN (
+    SELECT id
+    FROM threads
+    WHERE memory_scope_kind = ?
+      AND memory_scope_key = ?
+)
+  AND (selected_for_phase2 != 0 OR selected_for_phase2_source_updated_at IS NOT NULL)
             "#,
         )
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .execute(&mut *tx)
         .await?;
 
@@ -1155,8 +1377,27 @@ WHERE thread_id = ? AND source_updated_at = ?
         failure_reason: &str,
         retry_delay_seconds: i64,
     ) -> anyhow::Result<bool> {
+        self.mark_phase2_job_failed(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            ownership_token,
+            failure_reason,
+            retry_delay_seconds,
+        )
+        .await
+    }
+
+    pub async fn mark_phase2_job_failed(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        ownership_token: &str,
+        failure_reason: &str,
+        retry_delay_seconds: i64,
+    ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
+        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1174,8 +1415,8 @@ WHERE kind = ? AND job_key = ?
         .bind(now)
         .bind(retry_at)
         .bind(failure_reason)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-        .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(self.pool.as_ref())
         .await?
@@ -1196,8 +1437,27 @@ WHERE kind = ? AND job_key = ?
         failure_reason: &str,
         retry_delay_seconds: i64,
     ) -> anyhow::Result<bool> {
+        self.mark_phase2_job_failed_if_unowned(
+            GLOBAL_MEMORY_SCOPE_KIND,
+            GLOBAL_MEMORY_SCOPE_KEY,
+            ownership_token,
+            failure_reason,
+            retry_delay_seconds,
+        )
+        .await
+    }
+
+    pub async fn mark_phase2_job_failed_if_unowned(
+        &self,
+        memory_scope_kind: &str,
+        memory_scope_key: &str,
+        ownership_token: &str,
+        failure_reason: &str,
+        retry_delay_seconds: i64,
+    ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
+        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1216,8 +1476,8 @@ WHERE kind = ? AND job_key = ?
         .bind(now)
         .bind(retry_at)
         .bind(failure_reason)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-        .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(self.pool.as_ref())
         .await?
@@ -1227,13 +1487,16 @@ WHERE kind = ? AND job_key = ?
     }
 }
 
-async fn enqueue_global_consolidation_with_executor<'e, E>(
+async fn enqueue_phase2_consolidation_with_executor<'e, E>(
     executor: E,
+    memory_scope_kind: &str,
+    memory_scope_key: &str,
     input_watermark: i64,
 ) -> anyhow::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
 {
+    let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
     sqlx::query(
         r#"
 INSERT INTO jobs (
@@ -1268,8 +1531,8 @@ ON CONFLICT(kind, job_key) DO UPDATE SET
     END
         "#,
     )
-    .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
-    .bind(MEMORY_CONSOLIDATION_JOB_KEY)
+    .bind(JOB_KIND_MEMORY_CONSOLIDATE)
+    .bind(job_key.as_str())
     .bind(DEFAULT_RETRY_REMAINING)
     .bind(input_watermark)
     .execute(executor)
@@ -1278,9 +1541,18 @@ ON CONFLICT(kind, job_key) DO UPDATE SET
     Ok(())
 }
 
+fn memory_phase2_job_key(memory_scope_kind: &str, memory_scope_key: &str) -> String {
+    if memory_scope_kind == GLOBAL_MEMORY_SCOPE_KIND && memory_scope_key == GLOBAL_MEMORY_SCOPE_KEY
+    {
+        GLOBAL_MEMORY_SCOPE_KEY.to_string()
+    } else {
+        format!("{memory_scope_kind}:{memory_scope_key}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL;
+    use super::JOB_KIND_MEMORY_CONSOLIDATE;
     use super::JOB_KIND_MEMORY_STAGE1;
     use super::StateRuntime;
     use super::test_support::test_thread_metadata;
@@ -1899,7 +2171,7 @@ mod tests {
         let memory_jobs_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = ? OR kind = ?")
                 .bind(JOB_KIND_MEMORY_STAGE1)
-                .bind(JOB_KIND_MEMORY_CONSOLIDATE_GLOBAL)
+                .bind(JOB_KIND_MEMORY_CONSOLIDATE)
                 .fetch_one(runtime.pool.as_ref())
                 .await
                 .expect("count memory jobs");

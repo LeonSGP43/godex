@@ -1,6 +1,7 @@
 use crate::config::types::MemoriesConfig;
-use crate::memories::memory_root;
+use crate::memories::MemoryScope;
 use crate::memories::phase_one;
+use crate::memories::scoped_memory_root;
 use crate::memories::semantic_index::SemanticRecallMatch;
 use crate::memories::semantic_index::SemanticRecallOptions;
 use crate::memories::semantic_index::semantic_recall;
@@ -16,6 +17,11 @@ use std::path::Path;
 use std::sync::LazyLock;
 use tokio::fs;
 use tracing::warn;
+
+#[cfg(test)]
+use crate::memories::GLOBAL_MEMORY_SCOPE_KEY;
+#[cfg(test)]
+use crate::memories::GLOBAL_MEMORY_SCOPE_KIND;
 
 static CONSOLIDATION_PROMPT_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
     parse_embedded_template(
@@ -168,9 +174,17 @@ pub(super) fn build_stage_one_input_message(
 pub(crate) async fn build_memory_tool_developer_instructions(
     codex_home: &Path,
     memories: &MemoriesConfig,
+    memory_scope_kind: &str,
+    memory_scope_key: &str,
     turn_query: Option<&str>,
 ) -> Option<String> {
-    let base_path = memory_root(codex_home);
+    let base_path = scoped_memory_root(
+        codex_home,
+        &MemoryScope {
+            kind: memory_scope_kind.to_string(),
+            key: memory_scope_key.to_string(),
+        },
+    );
     let memory_summary_path = base_path.join("memory_summary.md");
     let memory_summary = fs::read_to_string(&memory_summary_path)
         .await
@@ -179,7 +193,7 @@ pub(crate) async fn build_memory_tool_developer_instructions(
         .to_string();
     let memory_summary = truncate_text(
         &memory_summary,
-        TruncationPolicy::Tokens(phase_one::MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_SUMMARY_TOKEN_LIMIT),
+        TruncationPolicy::Tokens(memories.summary_token_limit),
     );
     if memory_summary.is_empty() {
         return None;

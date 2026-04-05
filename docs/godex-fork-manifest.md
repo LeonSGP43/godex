@@ -119,6 +119,36 @@ default during conflict resolution.
   - `bash scripts/godex-maintain.sh check`
   - `bash scripts/godex-maintain.sh smoke`
 
+### 7. Memory Scope Partitioning
+
+- Purpose:
+  - keep the legacy global memory flow available while allowing `godex` to
+    isolate memories by detected project root
+  - limit startup memory injection size with a configurable summary token cap
+- Owner files:
+  - `codex-rs/core/src/config/types.rs`
+  - `codex-rs/core/src/config/mod.rs`
+  - `codex-rs/core/src/memories/scope.rs`
+  - `codex-rs/core/src/memories/prompts.rs`
+  - `codex-rs/core/src/memories/phase1.rs`
+  - `codex-rs/core/src/memories/phase2.rs`
+  - `codex-rs/state/src/runtime/memories.rs`
+  - `codex-rs/state/src/runtime/threads.rs`
+  - `docs/config.md`
+  - `docs/godex-memory-system.md`
+- Required behavior:
+  - `memories.scope = "global"` keeps using `<CODEX_HOME>/memories`
+  - `memories.scope = "project"` uses a project-partitioned root under
+    `<CODEX_HOME>/memories/scopes/project/...`
+  - project scope only selects, consolidates, and injects memories belonging to
+    the same detected project root
+  - `memories.summary_token_limit` controls how much `memory_summary.md` is
+    injected into developer instructions
+- Verification:
+  - `cargo test -p codex-core memories:: -- --nocapture`
+  - `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`
+  - inspect scoped memory artifacts under `~/.codex/memories/scopes/project/`
+
 ## Hot Overlap Files
 
 These files require special care during upstream sync:

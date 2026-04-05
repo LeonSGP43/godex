@@ -85,12 +85,17 @@ fixed_model = "grok-4.1-thinking"
 ## Memories semantic helpers
 
 The `[memories]` section supports semantic helper controls for the generated
-memory indexes and hybrid QMD recall:
+memory indexes, project scoping, summary truncation, and hybrid QMD recall:
 
 For full architecture, runtime flow, and complete parameter annotations, see:
 
 - `docs/godex-memory-system.md`
 
+- `scope`: memory partition to use for this session (default `global`)
+  - `global`: legacy shared memory root under `~/.codex/memories`
+  - `project`: partition memory under `~/.codex/memories/scopes/project/<project-hash>`
+- `summary_token_limit`: max tokens from `memory_summary.md` injected into
+  developer instructions (default `5000`, clamped to `256..20000`)
 - `semantic_index_enabled`: enable or disable generation/usage of
   `memory_index.qmd` and `vector_index.json` (default `true`)
 - `semantic_recall_limit`: max number of semantic recall hints injected into
@@ -106,6 +111,8 @@ Example:
 
 ```toml
 [memories]
+scope = "project"
+summary_token_limit = 3000
 semantic_index_enabled = true
 semantic_recall_limit = 8
 qmd_hybrid_enabled = true

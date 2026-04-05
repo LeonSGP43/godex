@@ -79,6 +79,10 @@ pub struct ThreadMetadata {
     pub reasoning_effort: Option<ReasoningEffort>,
     /// The working directory for the thread.
     pub cwd: PathBuf,
+    /// The memory scope kind captured when the thread started.
+    pub memory_scope_kind: String,
+    /// The memory scope key captured when the thread started.
+    pub memory_scope_key: String,
     /// Version of the CLI that created the thread.
     pub cli_version: String,
     /// A best-effort thread title.
@@ -124,6 +128,10 @@ pub struct ThreadMetadataBuilder {
     pub model_provider: Option<String>,
     /// The working directory for the thread.
     pub cwd: PathBuf,
+    /// The memory scope kind captured when the thread started.
+    pub memory_scope_kind: String,
+    /// The memory scope key captured when the thread started.
+    pub memory_scope_key: String,
     /// Version of the CLI that created the thread.
     pub cli_version: Option<String>,
     /// The sandbox policy.
@@ -159,6 +167,8 @@ impl ThreadMetadataBuilder {
             agent_path: None,
             model_provider: None,
             cwd: PathBuf::new(),
+            memory_scope_kind: "global".to_string(),
+            memory_scope_key: "global".to_string(),
             cli_version: None,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             approval_mode: AskForApproval::OnRequest,
@@ -198,6 +208,8 @@ impl ThreadMetadataBuilder {
             model: None,
             reasoning_effort: None,
             cwd: self.cwd.clone(),
+            memory_scope_kind: self.memory_scope_kind.clone(),
+            memory_scope_key: self.memory_scope_key.clone(),
             cli_version: self.cli_version.clone().unwrap_or_default(),
             title: String::new(),
             sandbox_policy,
@@ -265,6 +277,12 @@ impl ThreadMetadata {
         if self.cwd != other.cwd {
             diffs.push("cwd");
         }
+        if self.memory_scope_kind != other.memory_scope_kind {
+            diffs.push("memory_scope_kind");
+        }
+        if self.memory_scope_key != other.memory_scope_key {
+            diffs.push("memory_scope_key");
+        }
         if self.cli_version != other.cli_version {
             diffs.push("cli_version");
         }
@@ -317,6 +335,8 @@ pub(crate) struct ThreadRow {
     model: Option<String>,
     reasoning_effort: Option<String>,
     cwd: String,
+    memory_scope_kind: String,
+    memory_scope_key: String,
     cli_version: String,
     title: String,
     sandbox_policy: String,
@@ -344,6 +364,8 @@ impl ThreadRow {
             model: row.try_get("model")?,
             reasoning_effort: row.try_get("reasoning_effort")?,
             cwd: row.try_get("cwd")?,
+            memory_scope_kind: row.try_get("memory_scope_kind")?,
+            memory_scope_key: row.try_get("memory_scope_key")?,
             cli_version: row.try_get("cli_version")?,
             title: row.try_get("title")?,
             sandbox_policy: row.try_get("sandbox_policy")?,
@@ -375,6 +397,8 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             model,
             reasoning_effort,
             cwd,
+            memory_scope_kind,
+            memory_scope_key,
             cli_version,
             title,
             sandbox_policy,
@@ -400,6 +424,8 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             reasoning_effort: reasoning_effort
                 .and_then(|value| value.parse::<ReasoningEffort>().ok()),
             cwd: PathBuf::from(cwd),
+            memory_scope_kind,
+            memory_scope_key,
             cli_version,
             title,
             sandbox_policy,
@@ -468,6 +494,8 @@ mod tests {
             model: Some("gpt-5".to_string()),
             reasoning_effort: reasoning_effort.map(str::to_string),
             cwd: "/tmp/workspace".to_string(),
+            memory_scope_kind: "global".to_string(),
+            memory_scope_key: "global".to_string(),
             cli_version: "0.0.0".to_string(),
             title: String::new(),
             sandbox_policy: "read-only".to_string(),
@@ -496,6 +524,8 @@ mod tests {
             model: Some("gpt-5".to_string()),
             reasoning_effort,
             cwd: PathBuf::from("/tmp/workspace"),
+            memory_scope_kind: "global".to_string(),
+            memory_scope_key: "global".to_string(),
             cli_version: "0.0.0".to_string(),
             title: String::new(),
             sandbox_policy: "read-only".to_string(),

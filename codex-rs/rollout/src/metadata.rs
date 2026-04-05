@@ -53,6 +53,12 @@ pub(crate) fn builder_from_session_meta(
     builder.agent_role = session_meta.meta.agent_role.clone();
     builder.agent_path = session_meta.meta.agent_path.clone();
     builder.cwd = session_meta.meta.cwd.clone();
+    if let Some(memory_scope_kind) = session_meta.meta.memory_scope_kind.as_deref() {
+        builder.memory_scope_kind = memory_scope_kind.to_string();
+    }
+    if let Some(memory_scope_key) = session_meta.meta.memory_scope_key.as_deref() {
+        builder.memory_scope_key = memory_scope_key.to_string();
+    }
     builder.cli_version = Some(session_meta.meta.cli_version.clone());
     builder.sandbox_policy = SandboxPolicy::new_read_only_policy();
     builder.approval_mode = AskForApproval::OnRequest;

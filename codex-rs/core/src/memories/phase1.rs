@@ -3,7 +3,6 @@ use crate::RolloutRecorder;
 use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::config::Config;
-use crate::config::types::MemoriesConfig;
 use crate::contextual_user_message::is_memory_excluded_contextual_user_fragment;
 use crate::error::CodexErr;
 use crate::memories::metrics;
@@ -91,7 +90,7 @@ pub(in crate::memories) async fn run(session: &Arc<Session>, config: &Config) {
         .ok();
 
     // 1. Claim startup job.
-    let Some(claimed_candidates) = claim_startup_jobs(session, &config.memories).await else {
+    let Some(claimed_candidates) = claim_startup_jobs(session, config).await else {
         return;
     };
     if claimed_candidates.is_empty() {
@@ -127,7 +126,12 @@ pub(in crate::memories) async fn prune(session: &Arc<Session>, config: &Config) 
     if let Some(db) = session.services.state_db.as_deref() {
         let max_unused_days = config.memories.max_unused_days;
         match db
-            .prune_stage1_outputs_for_retention(max_unused_days, PRUNE_BATCH_SIZE)
+            .prune_stage1_outputs_for_retention_in_scope(
+                &config.memory_scope_kind,
+                &config.memory_scope_key,
+                max_unused_days,
+                PRUNE_BATCH_SIZE,
+            )
             .await
         {
             Ok(pruned) => {
@@ -179,7 +183,7 @@ impl RequestContext {
 
 async fn claim_startup_jobs(
     session: &Arc<Session>,
-    memories_config: &MemoriesConfig,
+    config: &Config,
 ) -> Option<Vec<codex_state::Stage1JobClaim>> {
     let Some(state_db) = session.services.state_db.as_deref() else {
         // This should not happen.
@@ -193,16 +197,18 @@ async fn claim_startup_jobs(
         .collect::<Vec<_>>();
 
     match state_db
-        .claim_stage1_jobs_for_startup(
+        .claim_stage1_jobs_for_startup_in_scope(
             session.conversation_id,
             codex_state::Stage1StartupClaimParams {
                 scan_limit: phase_one::THREAD_SCAN_LIMIT,
-                max_claimed: memories_config.max_rollouts_per_startup,
-                max_age_days: memories_config.max_rollout_age_days,
-                min_rollout_idle_hours: memories_config.min_rollout_idle_hours,
+                max_claimed: config.memories.max_rollouts_per_startup,
+                max_age_days: config.memories.max_rollout_age_days,
+                min_rollout_idle_hours: config.memories.min_rollout_idle_hours,
                 allowed_sources: allowed_sources.as_slice(),
                 lease_seconds: phase_one::JOB_LEASE_SECONDS,
             },
+            &config.memory_scope_kind,
+            &config.memory_scope_key,
         )
         .await
     {

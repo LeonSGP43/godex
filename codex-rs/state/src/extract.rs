@@ -60,6 +60,12 @@ fn apply_session_meta_from_item(metadata: &mut ThreadMetadata, meta_line: &Sessi
     if !meta_line.meta.cwd.as_os_str().is_empty() {
         metadata.cwd = meta_line.meta.cwd.clone();
     }
+    if let Some(memory_scope_kind) = meta_line.meta.memory_scope_kind.as_deref() {
+        metadata.memory_scope_kind = memory_scope_kind.to_string();
+    }
+    if let Some(memory_scope_key) = meta_line.meta.memory_scope_key.as_deref() {
+        metadata.memory_scope_key = memory_scope_key.to_string();
+    }
     if let Some(git) = meta_line.git.as_ref() {
         metadata.git_sha = git.commit_hash.as_ref().map(|sha| sha.0.clone());
         metadata.git_branch = git.branch.clone();
@@ -259,6 +265,8 @@ mod tests {
                     base_instructions: None,
                     dynamic_tools: None,
                     memory_mode: None,
+                    memory_scope_kind: None,
+                    memory_scope_key: None,
                 },
                 git: None,
             }),
@@ -386,6 +394,8 @@ mod tests {
                     base_instructions: None,
                     dynamic_tools: None,
                     memory_mode: None,
+                    memory_scope_kind: None,
+                    memory_scope_key: None,
                 },
                 git: None,
             }),
@@ -416,6 +426,8 @@ mod tests {
             title: String::new(),
             sandbox_policy: "read-only".to_string(),
             approval_mode: "on-request".to_string(),
+            memory_scope_kind: "global".to_string(),
+            memory_scope_key: "global".to_string(),
             tokens_used: 1,
             first_user_message: None,
             archived_at: None,

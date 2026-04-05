@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-04-05
+
+### Added
+
+- What changed: added selectable memory scope modes so `godex` can keep using the legacy global memory root or partition memories per project root, and threaded the chosen scope through config resolution, rollout/session metadata, state persistence, phase-1 extraction, phase-2 consolidation, and read-path injection. The memory read path also now honors a configurable `summary_token_limit` instead of a hard-coded summary truncation ceiling.
+- Why: the fork needed a practical way to avoid cross-project memory pollution and reduce unnecessary context consumption without breaking the existing global memory workflow.
+- Impact: maintainers can now choose between shared global memory and project-scoped memory partitions, where project mode only reads, writes, and consolidates conversations from the detected project root while keeping memory artifacts stored under the same global `CODEX_HOME` tree.
+- Verification: `cargo test -p codex-core memories:: -- --nocapture`, `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`, `cargo fmt --all --manifest-path codex-rs/Cargo.toml`, `python3 tools/argument-comment-lint/run-prebuilt-linter.py`
+- Files: `codex-rs/core/src/config/types.rs`, `codex-rs/core/src/config/mod.rs`, `codex-rs/core/src/memories/scope.rs`, `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/phase1.rs`, `codex-rs/core/src/memories/phase2.rs`, `codex-rs/core/src/codex.rs`, `codex-rs/protocol/src/protocol.rs`, `codex-rs/rollout/src/config.rs`, `codex-rs/rollout/src/metadata.rs`, `codex-rs/state/src/model/thread_metadata.rs`, `codex-rs/state/src/runtime/memories.rs`, `codex-rs/state/src/runtime/threads.rs`, `codex-rs/state/migrations/0023_threads_memory_scope.sql`, `codex-rs/core/config.schema.json`, `docs/config.md`, `docs/godex-memory-system.md`, `docs/godex-fork-manifest.md`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`
+
 ## [0.2.13] - 2026-04-03
 
 ### Fixed

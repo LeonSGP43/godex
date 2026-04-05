@@ -32,6 +32,7 @@ pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION: usize = 256;
 pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
 pub const DEFAULT_MEMORIES_SEMANTIC_RECALL_LIMIT: usize = 5;
 pub const DEFAULT_MEMORIES_QMD_RERANK_LIMIT: usize = 30;
+pub const DEFAULT_MEMORIES_SUMMARY_TOKEN_LIMIT: usize = 5_000;
 pub const DEFAULT_GROK_BASE_ORIGIN: &str = "https://apileon.leonai.top";
 pub const DEFAULT_GROK_API_KEY_ENV: &str = "GROK_API_KEY";
 pub const DEFAULT_GROK_DYNAMIC_MODEL: &str = "grok-4.20-beta";
@@ -579,6 +580,14 @@ pub struct ToolSuggestConfig {
     pub discoverables: Vec<ToolSuggestDiscoverable>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryScopeMode {
+    #[default]
+    Global,
+    Project,
+}
+
 /// Memories settings loaded from config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -589,6 +598,8 @@ pub struct MemoriesToml {
     pub generate_memories: Option<bool>,
     /// When `false`, skip injecting memory usage instructions into developer prompts.
     pub use_memories: Option<bool>,
+    /// Which memory partition to read/write for the current session.
+    pub scope: Option<MemoryScopeMode>,
     /// Maximum number of recent raw memories retained for global consolidation.
     pub max_raw_memories_for_consolidation: Option<usize>,
     /// Maximum number of days since a memory was last used before it becomes ineligible for phase 2 selection.
@@ -609,6 +620,8 @@ pub struct MemoriesToml {
     pub qmd_query_expansion_enabled: Option<bool>,
     /// Maximum number of candidates to rerank in the hybrid QMD recall pass.
     pub qmd_rerank_limit: Option<usize>,
+    /// Maximum number of tokens from `memory_summary.md` injected into developer instructions.
+    pub summary_token_limit: Option<usize>,
     /// Model used for thread summarisation.
     pub extract_model: Option<String>,
     /// Model used for memory consolidation.
@@ -621,6 +634,7 @@ pub struct MemoriesConfig {
     pub no_memories_if_mcp_or_web_search: bool,
     pub generate_memories: bool,
     pub use_memories: bool,
+    pub scope: MemoryScopeMode,
     pub max_raw_memories_for_consolidation: usize,
     pub max_unused_days: i64,
     pub max_rollout_age_days: i64,
@@ -631,6 +645,7 @@ pub struct MemoriesConfig {
     pub qmd_hybrid_enabled: bool,
     pub qmd_query_expansion_enabled: bool,
     pub qmd_rerank_limit: usize,
+    pub summary_token_limit: usize,
     pub extract_model: Option<String>,
     pub consolidation_model: Option<String>,
 }
@@ -641,6 +656,7 @@ impl Default for MemoriesConfig {
             no_memories_if_mcp_or_web_search: false,
             generate_memories: true,
             use_memories: true,
+            scope: MemoryScopeMode::Global,
             max_raw_memories_for_consolidation: DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION,
             max_unused_days: DEFAULT_MEMORIES_MAX_UNUSED_DAYS,
             max_rollout_age_days: DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS,
@@ -651,6 +667,7 @@ impl Default for MemoriesConfig {
             qmd_hybrid_enabled: true,
             qmd_query_expansion_enabled: true,
             qmd_rerank_limit: DEFAULT_MEMORIES_QMD_RERANK_LIMIT,
+            summary_token_limit: DEFAULT_MEMORIES_SUMMARY_TOKEN_LIMIT,
             extract_model: None,
             consolidation_model: None,
         }
@@ -666,6 +683,7 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .unwrap_or(defaults.no_memories_if_mcp_or_web_search),
             generate_memories: toml.generate_memories.unwrap_or(defaults.generate_memories),
             use_memories: toml.use_memories.unwrap_or(defaults.use_memories),
+            scope: toml.scope.unwrap_or(defaults.scope),
             max_raw_memories_for_consolidation: toml
                 .max_raw_memories_for_consolidation
                 .unwrap_or(defaults.max_raw_memories_for_consolidation)
@@ -703,6 +721,10 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .qmd_rerank_limit
                 .unwrap_or(defaults.qmd_rerank_limit)
                 .clamp(1, 100),
+            summary_token_limit: toml
+                .summary_token_limit
+                .unwrap_or(defaults.summary_token_limit)
+                .clamp(256, 20_000),
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
         }
