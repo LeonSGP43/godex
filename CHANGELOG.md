@@ -4,6 +4,8 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-04-06
+
 ### Docs
 
 - What changed: tightened the memory-scope documentation in the README, config guide, and memory architecture spec so the docs now spell out scope precedence, project-root detection (`project_root_markers`, default `.git`), storage layout under both `~/.codex` and `~/.godex`, and what exactly remains isolated in project mode.
@@ -11,6 +13,14 @@ All notable changes to this fork are documented in this file.
 - Impact: users can now choose `global` versus `project` memory with a precise mental model, which reduces accidental cross-project memory use and makes startup troubleshooting much faster.
 - Verification: `cargo test -p codex-core --test memory_scope_smoke launch_overrides_resolve_distinct_memory_roots --manifest-path codex-rs/Cargo.toml -- --exact`
 - Files: `README.md`, `docs/config.md`, `docs/godex-memory-system.md`, `CHANGELOG.md`
+
+### Test
+
+- What changed: added a dedicated `memory_scope_smoke` integration test that proves launch-time `global` and `project` memory scopes resolve to different roots, reuse the same project scope directory across repeated launches, and keep `MEMORY.md` writes isolated between the two scopes.
+- Why: the memory-scope feature needed an explicit smoke test at the launch/config boundary so future refactors cannot silently collapse project-local memory back into the shared global root.
+- Impact: maintainers now have a repeatable verification step for the most important operator guarantee in this feature: choosing `project` at startup must not read or write the same memory root as `global`.
+- Verification: `cargo test -p codex-core --test memory_scope_smoke launch_overrides_resolve_distinct_memory_roots --manifest-path codex-rs/Cargo.toml -- --exact`
+- Files: `codex-rs/core/tests/memory_scope_smoke.rs`
 
 ## [0.2.16] - 2026-04-06
 
