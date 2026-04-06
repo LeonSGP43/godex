@@ -126,6 +126,7 @@ default during conflict resolution.
     isolate memories by detected project root
   - limit startup memory injection size with a configurable summary token cap
 - Owner files:
+  - `codex-rs/cli/src/main.rs`
   - `codex-rs/core/src/config/types.rs`
   - `codex-rs/core/src/config/mod.rs`
   - `codex-rs/core/src/memories/scope.rs`
@@ -140,6 +141,8 @@ default during conflict resolution.
   - `memories.scope = "global"` keeps using `<CODEX_HOME>/memories`
   - `memories.scope = "project"` uses a project-partitioned root under
     `<CODEX_HOME>/memories/scopes/project/...`
+  - `godex --memory-scope global|project` temporarily overrides the configured
+    memory scope for the current launch
   - project scope only selects, consolidates, and injects memories belonging to
     the same detected project root
   - `memories.summary_token_limit` controls how much `memory_summary.md` is

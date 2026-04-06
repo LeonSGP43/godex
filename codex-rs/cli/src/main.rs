@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
+use clap::ValueEnum;
 use clap_complete::Shell;
 use clap_complete::generate;
 use codex_arg0::Arg0DispatchPaths;
@@ -77,6 +78,10 @@ struct MultitoolCli {
     #[arg(long = "godex-home", short = 'g', default_value_t = false)]
     use_godex_home: bool,
 
+    /// Temporarily select which memory partition this launch should use.
+    #[arg(long = "memory-scope", global = true, value_enum)]
+    memory_scope: Option<MemoryScopeCliArg>,
+
     #[clap(flatten)]
     pub config_overrides: CliConfigOverrides,
 
@@ -91,6 +96,22 @@ struct MultitoolCli {
 
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum MemoryScopeCliArg {
+    Global,
+    Project,
+}
+
+impl MemoryScopeCliArg {
+    fn raw_override(self) -> String {
+        let scope = match self {
+            Self::Global => "global",
+            Self::Project => "project",
+        };
+        format!("memories.scope=\"{scope}\"")
+    }
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -780,6 +801,7 @@ fn main() -> anyhow::Result<()> {
 async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     let MultitoolCli {
         use_godex_home,
+        memory_scope,
         config_overrides: mut root_config_overrides,
         feature_toggles,
         remote,
@@ -792,6 +814,11 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
     let toggle_overrides = feature_toggles.to_overrides()?;
     root_config_overrides.raw_overrides.extend(toggle_overrides);
+    if let Some(memory_scope) = memory_scope {
+        root_config_overrides
+            .raw_overrides
+            .push(memory_scope.raw_override());
+    }
     let root_remote = remote.remote;
     let root_remote_auth_token_env = remote.remote_auth_token_env;
 
@@ -2222,6 +2249,44 @@ mod tests {
         let cli = MultitoolCli::try_parse_from(["godex", "-g", "sync-upstream", "--dry-run"])
             .expect("parse should succeed");
         assert!(cli.use_godex_home);
+    }
+
+    #[test]
+    fn memory_scope_flag_parses_before_subcommand() {
+        let cli = MultitoolCli::try_parse_from([
+            "godex",
+            "--memory-scope",
+            "project",
+            "sync-upstream",
+            "--dry-run",
+        ])
+        .expect("parse should succeed");
+        assert_eq!(cli.memory_scope, Some(MemoryScopeCliArg::Project));
+    }
+
+    #[test]
+    fn memory_scope_flag_parses_after_subcommand() {
+        let cli = MultitoolCli::try_parse_from([
+            "godex",
+            "sync-upstream",
+            "--dry-run",
+            "--memory-scope",
+            "global",
+        ])
+        .expect("parse should succeed");
+        assert_eq!(cli.memory_scope, Some(MemoryScopeCliArg::Global));
+    }
+
+    #[test]
+    fn memory_scope_override_is_quoted_for_config_loading() {
+        assert_eq!(
+            MemoryScopeCliArg::Project.raw_override(),
+            "memories.scope=\"project\""
+        );
+        assert_eq!(
+            MemoryScopeCliArg::Global.raw_override(),
+            "memories.scope=\"global\""
+        );
     }
 
     #[test]

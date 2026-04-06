@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-04-05
+
+### Added
+
+- What changed: added a global `godex --memory-scope global|project` startup flag that injects a launch-only `memories.scope` override before command dispatch, so interactive mode and subcommands can switch between shared and project-partitioned memory roots without editing `config.toml`.
+- Why: the new project-scoped memory system needed a fast operational toggle at startup so the user can decide per launch whether to use global recall or directory-scoped recall while keeping the configured default intact.
+- Impact: operators can now keep a stable default in `[memories].scope` and temporarily flip a single run to `project` or `global`, which is especially useful when they want to avoid cross-project memory injection without permanently changing repo-wide settings.
+- Verification: `cargo test -p codex-cli memory_scope_flag_parses_before_subcommand --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli memory_scope_flag_parses_after_subcommand --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli --manifest-path codex-rs/Cargo.toml`, `cargo fmt --all --manifest-path codex-rs/Cargo.toml`, `python3 tools/argument-comment-lint/run-prebuilt-linter.py`, `bash scripts/godex-maintain.sh release-preflight`
+- Files: `codex-rs/cli/src/main.rs`, `docs/config.md`, `docs/godex-memory-system.md`, `docs/godex-fork-manifest.md`, `README.md`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`, `codex-rs/Cargo.lock`
+
 ## [0.2.14] - 2026-04-05
 
 ### Added

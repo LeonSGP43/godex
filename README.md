@@ -143,6 +143,9 @@ Relevant files:
 ### 7. `godex` Includes a QMD Hybrid Memory Mechanism
 
 - Startup memory flow is split into Phase 1 extraction and Phase 2 consolidation.
+- Memory scope can stay on shared global recall or switch to project-only recall:
+  - persistent default: `[memories].scope = "global" | "project"`
+  - per-launch override: `godex --memory-scope global|project`
 - Read-path memory hints use local hybrid retrieval:
   - BM25 lexical score
   - local hash-vector semantic score

@@ -73,6 +73,11 @@ Key behavior:
 - The selected scope root is:
   - global scope: `~/.codex/memories` (or `~/.godex/memories` in `-g`)
   - project scope: `~/.codex/memories/scopes/project/<project-scope-dir>`
+- Launch-time scope override:
+  - `godex --memory-scope global`
+  - `godex --memory-scope project`
+  - this temporarily overrides `[memories].scope` for the current launch and
+    flows through interactive mode plus subcommands
 
 Code:
 
