@@ -96,6 +96,8 @@ For full architecture, runtime flow, and complete parameter annotations, see:
   - `project`: partition memory under `~/.codex/memories/scopes/project/<project-hash>`
   - temporary CLI override: `godex --memory-scope global` or
     `godex --memory-scope project`
+  - with isolated home mode (`godex -g`), the same layout moves under
+    `~/.godex/memories/...`
 - `summary_token_limit`: max tokens from `memory_summary.md` injected into
   developer instructions (default `5000`, clamped to `256..20000`)
 - `semantic_index_enabled`: enable or disable generation/usage of
@@ -125,6 +127,15 @@ qmd_rerank_limit = 24
 The `--memory-scope` flag is a per-launch override for the same setting, so
 you can keep a global default in `config.toml` and switch a single run to
 project-local or shared memories without editing the file.
+
+Recommended patterns:
+
+- shared by default, isolate one launch:
+  - keep `scope = "global"` in `config.toml`
+  - run `godex --memory-scope project`
+- isolated by default, temporarily share:
+  - keep `scope = "project"` in `config.toml`
+  - run `godex --memory-scope global`
 
 ## MCP tool approvals
 

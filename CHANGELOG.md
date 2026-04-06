@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-04-06
+
+### Docs
+
+- What changed: expanded the memory-scope documentation across the README, config guide, and memory architecture doc so the fork now explains how `memories.scope` and `godex --memory-scope global|project` interact, where project-partitioned artifacts live, how `-g` changes the storage root, and which operator patterns are recommended.
+- Why: the feature itself was shipped, but the operator-facing docs still left gaps around precedence, path layout, and when to choose global versus project-local memory.
+- Impact: maintainers and users now have a clearer startup and troubleshooting path for memory scope selection, with less ambiguity about temporary overrides versus persistent config defaults.
+- Verification: `bash scripts/godex-maintain.sh release-preflight`
+- Files: `README.md`, `docs/config.md`, `docs/godex-memory-system.md`, `CHANGELOG.md`, `VERSION`, `codex-rs/Cargo.toml`
+
 ## [0.2.15] - 2026-04-05
 
 ### Added

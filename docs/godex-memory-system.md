@@ -79,6 +79,28 @@ Key behavior:
   - this temporarily overrides `[memories].scope` for the current launch and
     flows through interactive mode plus subcommands
 
+### Choosing a Scope
+
+- Use `global` when you want one shared memory pool across repositories.
+- Use `project` when you want memory extraction, consolidation, and read-path
+  injection to stay limited to the detected project root.
+- CLI precedence:
+  - `[memories].scope` sets the persistent default.
+  - `godex --memory-scope ...` overrides that default for the current launch
+    only.
+- Home namespace interaction:
+  - default home: `godex --memory-scope project` writes under
+    `~/.codex/memories/scopes/project/...`
+  - isolated home: `godex -g --memory-scope project` writes under
+    `~/.godex/memories/scopes/project/...`
+
+Recommended operator pattern:
+
+- keep `global` as the config default if you often want cross-project recall,
+  and switch a single sensitive repo with `--memory-scope project`
+- keep `project` as the config default if you want isolation by default, and
+  use `--memory-scope global` only for temporary shared recall
+
 Code:
 
 - `codex-rs/core/src/memories/phase2.rs`
@@ -191,6 +213,9 @@ Under memory root:
 - global scope: `<CODEX_HOME>/memories`
 - project scope: `<CODEX_HOME>/memories/scopes/project/<project-scope-dir>`
 
+Scope directories remain under the same selected `CODEX_HOME` tree. Project
+mode changes the partition path, not the overall memory-home ownership model.
+
 Within the selected scope root:
 
 - `raw_memories.md`
@@ -225,6 +250,10 @@ Runtime validation (recommended):
    `semantic_index_enabled=true`.
 4. Flip `qmd_hybrid_enabled=false` and verify recall behavior falls back to
    vector-only scoring path.
+5. Validate scope switching when needed:
+   - run once with the configured default scope
+   - run again with `godex --memory-scope <other-scope>`
+   - verify the second run reads and writes under the overridden scope root
 
 ## Troubleshooting
 

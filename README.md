@@ -146,6 +146,8 @@ Relevant files:
 - Memory scope can stay on shared global recall or switch to project-only recall:
   - persistent default: `[memories].scope = "global" | "project"`
   - per-launch override: `godex --memory-scope global|project`
+  - project-scoped artifacts still live under the same home tree, but are
+    partitioned under `~/.codex/memories/scopes/project/<project-scope-dir>`
 - Read-path memory hints use local hybrid retrieval:
   - BM25 lexical score
   - local hash-vector semantic score
@@ -158,8 +160,17 @@ Relevant files:
   - `semantic_recall_limit`
   - `semantic_index_enabled`
 
+Typical usage:
+
+- keep shared memory as the default, but isolate one project launch:
+  - `godex --memory-scope project`
+- keep project-local memory as the default in `config.toml`, but temporarily
+  fall back to shared memory:
+  - `godex --memory-scope global`
+
 Detailed developer documentation:
 
+- `docs/config.md`
 - `docs/godex-memory-system.md`
 
 ## Current Install Status
@@ -167,7 +178,7 @@ Detailed developer documentation:
 This release line is now synced through official upstream `rust-v0.118.0`.
 
 - Daily-use local runtime channel: the published npm package `@leonsgp43/godex`.
-- Current fork release line in this repository: `0.2.11`.
+- Current fork release line in this repository: `0.2.16`.
 - GitHub Release: used as the fork's public release signal and release history.
 - Source install: keep it for maintainer validation, development, and release preparation, not as the normal daily-use distribution path.
 
