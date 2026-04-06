@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Docs
+
+- What changed: tightened the memory-scope documentation in the README, config guide, and memory architecture spec so the docs now spell out scope precedence, project-root detection (`project_root_markers`, default `.git`), storage layout under both `~/.codex` and `~/.godex`, and what exactly remains isolated in project mode.
+- Why: the feature already existed, but the operator docs still left room for confusion around which launch setting wins, how directory-level memory partitions are derived, and whether project scope also isolates summary and recall artifacts.
+- Impact: users can now choose `global` versus `project` memory with a precise mental model, which reduces accidental cross-project memory use and makes startup troubleshooting much faster.
+- Verification: `cargo test -p codex-core --test memory_scope_smoke launch_overrides_resolve_distinct_memory_roots --manifest-path codex-rs/Cargo.toml -- --exact`
+- Files: `README.md`, `docs/config.md`, `docs/godex-memory-system.md`, `CHANGELOG.md`
+
 ## [0.2.16] - 2026-04-06
 
 ### Docs

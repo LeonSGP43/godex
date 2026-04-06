@@ -101,6 +101,32 @@ Recommended operator pattern:
 - keep `project` as the config default if you want isolation by default, and
   use `--memory-scope global` only for temporary shared recall
 
+### Scope Resolution Rules
+
+When `scope = "project"` is active, the selected project scope is resolved as
+follows:
+
+1. Start from the current launch `cwd`.
+2. Walk ancestors upward looking for any configured `project_root_markers`.
+3. Use the first matching ancestor as the project scope key.
+4. If no marker is found, fall back to the current `cwd`.
+
+Default markers:
+
+- `[".git"]`
+
+Operational implications:
+
+- two launches inside the same detected project root resolve to the same
+  project scope directory
+- different project roots resolve to different scope directories
+- the on-disk project scope directory is stable and hash-suffixed, so the
+  selected project root maps to one durable partition under
+  `<CODEX_HOME>/memories/scopes/project/`
+- project mode isolates stage-1 rollout selection, phase-2 consolidation,
+  `MEMORY.md`, `memory_summary.md`, and semantic recall to that resolved scope
+  only
+
 Code:
 
 - `codex-rs/core/src/memories/phase2.rs`
@@ -215,6 +241,9 @@ Under memory root:
 
 Scope directories remain under the same selected `CODEX_HOME` tree. Project
 mode changes the partition path, not the overall memory-home ownership model.
+The scope root chosen at launch owns all memory artifacts for that run. In
+project mode, summaries and consolidation outputs from other project scopes are
+not mixed into the selected scope root.
 
 Within the selected scope root:
 
@@ -236,7 +265,10 @@ When changing this memory system, run at minimum:
 1. `cargo check -p codex-core --lib --manifest-path codex-rs/Cargo.toml`
 2. `cargo test -p codex-core memories:: -- --nocapture --manifest-path codex-rs/Cargo.toml`
 3. `cargo test -p codex-core prompts_tests:: -- --nocapture --manifest-path codex-rs/Cargo.toml`
-4. If config types changed:
+4. `cargo test -p codex-core --test memory_scope_smoke launch_overrides_resolve_distinct_memory_roots --manifest-path codex-rs/Cargo.toml -- --exact`
+   - verifies `global` and `project` launches resolve to different memory
+     roots and keep `MEMORY.md` isolated between the two scopes
+5. If config types changed:
    - `cargo run -p codex-core --bin codex-write-config-schema --manifest-path codex-rs/Cargo.toml`
 
 Runtime validation (recommended):
@@ -283,3 +315,14 @@ Likely causes:
   `no_memories_if_mcp_or_web_search=true`
 - thread was `disabled` at creation (`generate_memories=false`)
 - thread is outside `max_unused_days` / age / idle windows
+
+### Project scope still looks shared
+
+Check:
+
+- the launch actually used `scope = "project"` or
+  `godex --memory-scope project`
+- the current `cwd` is inside the intended project root
+- `project_root_markers` still matches that project (default `.git`)
+- if no marker exists, remember the current `cwd` becomes the scope key, so
+  launching from different directories can create different project scopes

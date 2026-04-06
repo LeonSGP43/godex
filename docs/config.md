@@ -84,16 +84,21 @@ fixed_model = "grok-4.1-thinking"
 
 ## Memories semantic helpers
 
-The `[memories]` section supports semantic helper controls for the generated
-memory indexes, project scoping, summary truncation, and hybrid QMD recall:
+The `[memories]` section controls memory scope selection, summary injection
+budget, generated memory indexes, and hybrid QMD recall behavior.
 
 For full architecture, runtime flow, and complete parameter annotations, see:
 
 - `docs/godex-memory-system.md`
 
 - `scope`: memory partition to use for this session (default `global`)
-  - `global`: legacy shared memory root under `~/.codex/memories`
-  - `project`: partition memory under `~/.codex/memories/scopes/project/<project-hash>`
+  - `global`: legacy shared memory root under `<CODEX_HOME>/memories`
+  - `project`: partition memory under
+    `<CODEX_HOME>/memories/scopes/project/<project-scope-dir>`
+  - project root is resolved from `project_root_markers` (default:
+    `[".git"]`)
+  - if no configured marker is found, the current `cwd` becomes the project
+    scope key for that launch
   - temporary CLI override: `godex --memory-scope global` or
     `godex --memory-scope project`
   - with isolated home mode (`godex -g`), the same layout moves under
@@ -155,6 +160,9 @@ and are labeled as connected; others are marked as can be installed.
 
 ## Notify
 
+  - in `project` mode, phase-1 extraction, phase-2 consolidation,
+    `MEMORY.md`, `memory_summary.md`, and read-path recall all stay inside the
+    selected project scope instead of mixing with other repositories
 Codex can run a notification hook when the agent finishes a turn. See the configuration reference for the latest notification settings:
 
 - https://developers.openai.com/codex/config-reference
@@ -168,6 +176,23 @@ When Codex knows which client started the turn, the legacy notify JSON payload a
 - default `godex`: reuse Codex config locations
   - global: `~/.codex`
   - project: `.codex`
+Precedence and launch behavior:
+
+1. `[memories].scope` sets the persistent default in `config.toml`.
+2. `godex --memory-scope global|project` overrides that default for the
+   current launch only.
+3. `godex -g` changes the selected home namespace (`~/.godex` instead of
+   `~/.codex`) but does not change the meaning of `global` versus `project`.
+
+Storage layout examples:
+
+- default home + global scope:
+  - `~/.codex/memories`
+- default home + project scope:
+  - `~/.codex/memories/scopes/project/<project-scope-dir>`
+- isolated home + project scope:
+  - `~/.godex/memories/scopes/project/<project-scope-dir>`
+
 - `godex -g`: use isolated godex config locations
   - global: `~/.godex`
   - project: `.godex`
@@ -193,6 +218,9 @@ With that in place:
 
 - startup can show `godex update available!`
 - the comparison is against the current `godex --version`, not the tracked
+- if your main concern is reducing unrelated memory context from other repos:
+  - keep `scope = "project"` in `config.toml`
+  - switch back to `global` only for temporary cross-project recall
   upstream Codex base version
 - if no automatic update action is known, the UI falls back to release notes
 

@@ -148,6 +148,9 @@ Relevant files:
   - per-launch override: `godex --memory-scope global|project`
   - project-scoped artifacts still live under the same home tree, but are
     partitioned under `~/.codex/memories/scopes/project/<project-scope-dir>`
+  - project scope is resolved from the detected project root (default marker:
+    `.git`), and limits extraction, consolidation, and read-path memory hints
+    to that project only
 - Read-path memory hints use local hybrid retrieval:
   - BM25 lexical score
   - local hash-vector semantic score
@@ -167,6 +170,15 @@ Typical usage:
 - keep project-local memory as the default in `config.toml`, but temporarily
   fall back to shared memory:
   - `godex --memory-scope global`
+
+Storage examples:
+
+- `godex --memory-scope global`:
+  - `~/.codex/memories`
+- `godex --memory-scope project`:
+  - `~/.codex/memories/scopes/project/<project-scope-dir>`
+- `godex -g --memory-scope project`:
+  - `~/.godex/memories/scopes/project/<project-scope-dir>`
 
 Detailed developer documentation:
 
