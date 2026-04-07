@@ -1,5 +1,7 @@
 use super::*;
 use crate::agent::backend::SpawnedAgentBackendKind;
+use crate::agent::backend::normalize_backend_id;
+use crate::agent::backend::resolve_spawned_agent_backend;
 use crate::agent::control::SpawnAgentOptions;
 use crate::agent::control::render_input_preview;
 use crate::agent::next_thread_spawn_depth;
@@ -33,8 +35,9 @@ impl ToolHandler for Handler {
         } = invocation;
         let arguments = function_arguments(payload)?;
         let args: SpawnAgentArgs = parse_arguments(&arguments)?;
-        let backend_kind = SpawnedAgentBackendKind::parse(args.backend.as_deref())
+        let resolved_backend = resolve_spawned_agent_backend(&turn.config, args.backend.as_deref())
             .map_err(FunctionCallError::RespondToModel)?;
+        let backend_kind = resolved_backend.kind;
         let role_name = args
             .agent_type
             .as_deref()
@@ -59,7 +62,7 @@ impl ToolHandler for Handler {
                     call_id: call_id.clone(),
                     sender_thread_id: session.conversation_id,
                     prompt: prompt.clone(),
-                    model: spawn_request_model_label(backend_kind, args.model.as_deref()),
+                    model: spawn_request_model_label(&resolved_backend, args.model.as_deref()),
                     reasoning_effort: args.reasoning_effort.unwrap_or_default(),
                 }
                 .into(),
@@ -67,6 +70,7 @@ impl ToolHandler for Handler {
             .await;
         let mut config =
             build_agent_spawn_config(&session.get_base_instructions().await, turn.as_ref())?;
+        config.agent_backend_id = normalize_backend_id(args.backend.as_deref());
         match backend_kind {
             SpawnedAgentBackendKind::Codex => {
                 apply_requested_spawn_agent_model_overrides(
@@ -78,12 +82,12 @@ impl ToolHandler for Handler {
                 )
                 .await?;
             }
-            SpawnedAgentBackendKind::ClaudeCode => {
+            SpawnedAgentBackendKind::ClaudeCode | SpawnedAgentBackendKind::Command => {
                 apply_requested_external_backend_overrides(
                     &mut config,
                     args.model.as_deref(),
                     args.reasoning_effort,
-                    backend_kind,
+                    &resolved_backend,
                 )?;
             }
         }
@@ -167,7 +171,7 @@ impl ToolHandler for Handler {
         let effective_model = agent_snapshot
             .as_ref()
             .map(|snapshot| snapshot.model.clone())
-            .unwrap_or_else(|| spawn_request_model_label(backend_kind, args.model.as_deref()));
+            .unwrap_or_else(|| spawn_request_model_label(&resolved_backend, args.model.as_deref()));
         let effective_reasoning_effort = agent_snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.reasoning_effort)

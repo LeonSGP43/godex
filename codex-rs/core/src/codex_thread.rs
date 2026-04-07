@@ -30,6 +30,7 @@ use crate::state_db::StateDbHandle;
 
 #[derive(Clone, Debug)]
 pub struct ThreadConfigSnapshot {
+    pub agent_backend_id: String,
     pub model: String,
     pub model_provider_id: String,
     pub service_tier: Option<ServiceTier>,
@@ -130,12 +131,15 @@ impl CodexThread {
         self.codex.session.total_token_usage().await
     }
 
-    /// Records a user-role session-prefix message without creating a new user turn boundary.
-    pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
+    /// Records a session-prefix message without creating a new model turn.
+    pub(crate) async fn inject_message_without_turn(&self, role: &str, message: String) {
         let message = ResponseItem::Message {
             id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText { text: message }],
+            role: role.to_string(),
+            content: vec![match role {
+                "assistant" => ContentItem::OutputText { text: message },
+                _ => ContentItem::InputText { text: message },
+            }],
             end_turn: None,
             phase: None,
         };
@@ -159,6 +163,16 @@ impl CodexThread {
                 .record_conversation_items(turn_context.as_ref(), &[message])
                 .await;
         }
+    }
+
+    /// Records a user-role session-prefix message without creating a new user turn boundary.
+    pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
+        self.inject_message_without_turn("user", message).await;
+    }
+
+    /// Records an assistant-role message without scheduling a native model turn.
+    pub(crate) async fn inject_assistant_message_without_turn(&self, message: String) {
+        self.inject_message_without_turn("assistant", message).await;
     }
 
     /// Append a prebuilt message to the thread history without treating it as a user turn.

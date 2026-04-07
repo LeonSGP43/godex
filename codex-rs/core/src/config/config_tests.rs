@@ -4460,6 +4460,68 @@ fn load_config_rejects_empty_claude_code_backend_command_prefix() -> std::io::Re
     Ok(())
 }
 
+#[tokio::test]
+async fn load_config_reads_command_agent_backend_working_dir_and_env() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    tokio::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[agent_backends.gemini_worker]
+type = "command"
+protocol = "json_stdio_v1"
+command = ["uv", "run", "scripts/gemini_spawn_backend.py"]
+working_dir = "external/gemini"
+healthcheck = ["uv", "run", "scripts/healthcheck.py"]
+healthcheck_timeout_seconds = 7
+turn_timeout_seconds = 45
+max_retries = 2
+
+[agent_backends.gemini_worker.env]
+GEMINI_API_KEY = "demo-key"
+GEMINI_BASE_URL = "https://example.test/gemini"
+"#,
+    )
+    .await?;
+
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await?;
+
+    let backend = config
+        .agent_backends
+        .get("gemini_worker")
+        .expect("gemini backend");
+    assert_eq!(
+        backend.working_dir.as_deref(),
+        Some(std::path::Path::new("external/gemini"))
+    );
+    assert_eq!(
+        backend.env.get("GEMINI_API_KEY").map(String::as_str),
+        Some("demo-key")
+    );
+    assert_eq!(
+        backend.env.get("GEMINI_BASE_URL").map(String::as_str),
+        Some("https://example.test/gemini")
+    );
+    assert_eq!(
+        backend.healthcheck.as_ref().map(Vec::as_slice),
+        Some(
+            vec![
+                "uv".to_string(),
+                "run".to_string(),
+                "scripts/healthcheck.py".to_string(),
+            ]
+            .as_slice()
+        )
+    );
+    assert_eq!(backend.healthcheck_timeout_seconds, Some(7));
+    assert_eq!(backend.turn_timeout_seconds, Some(45));
+    assert_eq!(backend.max_retries, 2);
+
+    Ok(())
+}
+
 #[test]
 fn model_catalog_json_loads_from_path() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
@@ -4684,6 +4746,8 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
             claude_code_backend_command: None,
+            agent_backends: BTreeMap::new(),
+            agent_backend_id: "codex".to_string(),
             memories: MemoriesConfig::default(),
             project_root_markers: crate::config_loader::default_project_root_markers(),
             memory_scope_kind: "global".to_string(),
@@ -4833,6 +4897,8 @@ fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
         agent_roles: BTreeMap::new(),
         claude_code_backend_command: None,
+        agent_backends: BTreeMap::new(),
+        agent_backend_id: "codex".to_string(),
         memories: MemoriesConfig::default(),
         project_root_markers: crate::config_loader::default_project_root_markers(),
         memory_scope_kind: "global".to_string(),
@@ -4980,6 +5046,8 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
         agent_roles: BTreeMap::new(),
         claude_code_backend_command: None,
+        agent_backends: BTreeMap::new(),
+        agent_backend_id: "codex".to_string(),
         memories: MemoriesConfig::default(),
         project_root_markers: crate::config_loader::default_project_root_markers(),
         memory_scope_kind: "global".to_string(),
@@ -5113,6 +5181,8 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
         agent_roles: BTreeMap::new(),
         claude_code_backend_command: None,
+        agent_backends: BTreeMap::new(),
+        agent_backend_id: "codex".to_string(),
         memories: MemoriesConfig::default(),
         project_root_markers: crate::config_loader::default_project_root_markers(),
         memory_scope_kind: "global".to_string(),

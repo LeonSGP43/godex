@@ -324,6 +324,86 @@
       },
       "type": "object"
     },
+    "SpawnedAgentBackendProtocolToml": {
+      "default": "json_stdio_v1",
+      "enum": [
+        "json_stdio_v1",
+        "claude_cli_legacy"
+      ],
+      "type": "string"
+    },
+    "SpawnedAgentBackendToml": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "default_model": {
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "healthcheck": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "healthcheck_timeout_seconds": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_retries": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "protocol": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SpawnedAgentBackendProtocolToml"
+            }
+          ]
+        },
+        "turn_timeout_seconds": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "working_dir": {
+          "type": "string"
+        },
+        "supports_interrupt": {
+          "type": "boolean"
+        },
+        "supports_resume": {
+          "type": "boolean"
+        },
+        "type": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SpawnedAgentBackendTypeToml"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SpawnedAgentBackendTypeToml": {
+      "default": "command",
+      "enum": [
+        "command"
+      ],
+      "type": "string"
+    },
     "ConfigProfile": {
       "additionalProperties": false,
       "description": "Collection of common configuration options that a user can define as a unit in `config.toml`.",
@@ -2092,6 +2172,13 @@
         }
       ],
       "description": "Agent-related settings (thread limits, etc.)."
+    },
+    "agent_backends": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SpawnedAgentBackendToml"
+      },
+      "description": "Named spawned-agent backend settings for external runtimes.",
+      "type": "object"
     },
     "allow_login_shell": {
       "description": "Whether the model may request a login shell for shell-based tools. Default to `true`\n\nIf `true`, the model may request a login shell (`login = true`), and omitting `login` defaults to using a login shell. If `false`, the model can never use a login shell: `login = true` requests are rejected, and omitting `login` defaults to a non-login shell.",

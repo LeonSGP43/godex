@@ -1122,6 +1122,7 @@ impl SessionConfiguration {
 
     fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         ThreadConfigSnapshot {
+            agent_backend_id: self.original_config_do_not_use.agent_backend_id.clone(),
             model: self.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.service_tier,

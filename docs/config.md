@@ -22,10 +22,93 @@ Codex supports built-in and user-defined agent roles for `spawn_agent`.
   `claude-style.toml`.
 - Built-in roles currently still run on the native Codex spawned-agent runtime.
 
+## External spawned-agent backends
+
+Spawned-agent roles and spawned-agent runtimes are configured separately:
+
+- `agent_type` selects prompt/config layering.
+- `backend` selects the runtime that actually hosts the child.
+
+Use top-level `[agent_backends.<name>]` entries for custom external runtimes:
+
+```toml
+[agent_backends.gemini_worker]
+type = "command"
+protocol = "json_stdio_v1"
+command = ["python3", "backend.py"]
+healthcheck = ["python3", "backend.py", "--healthcheck"]
+working_dir = "/abs/path/to/.codex/backends/gemini_leonai"
+healthcheck_timeout_seconds = 10
+turn_timeout_seconds = 90
+max_retries = 2
+default_model = "gemini-2.5-pro"
+supports_resume = false
+supports_interrupt = false
+
+[agent_backends.gemini_worker.env]
+GEMINI_API_KEY = "replace-me"
+GEMINI_BASE_URL = "https://apileon.leonai.top/gemini"
+GEMINI_MODEL = "gemini-2.5-pro"
+```
+
+Then call it from `spawn_agent` with that backend id:
+
+```json
+{
+  "message": "Review this module and propose fixes.",
+  "backend": "gemini_worker"
+}
+```
+
+Current custom backend contract:
+
+- `type = "command"` launches a fresh external process per turn.
+- `protocol = "json_stdio_v1"` sends one JSON request on stdin and expects one
+  JSON response on stdout.
+- `working_dir` is optional; absolute paths are used as-is, relative paths are
+  resolved from the spawned thread's current `cwd`.
+- `[agent_backends.<name>.env]` adds or overrides environment variables for the
+  backend child process, which is useful for provider keys and endpoint routing.
+- the bundled Python sample in
+  `codex-rs/examples/external_agent_backends/python_json_stdio_v1/` is a real
+  Leonai Gemini `generateContent` bridge, not a fake echo scaffold.
+- `healthcheck` is optional and runs before each turn; non-zero exit or a
+  structured JSON error aborts the turn before the main handler launches.
+- `healthcheck_timeout_seconds`, `turn_timeout_seconds`, and `max_retries`
+  provide the production safety rails for slow or flaky external runtimes.
+- `backend` can be any configured `[agent_backends.<name>]` id; it is not
+  limited to built-in backends.
+
+For a fuller architecture guide and a copyable scaffold, see
+[External agent backends](./external-agent-backends.md).
+
+The request payload currently includes:
+
+- `protocol`
+- `backend_id`
+- `thread_id`
+- `cwd`
+- `model`
+- `reasoning_effort`
+- `developer_instructions`
+- `session_id`
+- `history`
+- `items`
+
+The response payload should return plain JSON. Codex reads these fields when
+present:
+
+- `message` or `result`: final assistant text
+- `session_id`: backend-owned session handle for same-session resume
+- `usage`: token accounting, with either camelCase or snake_case token fields
+- `error`: optional structured error object with `message`, optional `code`, and
+  optional `retryable`
+
 ## External Claude backend command prefix
 
-When using `spawn_agent(backend = "claude_code")`, you can configure the
-launcher argv prefix in `config.toml`:
+`claude_code` remains a built-in backend shortcut. When using
+`spawn_agent(backend = "claude_code")`, you can configure the launcher argv
+prefix in `config.toml`:
 
 ```toml
 [agents.claude_code]
@@ -103,6 +186,9 @@ For full architecture, runtime flow, and complete parameter annotations, see:
     `godex --memory-scope project`
   - with isolated home mode (`godex -g`), the same layout moves under
     `~/.godex/memories/...`
+  - in `project` mode, phase-1 extraction, phase-2 consolidation,
+    `MEMORY.md`, `memory_summary.md`, and read-path recall all stay inside the
+    selected project scope instead of mixing with other repositories
 - `summary_token_limit`: max tokens from `memory_summary.md` injected into
   developer instructions (default `5000`, clamped to `256..20000`)
 - `semantic_index_enabled`: enable or disable generation/usage of
@@ -115,6 +201,23 @@ For full architecture, runtime flow, and complete parameter annotations, see:
   recall (default `true`)
 - `qmd_rerank_limit`: max candidates reranked in hybrid recall (default `30`,
   clamped to `1..100`)
+
+Precedence and launch behavior:
+
+1. `[memories].scope` sets the persistent default in `config.toml`.
+2. `godex --memory-scope global|project` overrides that default for the
+   current launch only.
+3. `godex -g` changes the selected home namespace (`~/.godex` instead of
+   `~/.codex`) but does not change the meaning of `global` versus `project`.
+
+Storage layout examples:
+
+- default home + global scope:
+  - `~/.codex/memories`
+- default home + project scope:
+  - `~/.codex/memories/scopes/project/<project-scope-dir>`
+- isolated home + project scope:
+  - `~/.godex/memories/scopes/project/<project-scope-dir>`
 
 Example:
 
@@ -141,6 +244,9 @@ Recommended patterns:
 - isolated by default, temporarily share:
   - keep `scope = "project"` in `config.toml`
   - run `godex --memory-scope global`
+- if your main concern is reducing unrelated memory context from other repos:
+  - keep `scope = "project"` in `config.toml`
+  - switch back to `global` only for temporary cross-project recall
 
 ## MCP tool approvals
 
@@ -160,9 +266,6 @@ and are labeled as connected; others are marked as can be installed.
 
 ## Notify
 
-  - in `project` mode, phase-1 extraction, phase-2 consolidation,
-    `MEMORY.md`, `memory_summary.md`, and read-path recall all stay inside the
-    selected project scope instead of mixing with other repositories
 Codex can run a notification hook when the agent finishes a turn. See the configuration reference for the latest notification settings:
 
 - https://developers.openai.com/codex/config-reference
@@ -176,23 +279,6 @@ When Codex knows which client started the turn, the legacy notify JSON payload a
 - default `godex`: reuse Codex config locations
   - global: `~/.codex`
   - project: `.codex`
-Precedence and launch behavior:
-
-1. `[memories].scope` sets the persistent default in `config.toml`.
-2. `godex --memory-scope global|project` overrides that default for the
-   current launch only.
-3. `godex -g` changes the selected home namespace (`~/.godex` instead of
-   `~/.codex`) but does not change the meaning of `global` versus `project`.
-
-Storage layout examples:
-
-- default home + global scope:
-  - `~/.codex/memories`
-- default home + project scope:
-  - `~/.codex/memories/scopes/project/<project-scope-dir>`
-- isolated home + project scope:
-  - `~/.godex/memories/scopes/project/<project-scope-dir>`
-
 - `godex -g`: use isolated godex config locations
   - global: `~/.godex`
   - project: `.godex`
@@ -218,9 +304,6 @@ With that in place:
 
 - startup can show `godex update available!`
 - the comparison is against the current `godex --version`, not the tracked
-- if your main concern is reducing unrelated memory context from other repos:
-  - keep `scope = "project"` in `config.toml`
-  - switch back to `global` only for temporary cross-project recall
   upstream Codex base version
 - if no automatic update action is known, the UI falls back to release notes
 

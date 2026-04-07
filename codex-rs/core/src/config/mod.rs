@@ -433,6 +433,12 @@ pub struct Config {
     /// Optional command argv prefix for `spawn_agent(backend = "claude_code")`.
     pub claude_code_backend_command: Option<Vec<String>>,
 
+    /// Named spawned-agent backend configurations for external runtimes.
+    pub agent_backends: BTreeMap<String, SpawnedAgentBackendConfig>,
+
+    /// Runtime backend selected for this thread's spawned-agent hosting.
+    pub agent_backend_id: String,
+
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
 
@@ -1380,6 +1386,10 @@ pub struct ConfigToml {
     /// Agent-related settings (thread limits, etc.).
     pub agents: Option<AgentsToml>,
 
+    /// Named spawned-agent backend settings for external runtimes.
+    #[serde(default)]
+    pub agent_backends: Option<BTreeMap<String, SpawnedAgentBackendToml>>,
+
     /// Memories subsystem settings.
     pub memories: Option<MemoriesToml>,
 
@@ -1714,6 +1724,68 @@ pub struct AgentsToml {
     /// Runtime command prefix for the external Claude Code backend.
     #[serde(default)]
     pub claude_code: Option<ClaudeCodeBackendToml>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnedAgentBackendConfig {
+    pub backend_type: SpawnedAgentBackendType,
+    pub protocol: SpawnedAgentBackendProtocol,
+    pub command: Vec<String>,
+    pub working_dir: Option<PathBuf>,
+    pub env: BTreeMap<String, String>,
+    pub healthcheck: Option<Vec<String>>,
+    pub healthcheck_timeout_seconds: Option<u64>,
+    pub turn_timeout_seconds: Option<u64>,
+    pub max_retries: u32,
+    pub default_model: Option<String>,
+    pub supports_resume: bool,
+    pub supports_interrupt: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnedAgentBackendType {
+    Command,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnedAgentBackendProtocol {
+    JsonStdioV1,
+    ClaudeCliLegacy,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SpawnedAgentBackendToml {
+    #[serde(rename = "type", default)]
+    pub backend_type: Option<SpawnedAgentBackendTypeToml>,
+    #[serde(default)]
+    pub protocol: Option<SpawnedAgentBackendProtocolToml>,
+    pub command: Option<Vec<String>>,
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, String>>,
+    pub healthcheck: Option<Vec<String>>,
+    pub healthcheck_timeout_seconds: Option<u64>,
+    pub turn_timeout_seconds: Option<u64>,
+    pub max_retries: Option<u32>,
+    pub default_model: Option<String>,
+    pub supports_resume: Option<bool>,
+    pub supports_interrupt: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SpawnedAgentBackendTypeToml {
+    #[default]
+    Command,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SpawnedAgentBackendProtocolToml {
+    #[default]
+    JsonStdioV1,
+    ClaudeCliLegacy,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -2531,6 +2603,110 @@ impl Config {
             None
         };
 
+        let mut agent_backends = BTreeMap::new();
+        if let Some(configured_backends) = cfg.agent_backends.clone() {
+            for (backend_id, backend_toml) in configured_backends {
+                let backend_id = backend_id.trim().to_string();
+                if backend_id.is_empty() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "agent_backends keys must not be empty",
+                    ));
+                }
+                if backend_id == "codex" {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "agent_backends.codex is reserved for the native backend",
+                    ));
+                }
+                let command = backend_toml
+                    .command
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|part| part.trim().to_string())
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>();
+                if command.is_empty() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "agent_backends.{backend_id}.command must include at least one non-empty argv part"
+                        ),
+                    ));
+                }
+
+                let has_healthcheck = backend_toml.healthcheck.is_some();
+                let healthcheck = backend_toml
+                    .healthcheck
+                    .map(|command| {
+                        command
+                            .into_iter()
+                            .map(|part| part.trim().to_string())
+                            .filter(|part| !part.is_empty())
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|command| !command.is_empty());
+                if has_healthcheck && healthcheck.is_none() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "agent_backends.{backend_id}.healthcheck must include at least one non-empty argv part"
+                        ),
+                    ));
+                }
+
+                let working_dir = backend_toml
+                    .working_dir
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from);
+
+                let env = backend_toml
+                    .env
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(key, value)| (key.trim().to_string(), value))
+                    .collect::<BTreeMap<_, _>>();
+                if let Some(invalid_key) = env.keys().find(|key| key.is_empty()) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "agent_backends.{backend_id}.env contains an empty variable name: '{invalid_key}'"
+                        ),
+                    ));
+                }
+
+                let default_model = backend_toml
+                    .default_model
+                    .map(|model| model.trim().to_string())
+                    .filter(|model| !model.is_empty());
+                let config = SpawnedAgentBackendConfig {
+                    backend_type: match backend_toml.backend_type.unwrap_or_default() {
+                        SpawnedAgentBackendTypeToml::Command => SpawnedAgentBackendType::Command,
+                    },
+                    protocol: match backend_toml.protocol.unwrap_or_default() {
+                        SpawnedAgentBackendProtocolToml::JsonStdioV1 => {
+                            SpawnedAgentBackendProtocol::JsonStdioV1
+                        }
+                        SpawnedAgentBackendProtocolToml::ClaudeCliLegacy => {
+                            SpawnedAgentBackendProtocol::ClaudeCliLegacy
+                        }
+                    },
+                    command,
+                    working_dir,
+                    env,
+                    healthcheck,
+                    healthcheck_timeout_seconds: backend_toml.healthcheck_timeout_seconds,
+                    turn_timeout_seconds: backend_toml.turn_timeout_seconds,
+                    max_retries: backend_toml.max_retries.unwrap_or_default(),
+                    default_model,
+                    supports_resume: backend_toml.supports_resume.unwrap_or(false),
+                    supports_interrupt: backend_toml.supports_interrupt.unwrap_or(false),
+                };
+                agent_backends.insert(backend_id, config);
+            }
+        }
+
         let background_terminal_max_timeout = cfg
             .background_terminal_max_timeout
             .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
@@ -2860,6 +3036,8 @@ impl Config {
             agent_max_depth,
             agent_roles,
             claude_code_backend_command,
+            agent_backends,
+            agent_backend_id: "codex".to_string(),
             memories,
             project_root_markers,
             memory_scope_kind: memory_scope.kind,

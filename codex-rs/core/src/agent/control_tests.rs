@@ -8,6 +8,9 @@ use crate::agent::backend::ClaudeCodeCommand;
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::ConfigBuilder;
+use crate::config::SpawnedAgentBackendConfig;
+use crate::config::SpawnedAgentBackendProtocol;
+use crate::config::SpawnedAgentBackendType;
 use crate::config_loader::LoaderOverrides;
 use crate::contextual_user_message::SUBAGENT_NOTIFICATION_OPEN_TAG;
 use assert_matches::assert_matches;
@@ -28,6 +31,7 @@ use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_state::DirectionalThreadSpawnEdgeStatus;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeMap;
 use tempfile::TempDir;
 use tokio::time::Duration;
 use tokio::time::sleep;
@@ -71,6 +75,23 @@ fn text_input(text: &str) -> Op {
         text_elements: Vec::new(),
     }]
     .into()
+}
+
+fn command_backend_config(command: Vec<String>) -> SpawnedAgentBackendConfig {
+    SpawnedAgentBackendConfig {
+        backend_type: SpawnedAgentBackendType::Command,
+        protocol: SpawnedAgentBackendProtocol::JsonStdioV1,
+        command,
+        working_dir: None,
+        env: BTreeMap::new(),
+        healthcheck: None,
+        healthcheck_timeout_seconds: None,
+        turn_timeout_seconds: None,
+        max_retries: 0,
+        default_model: Some("gemini-2.5-pro".to_string()),
+        supports_resume: false,
+        supports_interrupt: true,
+    }
 }
 
 struct AgentControlHarness {
@@ -2156,6 +2177,107 @@ async fn close_agent_persists_closed_edge_for_claude_code_backend() {
         )
         .await
         .expect("closed spawn-edge query after close should succeed");
+    assert!(closed_children.contains(&child_thread_id));
+
+    let _ = harness
+        .control
+        .shutdown_live_agent(parent_thread_id)
+        .await
+        .expect("parent shutdown should succeed");
+}
+
+#[tokio::test]
+async fn command_backend_spawn_wait_and_close_round_trip() {
+    let harness = AgentControlHarness::new().await;
+    let (parent_thread_id, parent_thread) = harness.start_thread().await;
+    let state_db = parent_thread
+        .state_db()
+        .expect("sqlite state db should be available for parent thread");
+
+    let mut config = harness.config.clone();
+    config.agent_backend_id = "gemini_worker".to_string();
+    config.agent_backends = BTreeMap::from([(
+        "gemini_worker".to_string(),
+        command_backend_config(vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            r#"input=$(cat); case "$input" in *"hello external child"*) result='command backend ok' ;; *) result='command backend missing input' ;; esac; printf '{"message":"%s","usage":{"input_tokens":6,"output_tokens":2},"session_id":"gemini-session"}' "$result""#.to_string(),
+        ]),
+    )]);
+
+    let child_thread_id = harness
+        .control
+        .spawn_agent_with_metadata(
+            config,
+            text_input("hello external child"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+            SpawnAgentOptions::default(),
+        )
+        .await
+        .expect("command backend spawn should succeed")
+        .thread_id;
+
+    let status = timeout(Duration::from_secs(5), async {
+        loop {
+            let status = harness.control.get_status(child_thread_id).await;
+            if matches!(status, AgentStatus::Completed(_)) {
+                break status;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("command backend child should complete");
+    assert_eq!(
+        status,
+        AgentStatus::Completed(Some("command backend ok".to_string()))
+    );
+
+    let child_thread = harness
+        .manager
+        .get_thread(child_thread_id)
+        .await
+        .expect("command backend child thread should exist");
+    let history_items = child_thread
+        .codex
+        .session
+        .clone_history()
+        .await
+        .raw_items()
+        .to_vec();
+    assert!(
+        history_contains_text(&history_items, "hello external child"),
+        "command backend input should be mirrored into the child history"
+    );
+    assert!(
+        history_contains_text(&history_items, "command backend ok"),
+        "command backend output should be mirrored into the child history"
+    );
+
+    let _ = harness
+        .control
+        .close_agent(child_thread_id)
+        .await
+        .expect("command backend close should succeed");
+
+    assert_eq!(
+        harness.control.get_status(child_thread_id).await,
+        AgentStatus::NotFound
+    );
+
+    let closed_children = state_db
+        .list_thread_spawn_children_with_status(
+            parent_thread_id,
+            DirectionalThreadSpawnEdgeStatus::Closed,
+        )
+        .await
+        .expect("closed spawn-edge query after command close should succeed");
     assert!(closed_children.contains(&child_thread_id));
 
     let _ = harness

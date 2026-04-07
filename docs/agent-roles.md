@@ -83,9 +83,19 @@ Today, all built-in roles still run on the native Codex spawned-agent runtime.
 User-defined roles selected through `agent_type` also stay on the native Codex
 runtime unless the caller explicitly selects a different `backend`.
 
+That means `[agents.<role>]` is never the place to register a new backend
+runtime. A role can make a child feel like "Gemini", "Claude-style", or
+"researcher", but it does not provide the actual hosting/runtime bridge for
+`spawn_agent`.
+
 Internally, Codex routes spawned-agent lifecycle operations through a
 `SpawnedAgentHandle` abstraction. The default backend is still the native
 `Codex` runtime, and `claude_code` remains an explicit opt-in backend.
+
+Custom external backends are configured separately under
+`[agent_backends.<name>]` in `config.toml`. Those entries can point to your own
+launcher code, so you do not need to ship a built-in MCP server or a dedicated
+long-running backend daemon just to make a spawned backend usable.
 
 An external Claude Code path is available through the explicit `backend`
 selector on `spawn_agent`:
@@ -107,6 +117,44 @@ Current behavior of `backend = "claude_code"`:
 - `model` overrides are supported
 - if `model` is omitted, Codex defers to the local Claude Code CLI's default
   model selection
+
+The same `backend` selector also accepts any configured
+`[agent_backends.<name>]` id, for example:
+
+```json
+{
+  "message": "Investigate this failure and summarize the root cause.",
+  "agent_type": "worker",
+  "backend": "gemini_worker"
+}
+```
+
+In that example:
+
+- `agent_type = "worker"` still controls the child role/persona
+- `backend = "gemini_worker"` controls the external runtime bridge
+
+A matching backend config can live in `config.toml`, for example:
+
+```toml
+[agent_backends.gemini_worker]
+type = "command"
+protocol = "json_stdio_v1"
+command = ["python3", "backend.py"]
+healthcheck = ["python3", "backend.py", "--healthcheck"]
+working_dir = "/abs/path/to/.codex/backends/gemini_leonai"
+default_model = "gemini-2.5-pro"
+turn_timeout_seconds = 90
+healthcheck_timeout_seconds = 10
+max_retries = 2
+
+[agent_backends.gemini_worker.env]
+GEMINI_API_KEY = "replace-me"
+GEMINI_BASE_URL = "https://apileon.leonai.top/gemini"
+```
+
+For multi-backend layout guidance and a runnable Leonai Gemini reference backend, see
+[External agent backends](./external-agent-backends.md).
 
 ## Example
 

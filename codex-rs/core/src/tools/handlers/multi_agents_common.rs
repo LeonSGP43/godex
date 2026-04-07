@@ -1,5 +1,5 @@
 use crate::agent::AgentStatus;
-use crate::agent::backend::SpawnedAgentBackendKind;
+use crate::agent::backend::ResolvedSpawnedAgentBackend;
 use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::config::Config;
@@ -327,18 +327,13 @@ pub(crate) fn apply_requested_external_backend_overrides(
     config: &mut Config,
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
-    backend_kind: SpawnedAgentBackendKind,
+    backend: &ResolvedSpawnedAgentBackend,
 ) -> Result<(), FunctionCallError> {
-    let default_model = match backend_kind {
-        SpawnedAgentBackendKind::Codex => None,
-        SpawnedAgentBackendKind::ClaudeCode => Some("claude-code"),
-    };
-
     let model = requested_model
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .map(ToOwned::to_owned)
-        .or_else(|| default_model.map(str::to_owned));
+        .or_else(|| backend.default_model().map(str::to_owned));
 
     if requested_model.is_some() && model.is_none() {
         return Err(FunctionCallError::RespondToModel(
@@ -358,13 +353,13 @@ pub(crate) fn apply_requested_external_backend_overrides(
 }
 
 pub(crate) fn spawn_request_model_label(
-    backend_kind: SpawnedAgentBackendKind,
+    backend: &ResolvedSpawnedAgentBackend,
     requested_model: Option<&str>,
 ) -> String {
-    match backend_kind {
-        SpawnedAgentBackendKind::Codex => requested_model.unwrap_or_default().to_string(),
-        SpawnedAgentBackendKind::ClaudeCode => requested_model.unwrap_or("claude-code").to_string(),
-    }
+    requested_model
+        .or_else(|| backend.default_model())
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn find_spawn_agent_model_name(
