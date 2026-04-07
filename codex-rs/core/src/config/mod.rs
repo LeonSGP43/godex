@@ -2533,7 +2533,7 @@ impl Config {
             .clone()
             .unwrap_or_else(default_project_root_markers);
         let memories: MemoriesConfig = cfg.memories.clone().unwrap_or_default().into();
-        let memory_scope = crate::memories::resolve_memory_scope(
+        let memory_scope = crate::fork_patch::memory::resolve_memory_scope(
             resolved_cwd.as_path(),
             &project_root_markers,
             &memories,

@@ -40,6 +40,7 @@ mod exec_policy;
 pub mod external_agent_config;
 pub mod file_watcher;
 mod flags;
+mod fork_patch;
 #[cfg(test)]
 mod git_info_tests;
 mod guardian;
