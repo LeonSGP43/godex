@@ -78,24 +78,43 @@ These live under `[agent_backends.<name>]`:
 - `supports_resume`: whether Codex should persist backend-owned `session_id`
 - `supports_interrupt`: whether Codex may expose interrupt for that backend
 
-## Reference backend
+## Reference backends
 
-A copyable scaffold lives in `examples/external_agent_backends/python_json_stdio_v1/`.
+Copyable provider samples live under
+`codex-rs/examples/external_agent_backends/`.
 
-It demonstrates:
+Current references:
+
+- `python_json_stdio_v1/`
+  - real Leonai Gemini `generateContent` HTTP call
+  - intended runtime id: `backend = "gemini_worker"`
+- `python_grok_responses_v1/`
+  - real Grok-compatible `/v1/responses` HTTP call
+  - intended runtime id: `backend = "grok_worker"`
+
+They demonstrate:
 
 - request parsing
-- a real Leonai Gemini `generateContent` HTTP call
 - stable response JSON
 - structured retryable errors
 - `--healthcheck` handling
 - a clean place to factor shared client code when you add more backends
 
-The sample expects:
+The Gemini sample expects:
 
 - `GEMINI_API_KEY`
 - optional `GEMINI_BASE_URL` (defaults to `https://apileon.leonai.top/gemini`)
 - optional `GEMINI_MODEL` (defaults to `gemini-2.5-pro`)
 - optional `GEMINI_HTTP_TIMEOUT_SECONDS`
 
-It uses the Python standard library only, so it is easy to copy into `~/.codex/backends/<backend-id>/backend.py` and run immediately.
+The Grok sample expects:
+
+- `GROK_API_KEY`, `XAI_API_KEY`, or `OPENAI_API_KEY`
+- optional `GROK_BASE_ORIGIN` (defaults to `https://apileon.leonai.top`)
+- optional `GROK_PRESET` (defaults to `b42`)
+- optional `GROK_PRESET_PATH`
+- optional `GROK_MODEL`
+- optional `GROK_HTTP_TIMEOUT_SECONDS`
+
+Both samples use the Python standard library only, so they are easy to copy
+into `~/.codex/backends/<backend-id>/backend.py` and run immediately.

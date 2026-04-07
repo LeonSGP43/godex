@@ -86,6 +86,15 @@ Current custom backend contract:
 For a fuller architecture guide and a copyable scaffold, see
 [External agent backends](./external-agent-backends.md).
 
+Bundled provider examples:
+
+- `codex-rs/examples/external_agent_backends/python_json_stdio_v1/`
+  - Gemini `generateContent`
+  - intended runtime id: `gemini_worker`
+- `codex-rs/examples/external_agent_backends/python_grok_responses_v1/`
+  - Grok `/v1/responses`
+  - intended runtime id: `grok_worker`
+
 The request payload currently includes:
 
 - `protocol`

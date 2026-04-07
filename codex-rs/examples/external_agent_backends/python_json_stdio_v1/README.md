@@ -1,4 +1,4 @@
-# Python JSON-STDIO v1 Leonai Gemini backend
+# Python JSON-STDIO v1 Gemini backend
 
 This folder is a runnable reference backend for Codex external spawned-agent backends.
 
@@ -31,7 +31,7 @@ Optional environment:
 Example config:
 
 ```toml
-[agent_backends.gemini_leonai]
+[agent_backends.gemini_worker]
 type = "command"
 protocol = "json_stdio_v1"
 command = ["python3", "backend.py"]
@@ -44,7 +44,7 @@ supports_resume = true
 supports_interrupt = false
 default_model = "gemini-2.5-pro"
 
-[agent_backends.gemini_leonai.env]
+[agent_backends.gemini_worker.env]
 GEMINI_API_KEY = "replace-me"
 GEMINI_BASE_URL = "https://apileon.leonai.top/gemini"
 GEMINI_MODEL = "gemini-2.5-pro"
@@ -54,7 +54,7 @@ Quick smoke test:
 
 ```bash
 GEMINI_API_KEY=replace-me python3 backend.py --healthcheck
-printf '%s' '{"backend_id":"gemini_leonai","model":"gemini-2.5-pro","history":[],"items":[{"type":"text","text":"say hello in one sentence"}]}' | GEMINI_API_KEY=replace-me python3 backend.py
+printf '%s' '{"backend_id":"gemini_worker","model":"gemini-2.5-pro","history":[],"items":[{"type":"text","text":"say hello in one sentence"}]}' | GEMINI_API_KEY=replace-me python3 backend.py
 ```
 
 Notes:
