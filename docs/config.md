@@ -21,6 +21,10 @@ Codex supports built-in and user-defined agent roles for `spawn_agent`.
 - Built-in roles can also layer embedded config files, such as
   `claude-style.toml`.
 - Built-in roles currently still run on the native Codex spawned-agent runtime.
+- For real provider integrations, keep provider naming under
+  `[agent_backends.<name>]` instead of `[agents.<role>]`.
+- A custom role such as `gemini25p` or `grok_external` is only prompt/config
+  layering unless the spawned call also selects a non-native `backend`.
 
 ## External spawned-agent backends
 

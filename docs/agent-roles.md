@@ -79,6 +79,18 @@ Agent roles and spawned-agent runtimes are separate concerns:
 - a runtime backend controls how that spawned agent is hosted and how lifecycle
   operations such as `send_input`, `wait`, `resume`, and `close` are routed
 
+For custom integrations, treat provider identity as a backend concern, not a
+role concern:
+
+- `agent_type = "worker"` or `agent_type = "explorer"` is a task posture
+- `backend = "gemini_worker"` or `backend = "grok_worker"` is the provider
+  runtime bridge
+
+Avoid registering provider-branded custom roles such as `gemini25p`,
+`grok_external`, or similar names when the goal is to reach a real provider.
+Those role files only change prompt/config layering unless the call also
+selects a non-native `backend`.
+
 Today, all built-in roles still run on the native Codex spawned-agent runtime.
 User-defined roles selected through `agent_type` also stay on the native Codex
 runtime unless the caller explicitly selects a different `backend`.
