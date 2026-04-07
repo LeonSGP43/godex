@@ -56,6 +56,9 @@ All long-lived fork changes should belong to one of these patch groups:
   - default Codex-compatible mode and explicit `.godex` isolated mode
 - `fork/update-governance`
   - `godex_updates`, upstream gap reporting, release metadata
+- `fork/provider-backends`
+  - external spawned-agent backends, provider bridge examples, and backend
+    runtime documentation
 - `fork/distribution`
   - install script, release versioning, local packaging
 - `fork/maintenance`
@@ -88,9 +91,18 @@ Avoid expanding the fork surface in:
 - protocol schema churn
 - app-server transport internals
 - core agent runtime internals
+- provider-specific native tool handlers and provider-branded built-in roles
 - broad UI behavior unrelated to fork identity
 
 Those areas change rapidly upstream and raise merge cost.
+
+For provider integrations:
+
+- prefer `backend = "<provider>_worker"` plus `[agent_backends.<name>]`
+- keep provider HTTP/auth/retry logic outside upstream hot paths whenever
+  possible
+- treat any native provider-specific tool or built-in provider role as a legacy
+  compatibility shim that needs an extraction plan
 
 ## Hot Files
 

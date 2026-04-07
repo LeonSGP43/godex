@@ -62,24 +62,33 @@ default during conflict resolution.
   - `godex sync-upstream --dry-run`
   - targeted update-path smoke checks
 
-### 4. Grok Research Integration
+### 4. Legacy Native Grok Integration
 
 - Purpose:
-  - preserve the fork-specific native `grok` research tool and related config
-    surface
-  - keep Grok-backed built-in agent roles and docs coherent when upstream
-    tooling changes
+  - preserve only the minimum compatibility surface for the fork-specific
+    native `grok` research tool while it exists
+  - make the migration target explicit: provider-specific runtime expansion
+    should move to external spawned-agent backends such as
+    `backend = "grok_worker"`
 - Owner files:
+  - `codex-rs/core/src/agent/role.rs`
+  - `codex-rs/core/src/agent/builtins/grok.toml`
   - `codex-rs/core/src/tools/handlers/mod.rs`
   - `codex-rs/core/src/tools/spec.rs`
   - `docs/config.md`
+  - `docs/agent-roles.md`
 - Required behavior:
-  - native `grok` remains registered as a tool
-  - Grok-focused built-in roles can rely on config-driven routing defaults
-  - docs describe the `[grok]` config surface
+  - native `grok` may remain available as a compatibility path
+  - no new provider-specific product work should be added to the native Grok
+    role/tool surface
+  - new Grok runtime work should land as external backend plumbing and
+    examples, not as deeper core coupling
+  - docs must clearly describe native Grok as a migration target rather than a
+    long-term expansion lane
 - Verification:
   - inspect tool spec for `grok`
   - inspect effective config or schema for `[grok]`
+  - inspect docs for the migration target toward `backend = "grok_worker"`
   - targeted smoke of Grok tool registration and config loading
 
 ### 5. Distribution And Local Install
@@ -168,6 +177,8 @@ Rule:
 
 - keep only the minimum fork-specific logic in these files
 - if fork behavior grows here, update this manifest and add verification
+- if provider-specific runtime work is proposed here, stop and move it toward an
+  external backend patch instead
 
 ## Sync Review Checklist
 
