@@ -118,7 +118,7 @@ async fn prune_rollout_summaries(root: &Path, keep: &HashSet<String>) -> std::io
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some(stem) = file_name.strip_suffix(".md") else {
+        let Some(stem) = crate::fork_patch::memory::rollout_summary_file_stem(file_name) else {
             continue;
         };
         if !keep.contains(stem)

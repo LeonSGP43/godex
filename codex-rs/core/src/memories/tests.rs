@@ -5,6 +5,8 @@ use crate::fork_patch::memory::memory_index_file;
 use crate::fork_patch::memory::memory_qmd_file;
 use crate::fork_patch::memory::raw_memories_file;
 use crate::fork_patch::memory::rollout_summaries_dir;
+use crate::fork_patch::memory::rollout_summary_file_name;
+use crate::fork_patch::memory::rollout_summary_file_stem;
 use crate::fork_patch::memory::vector_index_file;
 use crate::memories::clear_memory_root_contents;
 use crate::memories::ensure_layout;
@@ -203,8 +205,8 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
 
     let keep_id = ThreadId::default().to_string();
     let drop_id = ThreadId::default().to_string();
-    let keep_path = rollout_summaries_dir(&root).join(format!("{keep_id}.md"));
-    let drop_path = rollout_summaries_dir(&root).join(format!("{drop_id}.md"));
+    let keep_path = rollout_summaries_dir(&root).join(rollout_summary_file_name(&keep_id));
+    let drop_path = rollout_summaries_dir(&root).join(rollout_summary_file_name(&drop_id));
     tokio::fs::write(&keep_path, "keep")
         .await
         .expect("write keep");
@@ -369,7 +371,8 @@ async fn sync_rollout_summaries_uses_timestamp_hash_and_sanitized_slug_filename(
     ensure_layout(&root).await.expect("ensure layout");
 
     let thread_id = ThreadId::new();
-    let stale_unslugged_path = rollout_summaries_dir(&root).join(format!("{thread_id}.md"));
+    let stale_unslugged_path =
+        rollout_summaries_dir(&root).join(rollout_summary_file_name(&thread_id.to_string()));
     let stale_old_slug_path =
         rollout_summaries_dir(&root).join(format!("{thread_id}--old-slug.md"));
     tokio::fs::write(&stale_unslugged_path, "stale")
@@ -411,9 +414,8 @@ async fn sync_rollout_summaries_uses_timestamp_hash_and_sanitized_slug_filename(
 
     assert_eq!(files.len(), 1);
     let file_name = &files[0];
-    let stem = file_name
-        .strip_suffix(".md")
-        .expect("rollout summary file should end with .md");
+    let stem =
+        rollout_summary_file_stem(file_name).expect("rollout summary file should end with .md");
     let (prefix, slug) = stem
         .rsplit_once('-')
         .expect("rollout summary filename should include slug");

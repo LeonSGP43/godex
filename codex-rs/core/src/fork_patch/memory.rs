@@ -12,6 +12,7 @@ use std::sync::LazyLock;
 use tokio::fs;
 
 const ROLLOUT_SUMMARIES_SUBDIR: &str = "rollout_summaries";
+const ROLLOUT_SUMMARY_FILENAME_SUFFIX: &str = ".md";
 const RAW_MEMORIES_FILENAME: &str = "raw_memories.md";
 const MEMORY_INDEX_FILENAME: &str = "MEMORY.md";
 const MEMORY_SUMMARY_FILENAME: &str = "memory_summary.md";
@@ -52,7 +53,11 @@ pub(crate) fn rollout_summaries_dir(root: &Path) -> PathBuf {
 }
 
 pub(crate) fn rollout_summary_file_name(file_stem: &str) -> String {
-    format!("{file_stem}.md")
+    format!("{file_stem}{ROLLOUT_SUMMARY_FILENAME_SUFFIX}")
+}
+
+pub(crate) fn rollout_summary_file_stem(file_name: &str) -> Option<&str> {
+    file_name.strip_suffix(ROLLOUT_SUMMARY_FILENAME_SUFFIX)
 }
 
 pub(crate) fn rollout_summary_relative_path(file_stem: &str) -> String {
