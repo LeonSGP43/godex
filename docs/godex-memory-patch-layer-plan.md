@@ -118,19 +118,32 @@ Completed recent atomic moves:
 - `658efc8c03 refactor(memory): extract state enqueue scope helper`
 - `cfa344646c refactor(memory): extract thread scope persistence helper`
 - `c16b1e033f refactor(memory): extract runtime scope query binding`
+- `b040468cca refactor(memory): extract phase2 job key binding`
+- `e3ba29987e refactor(memory): extract phase2 selection queries`
 
 What that means for the roadmap:
 
 - Step 1 is active and materially underway: the fork-owned `fork_patch::memory` and `state/src/fork_patch/memory_repo.rs` seams now carry real behavior instead of only placeholder structure.
 - Step 2 has partial progress: artifact-root and path-layout rules have started moving behind `fork_patch::memory`, but `core/src/memories/*` still owns parts of the contract.
 - Step 3 has partial progress: read-path helper logic is now behind the facade, and `prompts.rs` no longer carries the leftover wrapper layer.
-- Step 4 has partial progress: scope fetch, thread scope persistence glue, and repeated scope-query binding have been moved into `state/src/fork_patch/memory_repo.rs`, but `state/src/runtime/memories.rs` still carries phase2 job-key and scoped job glue that remains the best next extraction target.
+- Step 4 has partial progress: scope fetch, thread scope persistence glue, repeated scope-query binding, phase2 job-key binding, and phase2 selection-state queries have been moved into `state/src/fork_patch/memory_repo.rs`, but `state/src/runtime/memories.rs` still carries a small amount of thread-to-scope enqueue glue that is the best remaining extraction target.
 
 Current recommended next atomic cut:
 
 - Keep focus on `patch/memory-state-runtime`
 - Prefer a small move inside `codex-rs/state/src/runtime/memories.rs`
-- Only extract repeated phase2 job-key or scoped job glue that clearly reduces hot-path fork code without changing SQL semantics
+- Only extract thin thread-to-scope enqueue glue or similarly narrow scoped-query helpers that clearly reduce hot-path fork code without changing SQL semantics
+
+## patch/memory-state-runtime File Ledger
+
+This is the higher-resolution working ledger for the recent `memory-state-runtime` refactor chain. It is intentionally file-level so future upstream sync review can quickly see what has already been extracted, what is still worth extracting, and where to stop.
+
+| File | Completed extraction status | Remaining safe extractions | Do not extract now |
+| --- | --- | --- | --- |
+| `codex-rs/state/src/fork_patch/memory_repo.rs` | Owns default scope helpers, thread scope binding, scope-query binding, thread scope fetch, phase2 job-key binding, and phase2 selection-state queries. | Only add thin helpers that move obviously fork-specific scope glue out of hot paths. | Do not move the full stage1/phase2 state machine or broad runtime orchestration into this file. |
+| `codex-rs/state/src/runtime/memories.rs` | Reduced repeated scope binding, reduced phase2 job-key glue, and reduced phase2 selection-state query glue. | The main remaining candidate is narrow thread-to-scope enqueue glue such as the `enqueue_thread_phase2_consolidation(...)` path. | Do not introduce a broad scope carrier abstraction or relocate the claim/update SQL state transitions. |
+| `codex-rs/state/src/runtime/threads.rs` | Thread scope persistence binding has already been moved behind `fork_patch::memory_repo`. | Only reopen if a new fork-only scope write path appears. | Do not move generic thread lifecycle behavior just to increase patch-layer coverage. |
+| `codex-rs/state/src/model/thread_metadata.rs` | Keeps the memory-scope metadata contract needed by the runtime and rollout layers. | Minimal or none for now; this is mostly a contract surface, not a glue surface. | Do not churn metadata shape unless upstream introduces a compatible native contract. |
 
 ## Non-Goals
 

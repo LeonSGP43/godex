@@ -223,9 +223,20 @@ This ledger is the current-state inventory of how this fork differs from officia
     - `11941f87e6` and `658efc8c03` advanced `patch/memory-state-runtime` by moving scope helpers into `state/src/fork_patch/memory_repo.rs` and centralizing phase2 enqueue scope fetches.
     - `cfa344646c` advanced `patch/memory-state-runtime` again by moving duplicated thread scope persistence binding out of `state/src/runtime/threads.rs` and into `state/src/fork_patch/memory_repo.rs`.
     - `c16b1e033f` advanced `patch/memory-state-runtime` by centralizing repeated scope-query binding from `state/src/runtime/memories.rs` into `state/src/fork_patch/memory_repo.rs`.
+    - `b040468cca` advanced `patch/memory-state-runtime` by centralizing repeated phase2 job-key binding from `state/src/runtime/memories.rs` into `state/src/fork_patch/memory_repo.rs`.
+    - `e3ba29987e` advanced `patch/memory-state-runtime` by centralizing phase2 selection-state queries from `state/src/runtime/memories.rs` into `state/src/fork_patch/memory_repo.rs`.
   - Latest verification snapshot:
     - `cargo test -p codex-state --lib --manifest-path codex-rs/Cargo.toml` passed with `84 passed; 0 failed`.
-    - `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml` passed after `1547c00c83 fix(app-server): restore thread config snapshot test` and again after `c16b1e033f refactor(memory): extract runtime scope query binding`.
+    - `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml` passed after `1547c00c83 fix(app-server): restore thread config snapshot test`, after `c16b1e033f refactor(memory): extract runtime scope query binding`, after `b040468cca refactor(memory): extract phase2 job key binding`, and after `e3ba29987e refactor(memory): extract phase2 selection queries`.
+
+### `patch/memory-state-runtime` file-level ledger
+
+| File | Patch role now | Completed extractions | Remaining safe extractions | Not recommended now |
+| --- | --- | --- | --- | --- |
+| `codex-rs/state/src/fork_patch/memory_repo.rs` | Fork-owned scope and memory-state query seam | thread scope binding, runtime scope query binding, thread scope fetch, phase2 job-key binding, phase2 selection-state queries | thin helpers for any leftover scope lookup or query binding glue | moving the stage1/phase2 runtime state machine itself |
+| `codex-rs/state/src/runtime/memories.rs` | Upstream-hot runtime owner for job lifecycle and selection semantics | hot-path glue is materially reduced around scope binding, phase2 job-key binding, and phase2 selection-state queries | narrow thread-to-scope enqueue glue only | broad abstractions like `MemoryScopeRef`, generic job adapters, or moving SQL state transitions wholesale |
+| `codex-rs/state/src/runtime/threads.rs` | Thread metadata write path | thread scope persistence helper already extracted | little to none unless new fork-only scope writes appear | generic thread lifecycle refactors for patch-layer symmetry |
+| `codex-rs/state/src/model/thread_metadata.rs` | Metadata contract seam | keeps required memory-scope contract fields | little to none until upstream changes the contract | metadata churn without an upstream-compatibility reason |
 
 ## Bootstrap mixed residue and shared hot-path drift (`fork/bootstrap-residue`)
 
@@ -275,7 +286,7 @@ This section is the higher-resolution ledger for future fork-patch work. It maps
 
 ### Immediate Extraction Order
 
-- `1. patch/memory-state-runtime`: continue from the current helper extractions by shrinking the remaining phase2 job-key / scoped job glue in `state/src/runtime/memories.rs`.
+- `1. patch/memory-state-runtime`: continue from the current helper extractions only by shrinking the remaining thread-to-scope enqueue glue or similarly thin scoped queries in `state/src/runtime/memories.rs`.
 - `2. patch/memory-artifact-contract`: keep moving residual path/layout rules into `fork_patch::memory`, but only when a hot-path file still owns fork-specific naming policy.
 - `3. patch/memory-read-path`: treat the current facade move as stabilization work; only reopen this lane if summary/semantic hint assembly leaks back into hot upstream files.
 - `4. patch/bootstrap-proxy-mcp` and `patch/bootstrap-login-auth`: split residue into explicit adapters or delete it where upstream already covers the behavior.
