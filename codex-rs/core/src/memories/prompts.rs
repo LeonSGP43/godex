@@ -1,4 +1,3 @@
-use crate::config::types::MemoriesConfig;
 use crate::memories::phase_one;
 use crate::memories::storage::rollout_summary_file_stem_from_parts;
 use codex_protocol::openai_models::ModelInfo;
@@ -153,26 +152,6 @@ pub(super) fn build_stage_one_input_message(
         ("rollout_cwd", rollout_cwd.as_str()),
         ("rollout_contents", truncated_rollout_contents.as_str()),
     ])?)
-}
-
-/// Build prompt used for read path. This prompt must be added to the developer instructions. In
-/// case of large memory files, the `memory_summary.md` is truncated at
-/// [phase_one::MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_SUMMARY_TOKEN_LIMIT].
-pub(crate) async fn build_memory_tool_developer_instructions(
-    codex_home: &Path,
-    memories: &MemoriesConfig,
-    memory_scope_kind: &str,
-    memory_scope_key: &str,
-    turn_query: Option<&str>,
-) -> Option<String> {
-    crate::fork_patch::memory::build_memory_context_fragment(
-        codex_home,
-        memories,
-        memory_scope_kind,
-        memory_scope_key,
-        turn_query,
-    )
-    .await
 }
 
 #[cfg(test)]

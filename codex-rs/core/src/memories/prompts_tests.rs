@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::types::MemoriesConfig;
+use crate::fork_patch::memory::build_memory_context_fragment;
 use crate::fork_patch::memory::memory_summary_file;
 use crate::fork_patch::memory::vector_index_file;
 use crate::models_manager::model_info::model_info_from_slug;
@@ -81,7 +82,7 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
     .await
     .unwrap();
 
-    let instructions = build_memory_tool_developer_instructions(
+    let instructions = build_memory_context_fragment(
         codex_home,
         &MemoriesConfig::default(),
         GLOBAL_MEMORY_SCOPE_KIND,
@@ -142,7 +143,7 @@ async fn build_memory_tool_developer_instructions_appends_semantic_recall_hints(
     .await
     .unwrap();
 
-    let instructions = build_memory_tool_developer_instructions(
+    let instructions = build_memory_context_fragment(
         codex_home,
         &MemoriesConfig::default(),
         GLOBAL_MEMORY_SCOPE_KIND,
@@ -185,7 +186,7 @@ async fn build_memory_tool_developer_instructions_skips_semantic_hints_when_disa
         semantic_index_enabled: false,
         ..MemoriesConfig::default()
     };
-    let instructions = build_memory_tool_developer_instructions(
+    let instructions = build_memory_context_fragment(
         codex_home,
         &config,
         GLOBAL_MEMORY_SCOPE_KIND,
