@@ -79,6 +79,14 @@ pub(crate) fn skills_dir(root: &Path) -> PathBuf {
     root.join(SKILLS_SUBDIR)
 }
 
+pub(crate) fn empty_consolidation_cleanup_files(root: &Path) -> [PathBuf; 2] {
+    [memory_index_file(root), memory_summary_file(root)]
+}
+
+pub(crate) fn empty_consolidation_cleanup_dirs(root: &Path) -> [PathBuf; 1] {
+    [skills_dir(root)]
+}
+
 pub(crate) async fn build_memory_context_fragment(
     codex_home: &Path,
     memories: &MemoriesConfig,

@@ -42,10 +42,7 @@ pub(super) async fn sync_rollout_summaries_from_memories(
 
     if retained.is_empty() {
         clear_auxiliary_indexes(root).await?;
-        for path in [
-            crate::fork_patch::memory::memory_index_file(root),
-            crate::fork_patch::memory::memory_summary_file(root),
-        ] {
+        for path in crate::fork_patch::memory::empty_consolidation_cleanup_files(root) {
             if let Err(err) = tokio::fs::remove_file(path).await
                 && err.kind() != std::io::ErrorKind::NotFound
             {
@@ -53,11 +50,12 @@ pub(super) async fn sync_rollout_summaries_from_memories(
             }
         }
 
-        let skills_dir = crate::fork_patch::memory::skills_dir(root);
-        if let Err(err) = tokio::fs::remove_dir_all(skills_dir).await
-            && err.kind() != std::io::ErrorKind::NotFound
-        {
-            return Err(err);
+        for path in crate::fork_patch::memory::empty_consolidation_cleanup_dirs(root) {
+            if let Err(err) = tokio::fs::remove_dir_all(path).await
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(err);
+            }
         }
     } else if semantic_index_enabled {
         write_memory_index_qmd(root, retained).await?;
