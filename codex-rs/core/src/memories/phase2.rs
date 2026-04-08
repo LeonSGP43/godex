@@ -2,11 +2,9 @@ use crate::agent::AgentStatus;
 use crate::agent::status::is_final as is_final_agent_status;
 use crate::codex::Session;
 use crate::config::Config;
-use crate::memories::MemoryScope;
 use crate::memories::metrics;
 use crate::memories::phase_two;
 use crate::memories::prompts::build_consolidation_prompt;
-use crate::memories::scoped_memory_root;
 use crate::memories::storage::rebuild_raw_memories_file_from_memories;
 use crate::memories::storage::rollout_summary_file_stem;
 use crate::memories::storage::sync_rollout_summaries_from_memories;
@@ -54,11 +52,11 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
         // This should not happen.
         return;
     };
-    let memory_scope = MemoryScope {
-        kind: config.memory_scope_kind.clone(),
-        key: config.memory_scope_key.clone(),
-    };
-    let root = scoped_memory_root(&config.codex_home, &memory_scope);
+    let root = crate::fork_patch::memory::scoped_artifact_root(
+        &config.codex_home,
+        &config.memory_scope_kind,
+        &config.memory_scope_key,
+    );
     let max_raw_memories = config.memories.max_raw_memories_for_consolidation;
     let max_unused_days = config.memories.max_unused_days;
 
@@ -66,8 +64,8 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     let claim = match job::claim(
         session,
         db,
-        memory_scope.kind.as_str(),
-        memory_scope.key.as_str(),
+        config.memory_scope_kind.as_str(),
+        config.memory_scope_key.as_str(),
     )
     .await
     {

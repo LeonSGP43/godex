@@ -1,7 +1,5 @@
 use crate::config::types::MemoriesConfig;
-use crate::memories::MemoryScope;
 use crate::memories::phase_one;
-use crate::memories::scoped_memory_root;
 use crate::memories::semantic_index::SemanticRecallMatch;
 use crate::memories::semantic_index::SemanticRecallOptions;
 use crate::memories::semantic_index::semantic_recall;
@@ -178,12 +176,10 @@ pub(crate) async fn build_memory_tool_developer_instructions(
     memory_scope_key: &str,
     turn_query: Option<&str>,
 ) -> Option<String> {
-    let base_path = scoped_memory_root(
+    let base_path = crate::fork_patch::memory::scoped_artifact_root(
         codex_home,
-        &MemoryScope {
-            kind: memory_scope_kind.to_string(),
-            key: memory_scope_key.to_string(),
-        },
+        memory_scope_kind,
+        memory_scope_key,
     );
     let memory_summary_path = base_path.join("memory_summary.md");
     let memory_summary = fs::read_to_string(&memory_summary_path)
