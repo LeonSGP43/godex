@@ -2,6 +2,7 @@ use crate::ThreadMetadata;
 use sqlx::Executor;
 use sqlx::Row;
 use sqlx::Sqlite;
+use sqlx::Transaction;
 use sqlx::query::Query;
 use sqlx::sqlite::SqliteArguments;
 
@@ -119,6 +120,84 @@ WHERE thread_id IN (
     .await?;
 
     Ok(())
+}
+
+pub(crate) async fn enqueue_phase2_consolidation_with_executor<'e, E>(
+    executor: E,
+    job_kind: &str,
+    default_retry_remaining: i64,
+    memory_scope_kind: &str,
+    memory_scope_key: &str,
+    input_watermark: i64,
+) -> anyhow::Result<()>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    bind_phase2_job_key(
+        sqlx::query(
+            r#"
+INSERT INTO jobs (
+    kind,
+    job_key,
+    status,
+    worker_id,
+    ownership_token,
+    started_at,
+    finished_at,
+    lease_until,
+    retry_at,
+    retry_remaining,
+    last_error,
+    input_watermark,
+    last_success_watermark
+) VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?, 0)
+ON CONFLICT(kind, job_key) DO UPDATE SET
+    status = CASE
+        WHEN jobs.status = 'running' THEN 'running'
+        ELSE 'pending'
+    END,
+    retry_at = CASE
+        WHEN jobs.status = 'running' THEN jobs.retry_at
+        ELSE NULL
+    END,
+    retry_remaining = max(jobs.retry_remaining, excluded.retry_remaining),
+    input_watermark = CASE
+        WHEN excluded.input_watermark > COALESCE(jobs.input_watermark, 0)
+            THEN excluded.input_watermark
+        ELSE COALESCE(jobs.input_watermark, 0) + 1
+    END
+            "#,
+        )
+        .bind(job_kind),
+        memory_scope_kind,
+        memory_scope_key,
+    )
+    .bind(default_retry_remaining)
+    .bind(input_watermark)
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}
+
+pub(crate) async fn enqueue_thread_phase2_consolidation(
+    tx: &mut Transaction<'_, Sqlite>,
+    job_kind: &str,
+    default_retry_remaining: i64,
+    thread_id: &str,
+    input_watermark: i64,
+) -> anyhow::Result<()> {
+    let (memory_scope_kind, memory_scope_key) =
+        fetch_thread_memory_scope(&mut **tx, thread_id).await?;
+    enqueue_phase2_consolidation_with_executor(
+        &mut **tx,
+        job_kind,
+        default_retry_remaining,
+        memory_scope_kind.as_str(),
+        memory_scope_key.as_str(),
+        input_watermark,
+    )
+    .await
 }
 
 pub(crate) fn phase2_job_key(memory_scope_kind: &str, memory_scope_key: &str) -> String {

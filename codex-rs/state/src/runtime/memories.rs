@@ -12,7 +12,6 @@ use crate::model::Stage1StartupClaimParams;
 use crate::model::ThreadRow;
 use crate::model::stage1_output_ref_from_parts;
 use chrono::Duration;
-use sqlx::Executor;
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
 use std::collections::HashSet;
@@ -595,7 +594,14 @@ WHERE id = ? AND memory_mode != 'polluted'
         }
 
         if memory_repo::thread_has_phase2_selection(&mut *tx, thread_id.as_str()).await? {
-            enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), now).await?;
+            memory_repo::enqueue_thread_phase2_consolidation(
+                &mut tx,
+                JOB_KIND_MEMORY_CONSOLIDATE,
+                DEFAULT_RETRY_REMAINING,
+                thread_id.as_str(),
+                now,
+            )
+            .await?;
         }
 
         tx.commit().await?;
@@ -872,7 +878,14 @@ WHERE excluded.source_updated_at >= stage1_outputs.source_updated_at
         .execute(&mut *tx)
         .await?;
 
-        enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), source_updated_at).await?;
+        memory_repo::enqueue_thread_phase2_consolidation(
+            &mut tx,
+            JOB_KIND_MEMORY_CONSOLIDATE,
+            DEFAULT_RETRY_REMAINING,
+            thread_id.as_str(),
+            source_updated_at,
+        )
+        .await?;
 
         tx.commit().await?;
         Ok(true)
@@ -947,8 +960,14 @@ WHERE thread_id = ?
         .rows_affected();
 
         if deleted_rows > 0 {
-            enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), source_updated_at)
-                .await?;
+            memory_repo::enqueue_thread_phase2_consolidation(
+                &mut tx,
+                JOB_KIND_MEMORY_CONSOLIDATE,
+                DEFAULT_RETRY_REMAINING,
+                thread_id.as_str(),
+                source_updated_at,
+            )
+            .await?;
         }
 
         tx.commit().await?;
@@ -1021,8 +1040,10 @@ WHERE kind = ? AND job_key = ?
         memory_scope_key: &str,
         input_watermark: i64,
     ) -> anyhow::Result<()> {
-        enqueue_phase2_consolidation_with_executor(
+        memory_repo::enqueue_phase2_consolidation_with_executor(
             self.pool.as_ref(),
+            JOB_KIND_MEMORY_CONSOLIDATE,
+            DEFAULT_RETRY_REMAINING,
             memory_scope_kind,
             memory_scope_key,
             input_watermark,
@@ -1425,78 +1446,6 @@ WHERE kind = ? AND job_key = ?
 
         Ok(rows_affected > 0)
     }
-}
-
-async fn enqueue_phase2_consolidation_with_executor<'e, E>(
-    executor: E,
-    memory_scope_kind: &str,
-    memory_scope_key: &str,
-    input_watermark: i64,
-) -> anyhow::Result<()>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    memory_repo::bind_phase2_job_key(
-        sqlx::query(
-            r#"
-INSERT INTO jobs (
-    kind,
-    job_key,
-    status,
-    worker_id,
-    ownership_token,
-    started_at,
-    finished_at,
-    lease_until,
-    retry_at,
-    retry_remaining,
-    last_error,
-    input_watermark,
-    last_success_watermark
-) VALUES (?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?, 0)
-ON CONFLICT(kind, job_key) DO UPDATE SET
-    status = CASE
-        WHEN jobs.status = 'running' THEN 'running'
-        ELSE 'pending'
-    END,
-    retry_at = CASE
-        WHEN jobs.status = 'running' THEN jobs.retry_at
-        ELSE NULL
-    END,
-    retry_remaining = max(jobs.retry_remaining, excluded.retry_remaining),
-    input_watermark = CASE
-        WHEN excluded.input_watermark > COALESCE(jobs.input_watermark, 0)
-            THEN excluded.input_watermark
-        ELSE COALESCE(jobs.input_watermark, 0) + 1
-    END
-        "#,
-        )
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-        memory_scope_kind,
-        memory_scope_key,
-    )
-    .bind(DEFAULT_RETRY_REMAINING)
-    .bind(input_watermark)
-    .execute(executor)
-    .await?;
-
-    Ok(())
-}
-
-async fn enqueue_thread_phase2_consolidation(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
-    thread_id: &str,
-    input_watermark: i64,
-) -> anyhow::Result<()> {
-    let (memory_scope_kind, memory_scope_key) =
-        memory_repo::fetch_thread_memory_scope(&mut **tx, thread_id).await?;
-    enqueue_phase2_consolidation_with_executor(
-        &mut **tx,
-        memory_scope_kind.as_str(),
-        memory_scope_key.as_str(),
-        input_watermark,
-    )
-    .await
 }
 
 #[cfg(test)]
