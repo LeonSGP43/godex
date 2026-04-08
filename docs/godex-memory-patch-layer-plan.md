@@ -113,6 +113,7 @@ Completed recent atomic moves:
 - `ce26159c05 refactor(memory): extract scope and artifact root helpers`
 - `9695d4fc05 refactor(memory): extract artifact path helpers`
 - `ce89803488 refactor(memory): extract artifact cleanup targets`
+- `dc682e8edf refactor(memory): extract rollout summary path contract`
 - `59a7ab0b15 refactor(memory): extract read path helpers`
 - `11941f87e6 refactor(memory): extract state scope helpers`
 - `cc2dfc1341 refactor(memory): remove prompts read path shim`
@@ -126,7 +127,7 @@ Completed recent atomic moves:
 What that means for the roadmap:
 
 - Step 1 is active and materially underway: the fork-owned `fork_patch::memory` and `state/src/fork_patch/memory_repo.rs` seams now carry real behavior instead of only placeholder structure.
-- Step 2 has partial progress: artifact-root, path-layout rules, and empty-consolidation cleanup target ownership have started moving behind `fork_patch::memory`, but `core/src/memories/*` still owns parts of the contract.
+- Step 2 has partial progress: artifact-root, path-layout rules, empty-consolidation cleanup target ownership, and rollout-summary file/path naming have started moving behind `fork_patch::memory`, but `core/src/memories/*` still owns parts of the contract.
 - Step 3 has partial progress: read-path helper logic is now behind the facade, and `prompts.rs` no longer carries the leftover wrapper layer.
 - Step 4 is materially complete for the current lane: scope fetch, thread scope persistence glue, repeated scope-query binding, phase2 job-key binding, phase2 selection-state queries, and phase2 enqueue helpers now live behind `state/src/fork_patch/memory_repo.rs`, leaving `state/src/runtime/memories.rs` with the job lifecycle semantics rather than fork-specific query glue.
 
