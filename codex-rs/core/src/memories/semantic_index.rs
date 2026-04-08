@@ -148,7 +148,12 @@ pub(super) async fn write_memory_index_qmd(
     writeln!(out, "engine: {QMD_ENGINE}").map_err(format_err)?;
     writeln!(out, "retrieval_pipeline: {QMD_PIPELINE}").map_err(format_err)?;
     writeln!(out, "embedding_backend: {EMBEDDING_BACKEND}").map_err(format_err)?;
-    writeln!(out, "vector_index_file: vector_index.json").map_err(format_err)?;
+    writeln!(
+        out,
+        "vector_index_file: {}",
+        crate::fork_patch::memory::vector_index_file_name()
+    )
+    .map_err(format_err)?;
     writeln!(out, "---").map_err(format_err)?;
     writeln!(out).map_err(format_err)?;
     writeln!(out, "# Memory Index").map_err(format_err)?;
@@ -627,7 +632,8 @@ fn bm25_idf(total_docs: usize, doc_freq: usize) -> f32 {
 fn memory_index_qmd_empty() -> String {
     let generated_at = Utc::now().to_rfc3339();
     format!(
-        "---\ntitle: Codex Memory QMD Index\ngenerated_at: {generated_at}\nentry_count: 0\nengine: {QMD_ENGINE}\nretrieval_pipeline: {QMD_PIPELINE}\nembedding_backend: {EMBEDDING_BACKEND}\nvector_index_file: vector_index.json\n---\n\n# Memory Index\n\nNo memory entries yet.\n"
+        "---\ntitle: Codex Memory QMD Index\ngenerated_at: {generated_at}\nentry_count: 0\nengine: {QMD_ENGINE}\nretrieval_pipeline: {QMD_PIPELINE}\nembedding_backend: {EMBEDDING_BACKEND}\nvector_index_file: {}\n---\n\n# Memory Index\n\nNo memory entries yet.\n",
+        crate::fork_patch::memory::vector_index_file_name()
     )
 }
 

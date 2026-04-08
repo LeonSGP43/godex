@@ -8,11 +8,13 @@ use crate::fork_patch::memory::rollout_summaries_dir;
 use crate::fork_patch::memory::rollout_summary_file_name;
 use crate::fork_patch::memory::rollout_summary_file_stem;
 use crate::fork_patch::memory::vector_index_file;
+use crate::fork_patch::memory::vector_index_file_name;
 use crate::memories::clear_memory_root_contents;
 use crate::memories::ensure_layout;
 use crate::memories::memory_root;
 use crate::memories::semantic_index::SemanticRecallOptions;
 use crate::memories::semantic_index::semantic_recall;
+use crate::memories::semantic_index::write_memory_index_qmd;
 use chrono::TimeZone;
 use chrono::Utc;
 use codex_protocol::ThreadId;
@@ -362,6 +364,23 @@ async fn sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only
     assert!(updated_pos < cwd_pos);
     assert!(cwd_pos < rollout_path_pos);
     assert!(rollout_path_pos < file_pos);
+}
+
+#[tokio::test]
+async fn write_memory_index_qmd_empty_uses_canonical_vector_index_file_name() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().join("memory");
+    ensure_layout(&root).await.expect("ensure layout");
+
+    write_memory_index_qmd(&root, &[])
+        .await
+        .expect("write empty memory qmd");
+
+    let memory_qmd = tokio::fs::read_to_string(memory_qmd_file(&root))
+        .await
+        .expect("read memory_index.qmd");
+    assert!(memory_qmd.contains("# Memory Index"));
+    assert!(memory_qmd.contains(&format!("vector_index_file: {}", vector_index_file_name())));
 }
 
 #[tokio::test]

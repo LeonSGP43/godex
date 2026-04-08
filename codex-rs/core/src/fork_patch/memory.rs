@@ -91,6 +91,10 @@ pub(crate) fn vector_index_file(root: &Path) -> PathBuf {
     root.join(VECTOR_INDEX_FILENAME)
 }
 
+pub(crate) fn vector_index_file_name() -> &'static str {
+    VECTOR_INDEX_FILENAME
+}
+
 pub(crate) fn skills_dir(root: &Path) -> PathBuf {
     root.join(SKILLS_SUBDIR)
 }
