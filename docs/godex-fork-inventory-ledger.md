@@ -221,6 +221,11 @@ This ledger is the current-state inventory of how this fork differs from officia
     - `ce26159c05` and `9695d4fc05` advanced `patch/memory-facade` and `patch/memory-artifact-contract` by moving scope/artifact-root helpers and artifact path helpers behind `fork_patch::memory`.
     - `59a7ab0b15` and `cc2dfc1341` advanced `patch/memory-read-path` by moving read-path helper logic into the facade and removing a leftover wrapper from `prompts.rs`.
     - `11941f87e6` and `658efc8c03` advanced `patch/memory-state-runtime` by moving scope helpers into `state/src/fork_patch/memory_repo.rs` and centralizing phase2 enqueue scope fetches.
+    - `cfa344646c` advanced `patch/memory-state-runtime` again by moving duplicated thread scope persistence binding out of `state/src/runtime/threads.rs` and into `state/src/fork_patch/memory_repo.rs`.
+    - `c16b1e033f` advanced `patch/memory-state-runtime` by centralizing repeated scope-query binding from `state/src/runtime/memories.rs` into `state/src/fork_patch/memory_repo.rs`.
+  - Latest verification snapshot:
+    - `cargo test -p codex-state --lib --manifest-path codex-rs/Cargo.toml` passed with `84 passed; 0 failed`.
+    - `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml` passed after `1547c00c83 fix(app-server): restore thread config snapshot test` and again after `c16b1e033f refactor(memory): extract runtime scope query binding`.
 
 ## Bootstrap mixed residue and shared hot-path drift (`fork/bootstrap-residue`)
 
@@ -270,7 +275,7 @@ This section is the higher-resolution ledger for future fork-patch work. It maps
 
 ### Immediate Extraction Order
 
-- `1. patch/memory-state-runtime`: continue from the current helper extractions and shrink the remaining direct scope-metadata touchpoints in `state/src/runtime/threads.rs` and `state/src/model/thread_metadata.rs`.
+- `1. patch/memory-state-runtime`: continue from the current helper extractions by shrinking the remaining phase2 job-key / scoped job glue in `state/src/runtime/memories.rs`.
 - `2. patch/memory-artifact-contract`: keep moving residual path/layout rules into `fork_patch::memory`, but only when a hot-path file still owns fork-specific naming policy.
 - `3. patch/memory-read-path`: treat the current facade move as stabilization work; only reopen this lane if summary/semantic hint assembly leaks back into hot upstream files.
 - `4. patch/bootstrap-proxy-mcp` and `patch/bootstrap-login-auth`: split residue into explicit adapters or delete it where upstream already covers the behavior.

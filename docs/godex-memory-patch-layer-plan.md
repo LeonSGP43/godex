@@ -106,6 +106,32 @@ Recommended atomic refactor sequence:
 
 Each step above should be one independent commit. No step should mix behavioral change with pure file movement unless absolutely necessary.
 
+## Current Progress Snapshot
+
+Completed recent atomic moves:
+
+- `ce26159c05 refactor(memory): extract scope and artifact root helpers`
+- `9695d4fc05 refactor(memory): extract artifact path helpers`
+- `59a7ab0b15 refactor(memory): extract read path helpers`
+- `11941f87e6 refactor(memory): extract state scope helpers`
+- `cc2dfc1341 refactor(memory): remove prompts read path shim`
+- `658efc8c03 refactor(memory): extract state enqueue scope helper`
+- `cfa344646c refactor(memory): extract thread scope persistence helper`
+- `c16b1e033f refactor(memory): extract runtime scope query binding`
+
+What that means for the roadmap:
+
+- Step 1 is active and materially underway: the fork-owned `fork_patch::memory` and `state/src/fork_patch/memory_repo.rs` seams now carry real behavior instead of only placeholder structure.
+- Step 2 has partial progress: artifact-root and path-layout rules have started moving behind `fork_patch::memory`, but `core/src/memories/*` still owns parts of the contract.
+- Step 3 has partial progress: read-path helper logic is now behind the facade, and `prompts.rs` no longer carries the leftover wrapper layer.
+- Step 4 has partial progress: scope fetch, thread scope persistence glue, and repeated scope-query binding have been moved into `state/src/fork_patch/memory_repo.rs`, but `state/src/runtime/memories.rs` still carries phase2 job-key and scoped job glue that remains the best next extraction target.
+
+Current recommended next atomic cut:
+
+- Keep focus on `patch/memory-state-runtime`
+- Prefer a small move inside `codex-rs/state/src/runtime/memories.rs`
+- Only extract repeated phase2 job-key or scoped job glue that clearly reduces hot-path fork code without changing SQL semantics
+
 ## Non-Goals
 
 - Do not re-implement memory as an external service just to achieve patch isolation.
@@ -129,4 +155,3 @@ This is not only a memory refactor. It is the template for future fork work:
 - then define the upstream replacement trigger before adding more feature depth.
 
 That same pattern should later be applied to provider backends, maintenance helpers, and any future custom backend/runtime work.
-
