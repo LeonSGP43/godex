@@ -600,15 +600,7 @@ WHERE so.thread_id = ?
         .await?
         .unwrap_or(0);
         if selected_for_phase2 != 0 {
-            let (memory_scope_kind, memory_scope_key) =
-                memory_repo::fetch_thread_memory_scope(&mut *tx, thread_id.as_str()).await?;
-            enqueue_phase2_consolidation_with_executor(
-                &mut *tx,
-                memory_scope_kind.as_str(),
-                memory_scope_key.as_str(),
-                now,
-            )
-            .await?;
+            enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), now).await?;
         }
 
         tx.commit().await?;
@@ -885,15 +877,7 @@ WHERE excluded.source_updated_at >= stage1_outputs.source_updated_at
         .execute(&mut *tx)
         .await?;
 
-        let (memory_scope_kind, memory_scope_key) =
-            memory_repo::fetch_thread_memory_scope(&mut *tx, thread_id.as_str()).await?;
-        enqueue_phase2_consolidation_with_executor(
-            &mut *tx,
-            memory_scope_kind.as_str(),
-            memory_scope_key.as_str(),
-            source_updated_at,
-        )
-        .await?;
+        enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), source_updated_at).await?;
 
         tx.commit().await?;
         Ok(true)
@@ -968,15 +952,8 @@ WHERE thread_id = ?
         .rows_affected();
 
         if deleted_rows > 0 {
-            let (memory_scope_kind, memory_scope_key) =
-                memory_repo::fetch_thread_memory_scope(&mut *tx, thread_id.as_str()).await?;
-            enqueue_phase2_consolidation_with_executor(
-                &mut *tx,
-                memory_scope_kind.as_str(),
-                memory_scope_key.as_str(),
-                source_updated_at,
-            )
-            .await?;
+            enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), source_updated_at)
+                .await?;
         }
 
         tx.commit().await?;
@@ -1511,6 +1488,22 @@ ON CONFLICT(kind, job_key) DO UPDATE SET
     .await?;
 
     Ok(())
+}
+
+async fn enqueue_thread_phase2_consolidation(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    thread_id: &str,
+    input_watermark: i64,
+) -> anyhow::Result<()> {
+    let (memory_scope_kind, memory_scope_key) =
+        memory_repo::fetch_thread_memory_scope(&mut **tx, thread_id).await?;
+    enqueue_phase2_consolidation_with_executor(
+        &mut **tx,
+        memory_scope_kind.as_str(),
+        memory_scope_key.as_str(),
+        input_watermark,
+    )
+    .await
 }
 
 #[cfg(test)]
