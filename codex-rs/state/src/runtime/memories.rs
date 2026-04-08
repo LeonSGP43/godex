@@ -1077,19 +1077,21 @@ WHERE kind = ? AND job_key = ?
         let lease_until = now.saturating_add(lease_seconds.max(0));
         let ownership_token = Uuid::new_v4().to_string();
         let worker_id = worker_id.to_string();
-        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
 
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
-        let existing_job = sqlx::query(
-            r#"
+        let existing_job = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
 SELECT status, lease_until, retry_at, retry_remaining, input_watermark, last_success_watermark
 FROM jobs
 WHERE kind = ? AND job_key = ?
             "#,
+            )
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-        .bind(job_key.as_str())
         .fetch_optional(&mut *tx)
         .await?;
 
@@ -1125,8 +1127,9 @@ WHERE kind = ? AND job_key = ?
             return Ok(Phase2JobClaimOutcome::SkippedRunning);
         }
 
-        let rows_affected = sqlx::query(
-            r#"
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
 UPDATE jobs
 SET
     status = 'running',
@@ -1143,13 +1146,15 @@ WHERE kind = ? AND job_key = ?
   AND (retry_at IS NULL OR retry_at <= ?)
   AND retry_remaining > 0
             "#,
+            )
+            .bind(worker_id.as_str())
+            .bind(ownership_token.as_str())
+            .bind(now)
+            .bind(lease_until)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(worker_id.as_str())
-        .bind(ownership_token.as_str())
-        .bind(now)
-        .bind(lease_until)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-        .bind(job_key.as_str())
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -1195,18 +1200,20 @@ WHERE kind = ? AND job_key = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
-        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
-        let rows_affected = sqlx::query(
-            r#"
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
 UPDATE jobs
 SET lease_until = ?
 WHERE kind = ? AND job_key = ?
   AND status = 'running' AND ownership_token = ?
             "#,
+            )
+            .bind(lease_until)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(lease_until)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(self.pool.as_ref())
         .await?
@@ -1252,9 +1259,9 @@ WHERE kind = ? AND job_key = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let mut tx = self.pool.begin().await?;
-        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
-        let rows_affected = sqlx::query(
-            r#"
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
 UPDATE jobs
 SET
     status = 'done',
@@ -1265,11 +1272,13 @@ SET
 WHERE kind = ? AND job_key = ?
   AND status = 'running' AND ownership_token = ?
             "#,
+            )
+            .bind(now)
+            .bind(completed_watermark)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(now)
-        .bind(completed_watermark)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(&mut *tx)
         .await?
@@ -1356,9 +1365,9 @@ WHERE thread_id = ? AND source_updated_at = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
-        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
-        let rows_affected = sqlx::query(
-            r#"
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
 UPDATE jobs
 SET
     status = 'error',
@@ -1370,12 +1379,14 @@ SET
 WHERE kind = ? AND job_key = ?
   AND status = 'running' AND ownership_token = ?
             "#,
+            )
+            .bind(now)
+            .bind(retry_at)
+            .bind(failure_reason)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(now)
-        .bind(retry_at)
-        .bind(failure_reason)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(self.pool.as_ref())
         .await?
@@ -1416,9 +1427,9 @@ WHERE kind = ? AND job_key = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
-        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
-        let rows_affected = sqlx::query(
-            r#"
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
 UPDATE jobs
 SET
     status = 'error',
@@ -1431,12 +1442,14 @@ WHERE kind = ? AND job_key = ?
   AND status = 'running'
   AND (ownership_token = ? OR ownership_token IS NULL)
             "#,
+            )
+            .bind(now)
+            .bind(retry_at)
+            .bind(failure_reason)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(now)
-        .bind(retry_at)
-        .bind(failure_reason)
-        .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-        .bind(job_key.as_str())
         .bind(ownership_token)
         .execute(self.pool.as_ref())
         .await?
@@ -1455,9 +1468,9 @@ async fn enqueue_phase2_consolidation_with_executor<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
-    sqlx::query(
-        r#"
+    memory_repo::bind_phase2_job_key(
+        sqlx::query(
+            r#"
 INSERT INTO jobs (
     kind,
     job_key,
@@ -1489,9 +1502,11 @@ ON CONFLICT(kind, job_key) DO UPDATE SET
         ELSE COALESCE(jobs.input_watermark, 0) + 1
     END
         "#,
+        )
+        .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+        memory_scope_kind,
+        memory_scope_key,
     )
-    .bind(JOB_KIND_MEMORY_CONSOLIDATE)
-    .bind(job_key.as_str())
     .bind(DEFAULT_RETRY_REMAINING)
     .bind(input_watermark)
     .execute(executor)

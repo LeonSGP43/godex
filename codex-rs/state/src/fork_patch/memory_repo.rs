@@ -34,6 +34,14 @@ pub(crate) fn bind_memory_scope<'q>(
     query.bind(memory_scope_kind).bind(memory_scope_key)
 }
 
+pub(crate) fn bind_phase2_job_key<'q>(
+    query: Query<'q, Sqlite, SqliteArguments<'q>>,
+    memory_scope_kind: &'q str,
+    memory_scope_key: &'q str,
+) -> Query<'q, Sqlite, SqliteArguments<'q>> {
+    query.bind(phase2_job_key(memory_scope_kind, memory_scope_key))
+}
+
 pub(crate) async fn fetch_thread_memory_scope<'e, E>(
     executor: E,
     thread_id: &str,
