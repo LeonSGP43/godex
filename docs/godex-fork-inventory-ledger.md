@@ -4,16 +4,16 @@ This ledger is the current-state inventory of how this fork differs from officia
 
 ## Snapshot
 
-- Generated on: `2026-04-07`
-- Compared head: `529be4aa63`
+- Generated on: `2026-04-08`
+- Compared head: `658efc8c03`
 - Compared upstream base: `upstream/main` at `89f1a44afa`
-- Divergence: `behind 177` / `ahead 69`
-- Diff surface: `162 files changed, 17394 insertions(+), 918 deletions(-)`
+- Divergence: `behind 177` / `ahead 80`
+- Diff surface: `169 files changed, 18157 insertions(+), 980 deletions(-)`
 - Current top hot directories:
-  - `codex-rs/core/src`: 42 changed paths
+  - `codex-rs/core/src`: 44 changed paths
   - `codex-rs/tui/src`: 29 changed paths
+  - `codex-rs/state/src`: 8 changed paths
   - `codex-rs/rollout/src`: 6 changed paths
-  - `codex-rs/state/src`: 5 changed paths
   - `codex-rs/examples/external_agent_backends`: 4 changed paths
   - `codex-rs/login/src`: 4 changed paths
   - `.codex/skills/godex-release-distributor`: 3 changed paths
@@ -198,7 +198,10 @@ This ledger is the current-state inventory of how this fork differs from officia
   - `709c379ab2 feat(godex): add cli memory scope override`
 - Owner files / globs:
   - `codex-rs/core/src/memories/**`
+  - `codex-rs/core/src/fork_patch/memory.rs`
+  - `codex-rs/core/src/fork_patch/mod.rs`
   - `codex-rs/core/templates/memories/**`
+  - `codex-rs/state/src/fork_patch/**`
   - `codex-rs/state/src/runtime/memories.rs`
   - `codex-rs/state/src/runtime/threads.rs`
   - `codex-rs/state/src/model/thread_metadata.rs`
@@ -214,6 +217,10 @@ This ledger is the current-state inventory of how this fork differs from officia
 - Notes:
   - This is the highest merge-cost patch group because it crosses config, CLI, rollout metadata, state schema/runtime, prompt assembly, and retrieval logic.
   - The follow-up design for shrinking this intrusion is documented in `docs/godex-memory-patch-layer-plan.md`.
+  - Progress since the previous ledger snapshot:
+    - `ce26159c05` and `9695d4fc05` advanced `patch/memory-facade` and `patch/memory-artifact-contract` by moving scope/artifact-root helpers and artifact path helpers behind `fork_patch::memory`.
+    - `59a7ab0b15` and `cc2dfc1341` advanced `patch/memory-read-path` by moving read-path helper logic into the facade and removing a leftover wrapper from `prompts.rs`.
+    - `11941f87e6` and `658efc8c03` advanced `patch/memory-state-runtime` by moving scope helpers into `state/src/fork_patch/memory_repo.rs` and centralizing phase2 enqueue scope fetches.
 
 ## Bootstrap mixed residue and shared hot-path drift (`fork/bootstrap-residue`)
 
@@ -250,11 +257,11 @@ This section is the higher-resolution ledger for future fork-patch work. It maps
 | `patch/backend-examples` | `fork/provider-backends` | Ship runnable sample backends and operator docs so provider workers live outside the binary. | `codex-rs/examples/external_agent_backends/**`, `docs/external-agent-backends.md` | readme/example parity review; sample backend smoke against `[agent_backends.*]` | Upstream publishes first-party external backend examples or the fork moves examples to a separate maintainer repo |
 | `patch/backend-legacy-grok-shim` | `fork/native-grok-legacy` | Temporary compatibility layer for native Grok naming/tooling while real provider calls move to external backends. | `codex-rs/core/src/agent/builtins/grok.toml`, `codex-rs/core/src/tools/handlers/grok_research.rs`, `docs/config.md` | inspect registration and migration docs | External `grok_worker` is the only supported real Grok path and native shim usage falls to zero |
 | `patch/memory-facade` | `fork/memory-system` | Thin fork seam that gathers memory-only policy behind `fork_patch::memory`. | `codex-rs/core/src/fork_patch/memory.rs`, `codex-rs/core/src/fork_patch/mod.rs` | `cargo check -p codex-core --lib`; targeted prompt/storage tests | Once all remaining fork-only memory policy has moved behind the facade and hot upstream call sites only call the facade |
-| `patch/memory-artifact-contract` | `fork/memory-system` | Centralize memory artifact path naming and layout rules. | `codex-rs/core/src/memories/mod.rs`, `codex-rs/core/src/memories/storage.rs`, `codex-rs/core/src/memories/semantic_index.rs`, `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/tests.rs`, `codex-rs/core/src/memories/prompts_tests.rs` | `cargo test -p codex-core build_memory_tool_developer_instructions_renders_embedded_template --manifest-path codex-rs/Cargo.toml`; `cargo test -p codex-core sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only --manifest-path codex-rs/Cargo.toml` | Artifact names/locations become upstream-native or fully encapsulated behind a stable memory adapter |
+| `patch/memory-artifact-contract` | `fork/memory-system` | Centralize memory artifact path naming and layout rules. | `codex-rs/core/src/fork_patch/memory.rs`, `codex-rs/core/src/memories/mod.rs`, `codex-rs/core/src/memories/storage.rs`, `codex-rs/core/src/memories/semantic_index.rs`, `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/tests.rs`, `codex-rs/core/src/memories/prompts_tests.rs` | `cargo test -p codex-core build_memory_tool_developer_instructions_renders_embedded_template --manifest-path codex-rs/Cargo.toml`; `cargo test -p codex-core sync_rollout_summaries_and_raw_memories_file_keeps_latest_memories_only --manifest-path codex-rs/Cargo.toml` | Artifact names/locations become upstream-native or fully encapsulated behind a stable memory adapter |
 | `patch/memory-scope-policy` | `fork/memory-system` | Own global vs project scope selection, CLI override policy, and root resolution. | `codex-rs/core/src/memories/scope.rs`, `codex-rs/cli/src/main.rs`, `codex-rs/core/src/config/**`, `codex-rs/core/tests/memory_scope_smoke.rs`, `codex-rs/cli/tests/godex_home.rs` | `cargo test -p codex-cli godex_home -- --nocapture`; `cargo test -p codex-core memory_scope_smoke --manifest-path codex-rs/Cargo.toml` | Upstream ships equivalent scoped-memory semantics with compatible operator controls |
-| `patch/memory-read-path` | `fork/memory-system` | Control quick-pass instructions, summary embedding, and recall hint assembly. | `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/prompts_tests.rs`, `codex-rs/core/templates/memories/read_path.md` | `cargo test -p codex-core prompts::tests::memory_quick_pass_instructions_remain_stable --manifest-path codex-rs/Cargo.toml` | Upstream adds comparable prompt/read-path behavior or the fork can express the same policy purely as data/templates |
+| `patch/memory-read-path` | `fork/memory-system` | Control quick-pass instructions, summary embedding, and recall hint assembly. | `codex-rs/core/src/fork_patch/memory.rs`, `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/prompts_tests.rs`, `codex-rs/core/templates/memories/read_path.md` | `cargo test -p codex-core prompts::tests::memory_quick_pass_instructions_remain_stable --manifest-path codex-rs/Cargo.toml` | Upstream adds comparable prompt/read-path behavior or the fork can express the same policy purely as data/templates |
 | `patch/memory-recall-engine` | `fork/memory-system` | Own semantic index, QMD export, hybrid retrieval, and recall tuning. | `codex-rs/core/src/memories/semantic_index.rs`, `codex-rs/core/src/memories/usage.rs`, `codex-rs/core/src/memories/tests.rs`, `codex-rs/core/templates/memories/consolidation.md` | `cargo test -p codex-core memories:: -- --nocapture`; semantic recall fixture tests | Upstream introduces a better recall/indexing engine and the fork can delete or delegate the QMD/vector implementation |
-| `patch/memory-state-runtime` | `fork/memory-system` | Persist scope metadata and thread/runtime hooks needed by scoped memories. | `codex-rs/state/migrations/0023_threads_memory_scope.sql`, `codex-rs/state/src/model/thread_metadata.rs`, `codex-rs/state/src/runtime/memories.rs`, `codex-rs/state/src/runtime/threads.rs`, `codex-rs/rollout/src/**`, `codex-rs/protocol/src/protocol.rs` | `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`; rollout/state targeted suites | Upstream state/runtime grows a compatible memory-scope model and the fork can map onto native metadata |
+| `patch/memory-state-runtime` | `fork/memory-system` | Persist scope metadata and thread/runtime hooks needed by scoped memories. | `codex-rs/state/migrations/0023_threads_memory_scope.sql`, `codex-rs/state/src/fork_patch/mod.rs`, `codex-rs/state/src/fork_patch/memory_repo.rs`, `codex-rs/state/src/model/thread_metadata.rs`, `codex-rs/state/src/runtime/memories.rs`, `codex-rs/state/src/runtime/threads.rs`, `codex-rs/rollout/src/**`, `codex-rs/protocol/src/protocol.rs` | `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`; rollout/state targeted suites | Upstream state/runtime grows a compatible memory-scope model and the fork can map onto native metadata |
 | `patch/config-home-namespace` | `fork/config-namespace-home` | Keep `godex`/`godex -g` home behavior, config namespace policy, and schema exposure coherent. | `codex-rs/utils/home-dir/src/lib.rs`, `codex-rs/core/src/config_loader/**`, `codex-rs/core/config.schema.json`, `docs/config.md` | `cargo test -p codex-cli godex_home -- --nocapture`; `godex --memory-scope project --version` | Upstream exposes the same namespace/home policy hooks or the fork splits this into a dedicated wrapper crate |
 | `patch/release-distribution` | `fork/distribution-release` | Own fork package names, installers, npm staging, and release workflows. | `codex-cli/**`, `scripts/install/**`, `scripts/godex-release*.sh`, `.github/workflows/rust-release*.yml`, `codex-rs/Cargo.toml`, `codex-rs/Cargo.lock`, `VERSION`, `CHANGELOG.md` | `bash scripts/godex-maintain.sh release-preflight`; install dry-run; version/changelog gate | Only partial replacement is possible; artifact naming and release channels stay fork-owned |
 | `patch/bootstrap-login-auth` | `fork/bootstrap-residue` | Residual auth/login divergence that should either migrate into a thinner adapter or disappear. | `codex-rs/cli/src/login.rs`, `codex-rs/login/src/**`, `codex-rs/tui/src/onboarding/**` | targeted login smoke after sync; diff review around auth entrypoints | Upstream closes the behavior gap or fork-specific auth UX moves to isolated adapters |
@@ -263,9 +270,9 @@ This section is the higher-resolution ledger for future fork-patch work. It maps
 
 ### Immediate Extraction Order
 
-- `1. patch/memory-artifact-contract`: continue moving path/layout rules into `fork_patch::memory` until the memory module only consumes the facade.
-- `2. patch/memory-read-path`: isolate prompt assembly and summary/semantic hint selection from hot upstream memory flow.
-- `3. patch/memory-state-runtime`: reduce direct fork logic in state/runtime by introducing thinner mapping helpers around scope metadata.
+- `1. patch/memory-state-runtime`: continue from the current helper extractions and shrink the remaining direct scope-metadata touchpoints in `state/src/runtime/threads.rs` and `state/src/model/thread_metadata.rs`.
+- `2. patch/memory-artifact-contract`: keep moving residual path/layout rules into `fork_patch::memory`, but only when a hot-path file still owns fork-specific naming policy.
+- `3. patch/memory-read-path`: treat the current facade move as stabilization work; only reopen this lane if summary/semantic hint assembly leaks back into hot upstream files.
 - `4. patch/bootstrap-proxy-mcp` and `patch/bootstrap-login-auth`: split residue into explicit adapters or delete it where upstream already covers the behavior.
 - `5. patch/backend-contract`: keep growing only the external backend seam; do not reintroduce fake provider roles into the role layer.
 
