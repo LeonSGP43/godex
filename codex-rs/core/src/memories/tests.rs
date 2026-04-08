@@ -1,15 +1,16 @@
 use super::storage::rebuild_raw_memories_file_from_memories;
 use super::storage::sync_rollout_summaries_from_memories;
 use crate::config::types::DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION;
+use crate::fork_patch::memory::memory_index_file;
+use crate::fork_patch::memory::memory_qmd_file;
+use crate::fork_patch::memory::raw_memories_file;
+use crate::fork_patch::memory::rollout_summaries_dir;
+use crate::fork_patch::memory::vector_index_file;
 use crate::memories::clear_memory_root_contents;
 use crate::memories::ensure_layout;
-use crate::memories::memory_qmd_file;
 use crate::memories::memory_root;
-use crate::memories::raw_memories_file;
-use crate::memories::rollout_summaries_dir;
 use crate::memories::semantic_index::SemanticRecallOptions;
 use crate::memories::semantic_index::semantic_recall;
-use crate::memories::vector_index_file;
 use chrono::TimeZone;
 use chrono::Utc;
 use codex_protocol::ThreadId;
@@ -132,11 +133,11 @@ fn stage_one_output_schema_requires_rollout_slug_and_keeps_it_nullable() {
 async fn clear_memory_root_contents_preserves_root_directory() {
     let dir = tempdir().expect("tempdir");
     let root = dir.path().join("memory");
-    let nested_dir = root.join("rollout_summaries");
+    let nested_dir = rollout_summaries_dir(&root);
     tokio::fs::create_dir_all(&nested_dir)
         .await
         .expect("create rollout summaries dir");
-    tokio::fs::write(root.join("MEMORY.md"), "stale memory index\n")
+    tokio::fs::write(memory_index_file(&root), "stale memory index\n")
         .await
         .expect("write memory index");
     tokio::fs::write(nested_dir.join("rollout.md"), "stale rollout\n")
@@ -605,12 +606,15 @@ mod phase2 {
     use crate::codex::make_session_and_context;
     use crate::config::Config;
     use crate::config::test_config;
-    use crate::memories::memory_qmd_file;
+    use crate::fork_patch::memory::memory_index_file;
+    use crate::fork_patch::memory::memory_qmd_file;
+    use crate::fork_patch::memory::memory_summary_file;
+    use crate::fork_patch::memory::raw_memories_file;
+    use crate::fork_patch::memory::rollout_summaries_dir;
+    use crate::fork_patch::memory::skills_dir;
+    use crate::fork_patch::memory::vector_index_file;
     use crate::memories::memory_root;
     use crate::memories::phase2;
-    use crate::memories::raw_memories_file;
-    use crate::memories::rollout_summaries_dir;
-    use crate::memories::vector_index_file;
     use chrono::Utc;
     use codex_config::Constrained;
     use codex_protocol::ThreadId;
@@ -923,11 +927,11 @@ mod phase2 {
         tokio::fs::write(&raw_memories_path, "stale raw memories\n")
             .await
             .expect("write stale raw memories");
-        let memory_index_path = root.join("MEMORY.md");
+        let memory_index_path = memory_index_file(&root);
         tokio::fs::write(&memory_index_path, "stale memory index\n")
             .await
             .expect("write stale memory index");
-        let memory_summary_path = root.join("memory_summary.md");
+        let memory_summary_path = memory_summary_file(&root);
         tokio::fs::write(&memory_summary_path, "stale memory summary\n")
             .await
             .expect("write stale memory summary");
@@ -1000,7 +1004,7 @@ mod phase2 {
             "empty consolidation should remove stale skills artifacts"
         );
         assert!(
-            !tokio::fs::try_exists(root.join("skills"))
+            !tokio::fs::try_exists(skills_dir(&root))
                 .await
                 .expect("check skills dir existence"),
             "empty consolidation should remove stale skills directory"

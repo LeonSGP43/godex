@@ -1,6 +1,4 @@
-use crate::memories::memory_qmd_file;
 use crate::memories::storage::rollout_summary_file_stem;
-use crate::memories::vector_index_file;
 use chrono::Utc;
 use codex_state::Stage1Output;
 use serde::Deserialize;
@@ -136,7 +134,7 @@ pub(super) async fn write_memory_index_qmd(
     root: &Path,
     memories: &[Stage1Output],
 ) -> io::Result<()> {
-    let path = memory_qmd_file(root);
+    let path = crate::fork_patch::memory::memory_qmd_file(root);
     if memories.is_empty() {
         return tokio::fs::write(path, memory_index_qmd_empty()).await;
     }
@@ -267,11 +265,14 @@ pub(super) async fn write_vector_index_json(
     };
     let body = serde_json::to_string_pretty(&index)
         .map_err(|err| io::Error::other(format!("serialize vector index: {err}")))?;
-    tokio::fs::write(vector_index_file(root), body).await
+    tokio::fs::write(crate::fork_patch::memory::vector_index_file(root), body).await
 }
 
 pub(super) async fn clear_auxiliary_indexes(root: &Path) -> io::Result<()> {
-    for path in [memory_qmd_file(root), vector_index_file(root)] {
+    for path in [
+        crate::fork_patch::memory::memory_qmd_file(root),
+        crate::fork_patch::memory::vector_index_file(root),
+    ] {
         if let Err(err) = tokio::fs::remove_file(path).await
             && err.kind() != io::ErrorKind::NotFound
         {
@@ -290,11 +291,12 @@ pub(super) async fn semantic_recall(
         return Ok(Vec::new());
     }
 
-    let body = match tokio::fs::read_to_string(vector_index_file(root)).await {
-        Ok(body) => body,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(err),
-    };
+    let body =
+        match tokio::fs::read_to_string(crate::fork_patch::memory::vector_index_file(root)).await {
+            Ok(body) => body,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(err),
+        };
     let index: VectorIndexRead = serde_json::from_str(&body)
         .map_err(|err| io::Error::other(format!("parse vector index: {err}")))?;
     if index.dimension == 0 {

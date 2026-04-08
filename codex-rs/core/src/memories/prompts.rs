@@ -181,7 +181,7 @@ pub(crate) async fn build_memory_tool_developer_instructions(
         memory_scope_kind,
         memory_scope_key,
     );
-    let memory_summary_path = base_path.join("memory_summary.md");
+    let memory_summary_path = crate::fork_patch::memory::memory_summary_file(&base_path);
     let memory_summary = fs::read_to_string(&memory_summary_path)
         .await
         .ok()?

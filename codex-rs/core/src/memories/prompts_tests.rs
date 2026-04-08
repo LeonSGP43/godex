@@ -1,5 +1,7 @@
 use super::*;
 use crate::config::types::MemoriesConfig;
+use crate::fork_patch::memory::memory_summary_file;
+use crate::fork_patch::memory::vector_index_file;
 use crate::models_manager::model_info::model_info_from_slug;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -73,7 +75,7 @@ async fn build_memory_tool_developer_instructions_renders_embedded_template() {
     let memories_dir = codex_home.join("memories");
     tokio_fs::create_dir_all(&memories_dir).await.unwrap();
     tokio_fs::write(
-        memories_dir.join("memory_summary.md"),
+        memory_summary_file(&memories_dir),
         "Short memory summary for tests.",
     )
     .await
@@ -109,7 +111,7 @@ async fn build_memory_tool_developer_instructions_appends_semantic_recall_hints(
     let memories_dir = codex_home.join("memories");
     tokio_fs::create_dir_all(&memories_dir).await.unwrap();
     tokio_fs::write(
-        memories_dir.join("memory_summary.md"),
+        memory_summary_file(&memories_dir),
         "Short memory summary for tests.",
     )
     .await
@@ -134,7 +136,7 @@ async fn build_memory_tool_developer_instructions_appends_semantic_recall_hints(
         ]
     });
     tokio_fs::write(
-        memories_dir.join("vector_index.json"),
+        vector_index_file(&memories_dir),
         serde_json::to_string_pretty(&vector_index).unwrap(),
     )
     .await
@@ -167,13 +169,13 @@ async fn build_memory_tool_developer_instructions_skips_semantic_hints_when_disa
     let memories_dir = codex_home.join("memories");
     tokio_fs::create_dir_all(&memories_dir).await.unwrap();
     tokio_fs::write(
-        memories_dir.join("memory_summary.md"),
+        memory_summary_file(&memories_dir),
         "Short memory summary for tests.",
     )
     .await
     .unwrap();
     tokio_fs::write(
-        memories_dir.join("vector_index.json"),
+        vector_index_file(&memories_dir),
         r#"{"dimension":256,"entries":[]}"#,
     )
     .await

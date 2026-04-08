@@ -6,8 +6,6 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::memories::ensure_layout;
-use crate::memories::raw_memories_file;
-use crate::memories::rollout_summaries_dir;
 use crate::memories::semantic_index::clear_auxiliary_indexes;
 use crate::memories::semantic_index::write_memory_index_qmd;
 use crate::memories::semantic_index::write_vector_index_json;
@@ -44,8 +42,10 @@ pub(super) async fn sync_rollout_summaries_from_memories(
 
     if retained.is_empty() {
         clear_auxiliary_indexes(root).await?;
-        for file_name in ["MEMORY.md", "memory_summary.md"] {
-            let path = root.join(file_name);
+        for path in [
+            crate::fork_patch::memory::memory_index_file(root),
+            crate::fork_patch::memory::memory_summary_file(root),
+        ] {
             if let Err(err) = tokio::fs::remove_file(path).await
                 && err.kind() != std::io::ErrorKind::NotFound
             {
@@ -53,7 +53,7 @@ pub(super) async fn sync_rollout_summaries_from_memories(
             }
         }
 
-        let skills_dir = root.join("skills");
+        let skills_dir = crate::fork_patch::memory::skills_dir(root);
         if let Err(err) = tokio::fs::remove_dir_all(skills_dir).await
             && err.kind() != std::io::ErrorKind::NotFound
         {
@@ -79,7 +79,7 @@ async fn rebuild_raw_memories_file(
 
     if retained.is_empty() {
         body.push_str("No raw memories yet.\n");
-        return tokio::fs::write(raw_memories_file(root), body).await;
+        return tokio::fs::write(crate::fork_patch::memory::raw_memories_file(root), body).await;
     }
 
     body.push_str("Merged stage-1 raw memories (latest first):\n\n");
@@ -102,11 +102,11 @@ async fn rebuild_raw_memories_file(
         body.push_str("\n\n");
     }
 
-    tokio::fs::write(raw_memories_file(root), body).await
+    tokio::fs::write(crate::fork_patch::memory::raw_memories_file(root), body).await
 }
 
 async fn prune_rollout_summaries(root: &Path, keep: &HashSet<String>) -> std::io::Result<()> {
-    let dir_path = rollout_summaries_dir(root);
+    let dir_path = crate::fork_patch::memory::rollout_summaries_dir(root);
     let mut dir = match tokio::fs::read_dir(&dir_path).await {
         Ok(dir) => dir,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -140,7 +140,7 @@ async fn write_rollout_summary_for_thread(
     memory: &Stage1Output,
 ) -> std::io::Result<()> {
     let file_stem = rollout_summary_file_stem(memory);
-    let path = rollout_summaries_dir(root).join(format!("{file_stem}.md"));
+    let path = crate::fork_patch::memory::rollout_summary_path(root, &file_stem);
 
     let mut body = String::new();
     writeln!(body, "thread_id: {}", memory.thread_id).map_err(rollout_summary_format_error)?;
