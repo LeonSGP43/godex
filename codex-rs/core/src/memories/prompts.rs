@@ -94,13 +94,12 @@ fn render_phase2_input_selection(selection: &Phase2InputSelection) -> String {
 
 fn render_selected_input_line(item: &Stage1Output, retained: bool) -> String {
     let status = if retained { "retained" } else { "added" };
-    let rollout_summary_file = format!(
-        "rollout_summaries/{}.md",
-        rollout_summary_file_stem_from_parts(
+    let rollout_summary_file = crate::fork_patch::memory::rollout_summary_relative_path(
+        &rollout_summary_file_stem_from_parts(
             item.thread_id,
             item.source_updated_at,
             item.rollout_slug.as_deref(),
-        )
+        ),
     );
     format!(
         "- [{status}] thread_id={}, rollout_summary_file={rollout_summary_file}",
@@ -109,13 +108,12 @@ fn render_selected_input_line(item: &Stage1Output, retained: bool) -> String {
 }
 
 fn render_removed_input_line(item: &Stage1OutputRef) -> String {
-    let rollout_summary_file = format!(
-        "rollout_summaries/{}.md",
-        rollout_summary_file_stem_from_parts(
+    let rollout_summary_file = crate::fork_patch::memory::rollout_summary_relative_path(
+        &rollout_summary_file_stem_from_parts(
             item.thread_id,
             item.source_updated_at,
             item.rollout_slug.as_deref(),
-        )
+        ),
     );
     format!(
         "- thread_id={}, rollout_summary_file={rollout_summary_file}",

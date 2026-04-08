@@ -92,7 +92,9 @@ async fn rebuild_raw_memories_file(
         writeln!(body, "cwd: {}", memory.cwd.display()).map_err(raw_memories_format_error)?;
         writeln!(body, "rollout_path: {}", memory.rollout_path.display())
             .map_err(raw_memories_format_error)?;
-        let rollout_summary_file = format!("{}.md", rollout_summary_file_stem(memory));
+        let rollout_summary_file = crate::fork_patch::memory::rollout_summary_file_name(
+            &rollout_summary_file_stem(memory),
+        );
         writeln!(body, "rollout_summary_file: {rollout_summary_file}")
             .map_err(raw_memories_format_error)?;
         writeln!(body).map_err(raw_memories_format_error)?;

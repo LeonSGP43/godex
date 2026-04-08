@@ -161,8 +161,9 @@ pub(super) async fn write_memory_index_qmd(
     writeln!(out).map_err(format_err)?;
 
     for (position, memory) in memories.iter().enumerate() {
-        let rollout_summary_file =
-            format!("rollout_summaries/{}.md", rollout_summary_file_stem(memory));
+        let rollout_summary_file = crate::fork_patch::memory::rollout_summary_relative_path(
+            &rollout_summary_file_stem(memory),
+        );
         let combined_text = format!("{}\n{}", memory.rollout_summary, memory.raw_memory);
         let keywords = top_keywords(&combined_text, KEYWORD_LIMIT).join(", ");
         let summary_preview =
@@ -206,8 +207,9 @@ pub(super) async fn write_vector_index_json(
         .iter()
         .map(|memory| {
             let combined_text = format!("{}\n{}", memory.rollout_summary, memory.raw_memory);
-            let rollout_summary_file =
-                format!("rollout_summaries/{}.md", rollout_summary_file_stem(memory));
+            let rollout_summary_file = crate::fork_patch::memory::rollout_summary_relative_path(
+                &rollout_summary_file_stem(memory),
+            );
             let lexical_counts = lexical_term_counts(&combined_text);
             for term in lexical_counts.keys() {
                 *doc_frequency.entry(term.clone()).or_default() += 1;

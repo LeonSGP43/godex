@@ -51,8 +51,19 @@ pub(crate) fn rollout_summaries_dir(root: &Path) -> PathBuf {
     root.join(ROLLOUT_SUMMARIES_SUBDIR)
 }
 
+pub(crate) fn rollout_summary_file_name(file_stem: &str) -> String {
+    format!("{file_stem}.md")
+}
+
+pub(crate) fn rollout_summary_relative_path(file_stem: &str) -> String {
+    format!(
+        "{ROLLOUT_SUMMARIES_SUBDIR}/{}",
+        rollout_summary_file_name(file_stem)
+    )
+}
+
 pub(crate) fn rollout_summary_path(root: &Path, file_stem: &str) -> PathBuf {
-    rollout_summaries_dir(root).join(format!("{file_stem}.md"))
+    rollout_summaries_dir(root).join(rollout_summary_file_name(file_stem))
 }
 
 pub(crate) fn raw_memories_file(root: &Path) -> PathBuf {
