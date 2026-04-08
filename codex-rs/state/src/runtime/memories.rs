@@ -1,6 +1,7 @@
 use super::threads::push_thread_filters;
 use super::threads::push_thread_order_and_limit;
 use super::*;
+use crate::fork_patch::memory_repo;
 use crate::model::Phase2InputSelection;
 use crate::model::Phase2JobClaimOutcome;
 use crate::model::Stage1JobClaim;
@@ -19,9 +20,6 @@ use uuid::Uuid;
 
 const JOB_KIND_MEMORY_STAGE1: &str = "memory_stage1";
 const JOB_KIND_MEMORY_CONSOLIDATE: &str = "memory_consolidate_global";
-const GLOBAL_MEMORY_SCOPE_KIND: &str = "global";
-const GLOBAL_MEMORY_SCOPE_KEY: &str = "global";
-
 const DEFAULT_RETRY_REMAINING: i64 = 3;
 
 impl StateRuntime {
@@ -145,8 +143,8 @@ WHERE thread_id = ?
         self.claim_stage1_jobs_for_startup_in_scope(
             current_thread_id,
             params,
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
         )
         .await
     }
@@ -288,8 +286,12 @@ LEFT JOIN jobs
         &self,
         n: usize,
     ) -> anyhow::Result<Vec<Stage1Output>> {
-        self.list_stage1_outputs_for_scope(n, GLOBAL_MEMORY_SCOPE_KIND, GLOBAL_MEMORY_SCOPE_KEY)
-            .await
+        self.list_stage1_outputs_for_scope(
+            n,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
+        )
+        .await
     }
 
     pub async fn list_stage1_outputs_for_scope(
@@ -350,8 +352,8 @@ LIMIT ?
         limit: usize,
     ) -> anyhow::Result<usize> {
         self.prune_stage1_outputs_for_retention_in_scope(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             max_unused_days,
             limit,
         )
@@ -429,8 +431,8 @@ WHERE thread_id IN (
         self.get_phase2_input_selection_in_scope(
             n,
             max_unused_days,
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
         )
         .await
     }
@@ -598,18 +600,8 @@ WHERE so.thread_id = ?
         .await?
         .unwrap_or(0);
         if selected_for_phase2 != 0 {
-            let scope = sqlx::query(
-                r#"
-SELECT memory_scope_kind, memory_scope_key
-FROM threads
-WHERE id = ?
-                "#,
-            )
-            .bind(thread_id.as_str())
-            .fetch_one(&mut *tx)
-            .await?;
-            let memory_scope_kind: String = scope.try_get("memory_scope_kind")?;
-            let memory_scope_key: String = scope.try_get("memory_scope_key")?;
+            let (memory_scope_kind, memory_scope_key) =
+                memory_repo::fetch_thread_memory_scope(&mut *tx, thread_id.as_str()).await?;
             enqueue_phase2_consolidation_with_executor(
                 &mut *tx,
                 memory_scope_kind.as_str(),
@@ -893,18 +885,8 @@ WHERE excluded.source_updated_at >= stage1_outputs.source_updated_at
         .execute(&mut *tx)
         .await?;
 
-        let scope = sqlx::query(
-            r#"
-SELECT memory_scope_kind, memory_scope_key
-FROM threads
-WHERE id = ?
-            "#,
-        )
-        .bind(thread_id.as_str())
-        .fetch_one(&mut *tx)
-        .await?;
-        let memory_scope_kind: String = scope.try_get("memory_scope_kind")?;
-        let memory_scope_key: String = scope.try_get("memory_scope_key")?;
+        let (memory_scope_kind, memory_scope_key) =
+            memory_repo::fetch_thread_memory_scope(&mut *tx, thread_id.as_str()).await?;
         enqueue_phase2_consolidation_with_executor(
             &mut *tx,
             memory_scope_kind.as_str(),
@@ -986,18 +968,8 @@ WHERE thread_id = ?
         .rows_affected();
 
         if deleted_rows > 0 {
-            let scope = sqlx::query(
-                r#"
-SELECT memory_scope_kind, memory_scope_key
-FROM threads
-WHERE id = ?
-                "#,
-            )
-            .bind(thread_id.as_str())
-            .fetch_one(&mut *tx)
-            .await?;
-            let memory_scope_kind: String = scope.try_get("memory_scope_kind")?;
-            let memory_scope_key: String = scope.try_get("memory_scope_key")?;
+            let (memory_scope_kind, memory_scope_key) =
+                memory_repo::fetch_thread_memory_scope(&mut *tx, thread_id.as_str()).await?;
             enqueue_phase2_consolidation_with_executor(
                 &mut *tx,
                 memory_scope_kind.as_str(),
@@ -1064,8 +1036,8 @@ WHERE kind = ? AND job_key = ?
     /// older than prior maxima.
     pub async fn enqueue_global_consolidation(&self, input_watermark: i64) -> anyhow::Result<()> {
         self.enqueue_phase2_consolidation(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             input_watermark,
         )
         .await
@@ -1101,8 +1073,8 @@ WHERE kind = ? AND job_key = ?
         lease_seconds: i64,
     ) -> anyhow::Result<Phase2JobClaimOutcome> {
         self.try_claim_phase2_job(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             worker_id,
             lease_seconds,
         )
@@ -1120,7 +1092,7 @@ WHERE kind = ? AND job_key = ?
         let lease_until = now.saturating_add(lease_seconds.max(0));
         let ownership_token = Uuid::new_v4().to_string();
         let worker_id = worker_id.to_string();
-        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
+        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
 
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
@@ -1221,8 +1193,8 @@ WHERE kind = ? AND job_key = ?
         lease_seconds: i64,
     ) -> anyhow::Result<bool> {
         self.heartbeat_phase2_job(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             ownership_token,
             lease_seconds,
         )
@@ -1238,7 +1210,7 @@ WHERE kind = ? AND job_key = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
-        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
+        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1276,8 +1248,8 @@ WHERE kind = ? AND job_key = ?
         selected_outputs: &[Stage1Output],
     ) -> anyhow::Result<bool> {
         self.mark_phase2_job_succeeded(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             ownership_token,
             completed_watermark,
             selected_outputs,
@@ -1295,7 +1267,7 @@ WHERE kind = ? AND job_key = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let mut tx = self.pool.begin().await?;
-        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
+        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1378,8 +1350,8 @@ WHERE thread_id = ? AND source_updated_at = ?
         retry_delay_seconds: i64,
     ) -> anyhow::Result<bool> {
         self.mark_phase2_job_failed(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             ownership_token,
             failure_reason,
             retry_delay_seconds,
@@ -1397,7 +1369,7 @@ WHERE thread_id = ? AND source_updated_at = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
-        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
+        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1438,8 +1410,8 @@ WHERE kind = ? AND job_key = ?
         retry_delay_seconds: i64,
     ) -> anyhow::Result<bool> {
         self.mark_phase2_job_failed_if_unowned(
-            GLOBAL_MEMORY_SCOPE_KIND,
-            GLOBAL_MEMORY_SCOPE_KEY,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KIND,
+            memory_repo::GLOBAL_MEMORY_SCOPE_KEY,
             ownership_token,
             failure_reason,
             retry_delay_seconds,
@@ -1457,7 +1429,7 @@ WHERE kind = ? AND job_key = ?
     ) -> anyhow::Result<bool> {
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
-        let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
+        let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
         let rows_affected = sqlx::query(
             r#"
 UPDATE jobs
@@ -1496,7 +1468,7 @@ async fn enqueue_phase2_consolidation_with_executor<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    let job_key = memory_phase2_job_key(memory_scope_kind, memory_scope_key);
+    let job_key = memory_repo::phase2_job_key(memory_scope_kind, memory_scope_key);
     sqlx::query(
         r#"
 INSERT INTO jobs (
@@ -1539,15 +1511,6 @@ ON CONFLICT(kind, job_key) DO UPDATE SET
     .await?;
 
     Ok(())
-}
-
-fn memory_phase2_job_key(memory_scope_kind: &str, memory_scope_key: &str) -> String {
-    if memory_scope_kind == GLOBAL_MEMORY_SCOPE_KIND && memory_scope_key == GLOBAL_MEMORY_SCOPE_KEY
-    {
-        GLOBAL_MEMORY_SCOPE_KEY.to_string()
-    } else {
-        format!("{memory_scope_kind}:{memory_scope_key}")
-    }
 }
 
 #[cfg(test)]

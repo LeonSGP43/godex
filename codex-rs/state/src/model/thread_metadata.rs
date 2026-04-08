@@ -156,6 +156,8 @@ impl ThreadMetadataBuilder {
         created_at: DateTime<Utc>,
         source: SessionSource,
     ) -> Self {
+        let (memory_scope_kind, memory_scope_key) =
+            crate::fork_patch::memory_repo::default_memory_scope();
         Self {
             id,
             rollout_path,
@@ -167,8 +169,8 @@ impl ThreadMetadataBuilder {
             agent_path: None,
             model_provider: None,
             cwd: PathBuf::new(),
-            memory_scope_kind: "global".to_string(),
-            memory_scope_key: "global".to_string(),
+            memory_scope_kind,
+            memory_scope_key,
             cli_version: None,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             approval_mode: AskForApproval::OnRequest,
@@ -481,6 +483,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn thread_row(reasoning_effort: Option<&str>) -> ThreadRow {
+        let (memory_scope_kind, memory_scope_key) =
+            crate::fork_patch::memory_repo::default_memory_scope();
         ThreadRow {
             id: "00000000-0000-0000-0000-000000000123".to_string(),
             rollout_path: "/tmp/rollout-123.jsonl".to_string(),
@@ -494,8 +498,8 @@ mod tests {
             model: Some("gpt-5".to_string()),
             reasoning_effort: reasoning_effort.map(str::to_string),
             cwd: "/tmp/workspace".to_string(),
-            memory_scope_kind: "global".to_string(),
-            memory_scope_key: "global".to_string(),
+            memory_scope_kind,
+            memory_scope_key,
             cli_version: "0.0.0".to_string(),
             title: String::new(),
             sandbox_policy: "read-only".to_string(),
@@ -510,6 +514,8 @@ mod tests {
     }
 
     fn expected_thread_metadata(reasoning_effort: Option<ReasoningEffort>) -> ThreadMetadata {
+        let (memory_scope_kind, memory_scope_key) =
+            crate::fork_patch::memory_repo::default_memory_scope();
         ThreadMetadata {
             id: ThreadId::from_string("00000000-0000-0000-0000-000000000123")
                 .expect("valid thread id"),
@@ -524,8 +530,8 @@ mod tests {
             model: Some("gpt-5".to_string()),
             reasoning_effort,
             cwd: PathBuf::from("/tmp/workspace"),
-            memory_scope_kind: "global".to_string(),
-            memory_scope_key: "global".to_string(),
+            memory_scope_kind,
+            memory_scope_key,
             cli_version: "0.0.0".to_string(),
             title: String::new(),
             sandbox_policy: "read-only".to_string(),

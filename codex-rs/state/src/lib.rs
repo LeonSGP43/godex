@@ -5,6 +5,7 @@
 //! orchestration and rollout scanning live in `codex-core`.
 
 mod extract;
+mod fork_patch;
 pub mod log_db;
 mod migrations;
 mod model;

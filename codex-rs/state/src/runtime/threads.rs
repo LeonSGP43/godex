@@ -445,6 +445,8 @@ FROM threads
         &self,
         metadata: &crate::ThreadMetadata,
     ) -> anyhow::Result<bool> {
+        let (memory_scope_kind, memory_scope_key) =
+            crate::fork_patch::memory_repo::thread_memory_scope_parts(metadata);
         let result = sqlx::query(
             r#"
 INSERT INTO threads (
@@ -507,8 +509,8 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
         .bind("enabled")
-        .bind(metadata.memory_scope_kind.as_str())
-        .bind(metadata.memory_scope_key.as_str())
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
@@ -576,6 +578,8 @@ WHERE id = ?
         metadata: &crate::ThreadMetadata,
         creation_memory_mode: Option<&str>,
     ) -> anyhow::Result<()> {
+        let (memory_scope_kind, memory_scope_key) =
+            crate::fork_patch::memory_repo::thread_memory_scope_parts(metadata);
         sqlx::query(
             r#"
 INSERT INTO threads (
@@ -662,8 +666,8 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
         .bind(creation_memory_mode.unwrap_or("enabled"))
-        .bind(metadata.memory_scope_kind.as_str())
-        .bind(metadata.memory_scope_key.as_str())
+        .bind(memory_scope_kind)
+        .bind(memory_scope_key)
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
