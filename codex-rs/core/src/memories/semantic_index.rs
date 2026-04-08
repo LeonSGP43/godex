@@ -25,11 +25,11 @@ const QMD_PIPELINE: &str = "bm25+vector+rrf+rerank";
 const EMBEDDING_BACKEND: &str = "local-hash-256";
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct SemanticRecallOptions {
-    pub(super) limit: usize,
-    pub(super) hybrid_enabled: bool,
-    pub(super) query_expansion_enabled: bool,
-    pub(super) rerank_limit: usize,
+pub(crate) struct SemanticRecallOptions {
+    pub(crate) limit: usize,
+    pub(crate) hybrid_enabled: bool,
+    pub(crate) query_expansion_enabled: bool,
+    pub(crate) rerank_limit: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,13 +107,13 @@ struct Bm25IndexRead {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SemanticRecallMatch {
-    pub(super) thread_id: String,
-    pub(super) rollout_summary_file: String,
-    pub(super) keywords: Vec<String>,
-    pub(super) summary_preview: String,
-    pub(super) signals: Vec<String>,
-    pub(super) score: f32,
+pub(crate) struct SemanticRecallMatch {
+    pub(crate) thread_id: String,
+    pub(crate) rollout_summary_file: String,
+    pub(crate) keywords: Vec<String>,
+    pub(crate) summary_preview: String,
+    pub(crate) signals: Vec<String>,
+    pub(crate) score: f32,
 }
 
 #[derive(Debug)]
@@ -282,7 +282,7 @@ pub(super) async fn clear_auxiliary_indexes(root: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub(super) async fn semantic_recall(
+pub(crate) async fn semantic_recall(
     root: &Path,
     query: &str,
     options: SemanticRecallOptions,

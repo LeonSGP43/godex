@@ -27,6 +27,9 @@ pub(crate) use scope::GLOBAL_MEMORY_SCOPE_KIND;
 pub(crate) use scope::MemoryScope;
 pub(crate) use scope::resolve_memory_scope;
 pub(crate) use scope::scoped_memory_root;
+pub(crate) use semantic_index::SemanticRecallMatch;
+pub(crate) use semantic_index::SemanticRecallOptions;
+pub(crate) use semantic_index::semantic_recall;
 /// Starts the memory startup pipeline for eligible root sessions.
 /// This is the single entrypoint that `codex` uses to trigger memory startup.
 ///

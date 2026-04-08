@@ -1,8 +1,5 @@
 use crate::config::types::MemoriesConfig;
 use crate::memories::phase_one;
-use crate::memories::semantic_index::SemanticRecallMatch;
-use crate::memories::semantic_index::SemanticRecallOptions;
-use crate::memories::semantic_index::semantic_recall;
 use crate::memories::storage::rollout_summary_file_stem_from_parts;
 use codex_protocol::openai_models::ModelInfo;
 use codex_state::Phase2InputSelection;
@@ -13,7 +10,6 @@ use codex_utils_output_truncation::truncate_text;
 use codex_utils_template::Template;
 use std::path::Path;
 use std::sync::LazyLock;
-use tokio::fs;
 use tracing::warn;
 
 #[cfg(test)]
@@ -33,13 +29,6 @@ static STAGE_ONE_INPUT_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
         "memories/stage_one_input.md",
     )
 });
-static MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
-    parse_embedded_template(
-        include_str!("../../templates/memories/read_path.md"),
-        "memories/read_path.md",
-    )
-});
-const MEMORY_TOOL_QUERY_PREVIEW_CHAR_LIMIT: usize = 240;
 
 fn parse_embedded_template(source: &'static str, template_name: &str) -> Template {
     match Template::parse(source) {
@@ -176,111 +165,14 @@ pub(crate) async fn build_memory_tool_developer_instructions(
     memory_scope_key: &str,
     turn_query: Option<&str>,
 ) -> Option<String> {
-    let base_path = crate::fork_patch::memory::scoped_artifact_root(
+    crate::fork_patch::memory::build_memory_context_fragment(
         codex_home,
+        memories,
         memory_scope_kind,
         memory_scope_key,
-    );
-    let memory_summary_path = crate::fork_patch::memory::memory_summary_file(&base_path);
-    let memory_summary = fs::read_to_string(&memory_summary_path)
-        .await
-        .ok()?
-        .trim()
-        .to_string();
-    let memory_summary = truncate_text(
-        &memory_summary,
-        TruncationPolicy::Tokens(memories.summary_token_limit),
-    );
-    if memory_summary.is_empty() {
-        return None;
-    }
-    let base_path_display = base_path.display().to_string();
-    let mut rendered = MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_TEMPLATE
-        .render([
-            ("base_path", base_path_display.as_str()),
-            ("memory_summary", memory_summary.as_str()),
-        ])
-        .ok()?;
-
-    if memories.semantic_index_enabled
-        && let Some(normalized_query) = normalize_turn_query(turn_query)
-        && let Ok(matches) = semantic_recall(
-            &base_path,
-            &normalized_query,
-            SemanticRecallOptions {
-                limit: memories.semantic_recall_limit,
-                hybrid_enabled: memories.qmd_hybrid_enabled,
-                query_expansion_enabled: memories.qmd_query_expansion_enabled,
-                rerank_limit: memories.qmd_rerank_limit,
-            },
-        )
-        .await
-        && !matches.is_empty()
-    {
-        append_semantic_recall_hints(&mut rendered, &normalized_query, &matches);
-    }
-
-    Some(rendered)
-}
-
-fn normalize_turn_query(turn_query: Option<&str>) -> Option<String> {
-    let query = turn_query?.trim();
-    if query.is_empty() {
-        return None;
-    }
-    Some(truncate_query_preview(
-        &query.split_whitespace().collect::<Vec<_>>().join(" "),
-    ))
-}
-
-fn truncate_query_preview(query: &str) -> String {
-    if query.chars().count() <= MEMORY_TOOL_QUERY_PREVIEW_CHAR_LIMIT {
-        return query.to_string();
-    }
-    let truncated = query
-        .chars()
-        .take(MEMORY_TOOL_QUERY_PREVIEW_CHAR_LIMIT)
-        .collect::<String>();
-    format!("{truncated}...")
-}
-
-fn append_semantic_recall_hints(
-    buffer: &mut String,
-    normalized_query: &str,
-    matches: &[SemanticRecallMatch],
-) {
-    buffer.push_str("\n\n## Semantic Recall Hints\n");
-    buffer.push_str(
-        "Use this shortlist as a semantic fallback before broad scans when MEMORY.md keyword hits are weak.\n",
-    );
-    buffer.push_str(&format!("- query: {normalized_query}\n"));
-    for (idx, item) in matches.iter().enumerate() {
-        let keywords = if item.keywords.is_empty() {
-            "n/a".to_string()
-        } else {
-            item.keywords.join(", ")
-        };
-        let signals = if item.signals.is_empty() {
-            "vector".to_string()
-        } else {
-            item.signals.join("+")
-        };
-        let summary_preview = if item.summary_preview.trim().is_empty() {
-            "(empty summary)".to_string()
-        } else {
-            item.summary_preview.replace('\n', " ")
-        };
-        buffer.push_str(&format!(
-            "- [{}] score={:.3}, signals={}, thread_id={}, file={}, keywords={}\n",
-            idx + 1,
-            item.score,
-            signals,
-            item.thread_id,
-            item.rollout_summary_file,
-            keywords
-        ));
-        buffer.push_str(&format!("  summary: {summary_preview}\n"));
-    }
+        turn_query,
+    )
+    .await
 }
 
 #[cfg(test)]
