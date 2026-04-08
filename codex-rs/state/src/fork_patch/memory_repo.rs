@@ -19,9 +19,19 @@ pub(crate) fn bind_thread_memory_scope<'q>(
     query: Query<'q, Sqlite, SqliteArguments<'q>>,
     metadata: &'q ThreadMetadata,
 ) -> Query<'q, Sqlite, SqliteArguments<'q>> {
-    query
-        .bind(metadata.memory_scope_kind.as_str())
-        .bind(metadata.memory_scope_key.as_str())
+    bind_memory_scope(
+        query,
+        metadata.memory_scope_kind.as_str(),
+        metadata.memory_scope_key.as_str(),
+    )
+}
+
+pub(crate) fn bind_memory_scope<'q>(
+    query: Query<'q, Sqlite, SqliteArguments<'q>>,
+    memory_scope_kind: &'q str,
+    memory_scope_key: &'q str,
+) -> Query<'q, Sqlite, SqliteArguments<'q>> {
+    query.bind(memory_scope_kind).bind(memory_scope_key)
 }
 
 pub(crate) async fn fetch_thread_memory_scope<'e, E>(

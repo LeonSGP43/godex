@@ -304,8 +304,9 @@ LEFT JOIN jobs
             return Ok(Vec::new());
         }
 
-        let rows = sqlx::query(
-            r#"
+        let rows = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
 SELECT
     so.thread_id,
     COALESCE(t.rollout_path, '') AS rollout_path,
@@ -326,9 +327,10 @@ WHERE t.memory_mode = 'enabled'
 ORDER BY so.source_updated_at DESC, so.thread_id DESC
 LIMIT ?
             "#,
+            ),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .bind(n as i64)
         .fetch_all(self.pool.as_ref())
         .await?;
@@ -372,8 +374,9 @@ LIMIT ?
         }
 
         let cutoff = (Utc::now() - Duration::days(max_unused_days.max(0))).timestamp();
-        let rows_affected = sqlx::query(
-            r#"
+        let rows_affected = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
 DELETE FROM stage1_outputs
 WHERE thread_id IN (
     SELECT so.thread_id
@@ -391,9 +394,10 @@ WHERE thread_id IN (
     LIMIT ?
 )
             "#,
+            ),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .bind(cutoff)
         .bind(limit as i64)
         .execute(self.pool.as_ref())
@@ -449,8 +453,9 @@ WHERE thread_id IN (
         }
         let cutoff = (Utc::now() - Duration::days(max_unused_days.max(0))).timestamp();
 
-        let current_rows = sqlx::query(
-            r#"
+        let current_rows = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
 SELECT
     so.thread_id,
     COALESCE(t.rollout_path, '') AS rollout_path,
@@ -481,9 +486,10 @@ ORDER BY
     so.thread_id DESC
 LIMIT ?
             "#,
+            ),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .bind(cutoff)
         .bind(cutoff)
         .bind(n as i64)
@@ -508,8 +514,9 @@ LIMIT ?
             )?)?);
         }
 
-        let previous_rows = sqlx::query(
-            r#"
+        let previous_rows = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
 SELECT
     so.thread_id,
     COALESCE(t.rollout_path, '') AS rollout_path,
@@ -528,9 +535,10 @@ WHERE so.selected_for_phase2 = 1
   AND t.memory_scope_key = ?
 ORDER BY so.source_updated_at DESC, so.thread_id DESC
             "#,
+            ),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .fetch_all(self.pool.as_ref())
         .await?;
 
@@ -1272,8 +1280,9 @@ WHERE kind = ? AND job_key = ?
             return Ok(false);
         }
 
-        sqlx::query(
-            r#"
+        memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
 UPDATE stage1_outputs
 SET
     selected_for_phase2 = 0,
@@ -1286,9 +1295,10 @@ WHERE thread_id IN (
 )
   AND (selected_for_phase2 != 0 OR selected_for_phase2_source_updated_at IS NOT NULL)
             "#,
+            ),
+            memory_scope_kind,
+            memory_scope_key,
         )
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .execute(&mut *tx)
         .await?;
 
