@@ -2,6 +2,8 @@ use crate::ThreadMetadata;
 use sqlx::Executor;
 use sqlx::Row;
 use sqlx::Sqlite;
+use sqlx::query::Query;
+use sqlx::sqlite::SqliteArguments;
 
 pub(crate) const GLOBAL_MEMORY_SCOPE_KIND: &str = "global";
 pub(crate) const GLOBAL_MEMORY_SCOPE_KEY: &str = "global";
@@ -13,11 +15,13 @@ pub(crate) fn default_memory_scope() -> (String, String) {
     )
 }
 
-pub(crate) fn thread_memory_scope_parts(metadata: &ThreadMetadata) -> (&str, &str) {
-    (
-        metadata.memory_scope_kind.as_str(),
-        metadata.memory_scope_key.as_str(),
-    )
+pub(crate) fn bind_thread_memory_scope<'q>(
+    query: Query<'q, Sqlite, SqliteArguments<'q>>,
+    metadata: &'q ThreadMetadata,
+) -> Query<'q, Sqlite, SqliteArguments<'q>> {
+    query
+        .bind(metadata.memory_scope_kind.as_str())
+        .bind(metadata.memory_scope_key.as_str())
 }
 
 pub(crate) async fn fetch_thread_memory_scope<'e, E>(

@@ -445,10 +445,9 @@ FROM threads
         &self,
         metadata: &crate::ThreadMetadata,
     ) -> anyhow::Result<bool> {
-        let (memory_scope_kind, memory_scope_key) =
-            crate::fork_patch::memory_repo::thread_memory_scope_parts(metadata);
-        let result = sqlx::query(
-            r#"
+        let result = crate::fork_patch::memory_repo::bind_thread_memory_scope(
+            sqlx::query(
+                r#"
 INSERT INTO threads (
     id,
     rollout_path,
@@ -479,38 +478,38 @@ INSERT INTO threads (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
+            )
+            .bind(metadata.id.to_string())
+            .bind(metadata.rollout_path.display().to_string())
+            .bind(datetime_to_epoch_seconds(metadata.created_at))
+            .bind(datetime_to_epoch_seconds(metadata.updated_at))
+            .bind(metadata.source.as_str())
+            .bind(metadata.agent_nickname.as_deref())
+            .bind(metadata.agent_role.as_deref())
+            .bind(metadata.agent_path.as_deref())
+            .bind(metadata.model_provider.as_str())
+            .bind(metadata.model.as_deref())
+            .bind(
+                metadata
+                    .reasoning_effort
+                    .as_ref()
+                    .map(crate::extract::enum_to_string),
+            )
+            .bind(metadata.cwd.display().to_string())
+            .bind(metadata.cli_version.as_str())
+            .bind(metadata.title.as_str())
+            .bind(metadata.sandbox_policy.as_str())
+            .bind(metadata.approval_mode.as_str())
+            .bind(metadata.tokens_used)
+            .bind(metadata.first_user_message.as_deref().unwrap_or_default())
+            .bind(metadata.archived_at.is_some())
+            .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
+            .bind(metadata.git_sha.as_deref())
+            .bind(metadata.git_branch.as_deref())
+            .bind(metadata.git_origin_url.as_deref())
+            .bind("enabled"),
+            metadata,
         )
-        .bind(metadata.id.to_string())
-        .bind(metadata.rollout_path.display().to_string())
-        .bind(datetime_to_epoch_seconds(metadata.created_at))
-        .bind(datetime_to_epoch_seconds(metadata.updated_at))
-        .bind(metadata.source.as_str())
-        .bind(metadata.agent_nickname.as_deref())
-        .bind(metadata.agent_role.as_deref())
-        .bind(metadata.agent_path.as_deref())
-        .bind(metadata.model_provider.as_str())
-        .bind(metadata.model.as_deref())
-        .bind(
-            metadata
-                .reasoning_effort
-                .as_ref()
-                .map(crate::extract::enum_to_string),
-        )
-        .bind(metadata.cwd.display().to_string())
-        .bind(metadata.cli_version.as_str())
-        .bind(metadata.title.as_str())
-        .bind(metadata.sandbox_policy.as_str())
-        .bind(metadata.approval_mode.as_str())
-        .bind(metadata.tokens_used)
-        .bind(metadata.first_user_message.as_deref().unwrap_or_default())
-        .bind(metadata.archived_at.is_some())
-        .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
-        .bind(metadata.git_sha.as_deref())
-        .bind(metadata.git_branch.as_deref())
-        .bind(metadata.git_origin_url.as_deref())
-        .bind("enabled")
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
@@ -578,10 +577,9 @@ WHERE id = ?
         metadata: &crate::ThreadMetadata,
         creation_memory_mode: Option<&str>,
     ) -> anyhow::Result<()> {
-        let (memory_scope_kind, memory_scope_key) =
-            crate::fork_patch::memory_repo::thread_memory_scope_parts(metadata);
-        sqlx::query(
-            r#"
+        crate::fork_patch::memory_repo::bind_thread_memory_scope(
+            sqlx::query(
+                r#"
 INSERT INTO threads (
     id,
     rollout_path,
@@ -636,38 +634,38 @@ ON CONFLICT(id) DO UPDATE SET
     git_branch = excluded.git_branch,
     git_origin_url = excluded.git_origin_url
             "#,
+            )
+            .bind(metadata.id.to_string())
+            .bind(metadata.rollout_path.display().to_string())
+            .bind(datetime_to_epoch_seconds(metadata.created_at))
+            .bind(datetime_to_epoch_seconds(metadata.updated_at))
+            .bind(metadata.source.as_str())
+            .bind(metadata.agent_nickname.as_deref())
+            .bind(metadata.agent_role.as_deref())
+            .bind(metadata.agent_path.as_deref())
+            .bind(metadata.model_provider.as_str())
+            .bind(metadata.model.as_deref())
+            .bind(
+                metadata
+                    .reasoning_effort
+                    .as_ref()
+                    .map(crate::extract::enum_to_string),
+            )
+            .bind(metadata.cwd.display().to_string())
+            .bind(metadata.cli_version.as_str())
+            .bind(metadata.title.as_str())
+            .bind(metadata.sandbox_policy.as_str())
+            .bind(metadata.approval_mode.as_str())
+            .bind(metadata.tokens_used)
+            .bind(metadata.first_user_message.as_deref().unwrap_or_default())
+            .bind(metadata.archived_at.is_some())
+            .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
+            .bind(metadata.git_sha.as_deref())
+            .bind(metadata.git_branch.as_deref())
+            .bind(metadata.git_origin_url.as_deref())
+            .bind(creation_memory_mode.unwrap_or("enabled")),
+            metadata,
         )
-        .bind(metadata.id.to_string())
-        .bind(metadata.rollout_path.display().to_string())
-        .bind(datetime_to_epoch_seconds(metadata.created_at))
-        .bind(datetime_to_epoch_seconds(metadata.updated_at))
-        .bind(metadata.source.as_str())
-        .bind(metadata.agent_nickname.as_deref())
-        .bind(metadata.agent_role.as_deref())
-        .bind(metadata.agent_path.as_deref())
-        .bind(metadata.model_provider.as_str())
-        .bind(metadata.model.as_deref())
-        .bind(
-            metadata
-                .reasoning_effort
-                .as_ref()
-                .map(crate::extract::enum_to_string),
-        )
-        .bind(metadata.cwd.display().to_string())
-        .bind(metadata.cli_version.as_str())
-        .bind(metadata.title.as_str())
-        .bind(metadata.sandbox_policy.as_str())
-        .bind(metadata.approval_mode.as_str())
-        .bind(metadata.tokens_used)
-        .bind(metadata.first_user_message.as_deref().unwrap_or_default())
-        .bind(metadata.archived_at.is_some())
-        .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
-        .bind(metadata.git_sha.as_deref())
-        .bind(metadata.git_branch.as_deref())
-        .bind(metadata.git_origin_url.as_deref())
-        .bind(creation_memory_mode.unwrap_or("enabled"))
-        .bind(memory_scope_kind)
-        .bind(memory_scope_key)
         .execute(self.pool.as_ref())
         .await?;
         self.insert_thread_spawn_edge_from_source_if_absent(metadata.id, metadata.source.as_str())
