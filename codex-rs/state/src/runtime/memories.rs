@@ -594,20 +594,7 @@ WHERE id = ? AND memory_mode != 'polluted'
             return Ok(false);
         }
 
-        let selected_for_phase2 = sqlx::query_scalar::<_, i64>(
-            r#"
-SELECT so.selected_for_phase2
-FROM stage1_outputs AS so
-JOIN threads AS t
-    ON t.id = so.thread_id
-WHERE so.thread_id = ?
-            "#,
-        )
-        .bind(thread_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await?
-        .unwrap_or(0);
-        if selected_for_phase2 != 0 {
+        if memory_repo::thread_has_phase2_selection(&mut *tx, thread_id.as_str()).await? {
             enqueue_thread_phase2_consolidation(&mut tx, thread_id.as_str(), now).await?;
         }
 
@@ -1289,27 +1276,8 @@ WHERE kind = ? AND job_key = ?
             return Ok(false);
         }
 
-        memory_repo::bind_memory_scope(
-            sqlx::query(
-                r#"
-UPDATE stage1_outputs
-SET
-    selected_for_phase2 = 0,
-    selected_for_phase2_source_updated_at = NULL
-WHERE thread_id IN (
-    SELECT id
-    FROM threads
-    WHERE memory_scope_kind = ?
-      AND memory_scope_key = ?
-)
-  AND (selected_for_phase2 != 0 OR selected_for_phase2_source_updated_at IS NOT NULL)
-            "#,
-            ),
-            memory_scope_kind,
-            memory_scope_key,
-        )
-        .execute(&mut *tx)
-        .await?;
+        memory_repo::clear_phase2_selection_in_scope(&mut *tx, memory_scope_kind, memory_scope_key)
+            .await?;
 
         for output in selected_outputs {
             sqlx::query(

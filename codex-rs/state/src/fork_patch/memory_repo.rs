@@ -66,6 +66,61 @@ WHERE id = ?
     ))
 }
 
+pub(crate) async fn thread_has_phase2_selection<'e, E>(
+    executor: E,
+    thread_id: &str,
+) -> anyhow::Result<bool>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let selected_for_phase2 = sqlx::query_scalar::<_, i64>(
+        r#"
+SELECT selected_for_phase2
+FROM stage1_outputs
+WHERE thread_id = ?
+        "#,
+    )
+    .bind(thread_id)
+    .fetch_optional(executor)
+    .await?
+    .unwrap_or(0);
+
+    Ok(selected_for_phase2 != 0)
+}
+
+pub(crate) async fn clear_phase2_selection_in_scope<'e, E>(
+    executor: E,
+    memory_scope_kind: &str,
+    memory_scope_key: &str,
+) -> anyhow::Result<()>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    bind_memory_scope(
+        sqlx::query(
+            r#"
+UPDATE stage1_outputs
+SET
+    selected_for_phase2 = 0,
+    selected_for_phase2_source_updated_at = NULL
+WHERE thread_id IN (
+    SELECT id
+    FROM threads
+    WHERE memory_scope_kind = ?
+      AND memory_scope_key = ?
+)
+  AND (selected_for_phase2 != 0 OR selected_for_phase2_source_updated_at IS NOT NULL)
+            "#,
+        ),
+        memory_scope_kind,
+        memory_scope_key,
+    )
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}
+
 pub(crate) fn phase2_job_key(memory_scope_kind: &str, memory_scope_key: &str) -> String {
     if memory_scope_kind == GLOBAL_MEMORY_SCOPE_KIND && memory_scope_key == GLOBAL_MEMORY_SCOPE_KEY
     {
