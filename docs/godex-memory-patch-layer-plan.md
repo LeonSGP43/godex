@@ -120,19 +120,20 @@ Completed recent atomic moves:
 - `c16b1e033f refactor(memory): extract runtime scope query binding`
 - `b040468cca refactor(memory): extract phase2 job key binding`
 - `e3ba29987e refactor(memory): extract phase2 selection queries`
+- `5b3b550614 refactor(memory): extract phase2 enqueue helpers`
 
 What that means for the roadmap:
 
 - Step 1 is active and materially underway: the fork-owned `fork_patch::memory` and `state/src/fork_patch/memory_repo.rs` seams now carry real behavior instead of only placeholder structure.
 - Step 2 has partial progress: artifact-root and path-layout rules have started moving behind `fork_patch::memory`, but `core/src/memories/*` still owns parts of the contract.
 - Step 3 has partial progress: read-path helper logic is now behind the facade, and `prompts.rs` no longer carries the leftover wrapper layer.
-- Step 4 has partial progress: scope fetch, thread scope persistence glue, repeated scope-query binding, phase2 job-key binding, and phase2 selection-state queries have been moved into `state/src/fork_patch/memory_repo.rs`, but `state/src/runtime/memories.rs` still carries a small amount of thread-to-scope enqueue glue that is the best remaining extraction target.
+- Step 4 is materially complete for the current lane: scope fetch, thread scope persistence glue, repeated scope-query binding, phase2 job-key binding, phase2 selection-state queries, and phase2 enqueue helpers now live behind `state/src/fork_patch/memory_repo.rs`, leaving `state/src/runtime/memories.rs` with the job lifecycle semantics rather than fork-specific query glue.
 
 Current recommended next atomic cut:
 
-- Keep focus on `patch/memory-state-runtime`
-- Prefer a small move inside `codex-rs/state/src/runtime/memories.rs`
-- Only extract thin thread-to-scope enqueue glue or similarly narrow scoped-query helpers that clearly reduce hot-path fork code without changing SQL semantics
+- Shift focus to `patch/memory-artifact-contract`
+- Prefer moves that keep path/layout naming rules behind `fork_patch::memory`
+- Do not reopen `patch/memory-state-runtime` unless a new fork-specific scope/query glue point appears during later refactors
 
 ## patch/memory-state-runtime File Ledger
 
@@ -140,8 +141,8 @@ This is the higher-resolution working ledger for the recent `memory-state-runtim
 
 | File | Completed extraction status | Remaining safe extractions | Do not extract now |
 | --- | --- | --- | --- |
-| `codex-rs/state/src/fork_patch/memory_repo.rs` | Owns default scope helpers, thread scope binding, scope-query binding, thread scope fetch, phase2 job-key binding, and phase2 selection-state queries. | Only add thin helpers that move obviously fork-specific scope glue out of hot paths. | Do not move the full stage1/phase2 state machine or broad runtime orchestration into this file. |
-| `codex-rs/state/src/runtime/memories.rs` | Reduced repeated scope binding, reduced phase2 job-key glue, and reduced phase2 selection-state query glue. | The main remaining candidate is narrow thread-to-scope enqueue glue such as the `enqueue_thread_phase2_consolidation(...)` path. | Do not introduce a broad scope carrier abstraction or relocate the claim/update SQL state transitions. |
+| `codex-rs/state/src/fork_patch/memory_repo.rs` | Owns default scope helpers, thread scope binding, scope-query binding, thread scope fetch, phase2 job-key binding, phase2 selection-state queries, and phase2 enqueue helpers. | Only add thin helpers that move obviously fork-specific scope/query glue out of hot paths. | Do not move the full stage1/phase2 state machine or broad runtime orchestration into this file. |
+| `codex-rs/state/src/runtime/memories.rs` | Reduced repeated scope binding, reduced phase2 job-key glue, reduced phase2 selection-state query glue, and no longer owns thread-to-scope phase2 enqueue glue. | None currently required for this patch group; reopen only if later changes expose a new fork-specific glue seam. | Do not introduce a broad scope carrier abstraction or relocate the claim/update SQL state transitions. |
 | `codex-rs/state/src/runtime/threads.rs` | Thread scope persistence binding has already been moved behind `fork_patch::memory_repo`. | Only reopen if a new fork-only scope write path appears. | Do not move generic thread lifecycle behavior just to increase patch-layer coverage. |
 | `codex-rs/state/src/model/thread_metadata.rs` | Keeps the memory-scope metadata contract needed by the runtime and rollout layers. | Minimal or none for now; this is mostly a contract surface, not a glue surface. | Do not churn metadata shape unless upstream introduces a compatible native contract. |
 
