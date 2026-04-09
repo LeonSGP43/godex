@@ -304,6 +304,9 @@ default during sync and conflict resolution.
   - CLI MCP config loading and global MCP store lookup now also start in
     `codex-rs/cli/src/mcp_copy.rs` instead of staying inline in
     `codex-rs/cli/src/mcp_cmd.rs`
+  - network proxy config-layer bootstrap now starts in a dedicated helper
+    inside `codex-rs/core/src/network_proxy_loader.rs` instead of keeping the
+    fork-specific `CodexCompatible` loader wiring inline in the state builder
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
