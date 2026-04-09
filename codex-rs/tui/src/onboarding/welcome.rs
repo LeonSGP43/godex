@@ -1,3 +1,4 @@
+use codex_core::branding::APP_DISPLAY_NAME;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -18,6 +19,7 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::tui::FrameRequester;
 
+use super::bootstrap_copy::WELCOME_DESCRIPTION;
 use super::onboarding_screen::StepState;
 
 const MIN_ANIMATION_HEIGHT: u16 = 37;
@@ -86,8 +88,8 @@ impl WidgetRef for &WelcomeWidget {
         lines.push(Line::from(vec![
             "  ".into(),
             "Welcome to ".into(),
-            "godex".bold(),
-            ", your Codex-compatible command-line coding agent".into(),
+            APP_DISPLAY_NAME.bold(),
+            format!(", {WELCOME_DESCRIPTION}").into(),
         ]));
 
         Paragraph::new(lines)
