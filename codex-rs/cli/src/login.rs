@@ -7,16 +7,16 @@
 //! into a one-shot CLI command while still producing a durable `codex-login.log` artifact that
 //! support can request from users.
 
-use codex_core::CodexAuth;
+use codex_core::auth::login_with_api_key;
+use codex_core::auth::logout;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::AuthMode;
 use codex_core::auth::CLIENT_ID;
-use codex_core::auth::login_with_api_key;
-use codex_core::auth::logout;
 use codex_core::config::Config;
-use codex_login::ServerOptions;
+use codex_core::CodexAuth;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
+use codex_login::ServerOptions;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
 use std::fs::OpenOptions;
@@ -25,16 +25,16 @@ use std::io::Read;
 use std::path::PathBuf;
 use tracing_appender::non_blocking;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
 
-const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
-    "ChatGPT login is disabled. Use API key login instead.";
-const API_KEY_LOGIN_DISABLED_MESSAGE: &str =
-    "API key login is disabled. Use ChatGPT login instead.";
-const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
+use crate::login_copy::api_key_stdin_guidance;
+use crate::login_copy::login_server_start_message;
+use crate::login_copy::API_KEY_LOGIN_DISABLED_MESSAGE;
+use crate::login_copy::CHATGPT_LOGIN_DISABLED_MESSAGE;
+use crate::login_copy::LOGIN_SUCCESS_MESSAGE;
 
 /// Installs a small file-backed tracing layer for direct `codex login` flows.
 ///
@@ -105,10 +105,7 @@ fn init_login_file_logging(config: &Config) -> Option<WorkerGuard> {
 }
 
 fn print_login_server_start(actual_port: u16, auth_url: &str) {
-    eprintln!(
-        "Starting local login server on http://localhost:{actual_port}.\nIf your browser did not open, navigate to this URL to authenticate:\n\n{auth_url}\n\nOn a remote or headless machine? Use `{exe} login --device-auth` instead.",
-        exe = codex_core::branding::APP_EXECUTABLE_NAME,
-    );
+    eprintln!("{}", login_server_start_message(actual_port, auth_url));
 }
 
 pub async fn login_with_chatgpt(
@@ -192,10 +189,7 @@ pub fn read_api_key_from_stdin() -> String {
     let mut stdin = std::io::stdin();
 
     if stdin.is_terminal() {
-        eprintln!(
-            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | {exe} login --with-api-key`.",
-            exe = codex_core::branding::APP_EXECUTABLE_NAME,
-        );
+        eprintln!("{}", api_key_stdin_guidance());
         std::process::exit(1);
     }
 
