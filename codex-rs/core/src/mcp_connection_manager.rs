@@ -375,9 +375,8 @@ struct ManagedClient {
 impl ManagedClient {
     fn listed_tools(&self) -> Vec<ToolInfo> {
         let total_start = Instant::now();
-        if let Some(cache_context) = self.codex_apps_tools_cache_context.as_ref()
-            && let CachedCodexAppsToolsLoad::Hit(tools) =
-                load_cached_codex_apps_tools(cache_context)
+        if let Some(tools) =
+            cached_codex_apps_tools(self.codex_apps_tools_cache_context.as_ref())
         {
             emit_duration(
                 MCP_TOOLS_LIST_DURATION_METRIC,
@@ -438,11 +437,9 @@ impl AsyncManagedClient {
         tool_plugin_provenance: Arc<ToolPluginProvenance>,
     ) -> Self {
         let tool_filter = ToolFilter::from_config(&config);
-        let startup_snapshot = load_startup_cached_codex_apps_tools_snapshot(
-            &server_name,
-            codex_apps_tools_cache_context.as_ref(),
-        )
-        .map(|tools| filter_tools(tools, &tool_filter));
+        let startup_snapshot =
+            load_startup_cached_codex_apps_tools_snapshot(codex_apps_tools_cache_context.as_ref())
+                .map(|tools| filter_tools(tools, &tool_filter));
         let startup_tool_filter = tool_filter;
         let startup_complete = Arc::new(AtomicBool::new(false));
         let startup_complete_for_fut = Arc::clone(&startup_complete);
@@ -849,7 +846,6 @@ impl McpConnectionManager {
         );
 
         write_cached_codex_apps_tools_if_needed(
-            CODEX_APPS_MCP_SERVER_NAME,
             managed_client.codex_apps_tools_cache_context.as_ref(),
             &tools,
         );
@@ -1377,7 +1373,6 @@ async fn start_server_task(
         &[],
     );
     write_cached_codex_apps_tools_if_needed(
-        &server_name,
         codex_apps_tools_cache_context.as_ref(),
         &tools,
     );
@@ -1467,14 +1462,9 @@ async fn make_rmcp_client(
 }
 
 fn write_cached_codex_apps_tools_if_needed(
-    server_name: &str,
     cache_context: Option<&CodexAppsToolsCacheContext>,
     tools: &[ToolInfo],
 ) {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
-        return;
-    }
-
     if let Some(cache_context) = cache_context {
         let cache_write_start = Instant::now();
         write_cached_codex_apps_tools(cache_context, tools);
@@ -1487,25 +1477,22 @@ fn write_cached_codex_apps_tools_if_needed(
 }
 
 fn load_startup_cached_codex_apps_tools_snapshot(
-    server_name: &str,
     cache_context: Option<&CodexAppsToolsCacheContext>,
 ) -> Option<Vec<ToolInfo>> {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
-        return None;
-    }
-
-    let cache_context = cache_context?;
-
-    match load_cached_codex_apps_tools(cache_context) {
-        CachedCodexAppsToolsLoad::Hit(tools) => Some(tools),
-        CachedCodexAppsToolsLoad::Missing | CachedCodexAppsToolsLoad::Invalid => None,
-    }
+    cached_codex_apps_tools(cache_context)
 }
 
 #[cfg(test)]
 fn read_cached_codex_apps_tools(
     cache_context: &CodexAppsToolsCacheContext,
 ) -> Option<Vec<ToolInfo>> {
+    cached_codex_apps_tools(Some(cache_context))
+}
+
+fn cached_codex_apps_tools(
+    cache_context: Option<&CodexAppsToolsCacheContext>,
+) -> Option<Vec<ToolInfo>> {
+    let cache_context = cache_context?;
     match load_cached_codex_apps_tools(cache_context) {
         CachedCodexAppsToolsLoad::Hit(tools) => Some(tools),
         CachedCodexAppsToolsLoad::Missing | CachedCodexAppsToolsLoad::Invalid => None,

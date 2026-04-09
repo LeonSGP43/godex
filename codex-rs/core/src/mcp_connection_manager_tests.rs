@@ -387,10 +387,7 @@ fn startup_cached_codex_apps_tools_loads_from_disk_cache() {
     )];
     write_cached_codex_apps_tools(&cache_context, &cached_tools);
 
-    let startup_snapshot = load_startup_cached_codex_apps_tools_snapshot(
-        CODEX_APPS_MCP_SERVER_NAME,
-        Some(&cache_context),
-    );
+    let startup_snapshot = load_startup_cached_codex_apps_tools_snapshot(Some(&cache_context));
     let startup_tools = startup_snapshot.expect("expected startup snapshot to load from cache");
 
     assert_eq!(startup_tools.len(), 1);
