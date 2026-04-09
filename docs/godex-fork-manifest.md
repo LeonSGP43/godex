@@ -299,11 +299,16 @@ default during sync and conflict resolution.
   - CLI login copy now has a thin adapter at `codex-rs/cli/src/login_copy.rs`
   - `codex-rs/cli/src/main.rs` now consumes login help/guidance from that
     adapter instead of keeping the fork copy inline
+  - CLI login entrypoints now also share helperized forced-method guards,
+    server-option assembly, browser fallback reuse, and result/exit handling
+    inside `codex-rs/cli/src/login.rs`
   - CLI MCP copy/config namespace selection now has a thin adapter at
     `codex-rs/cli/src/mcp_copy.rs`
   - CLI MCP config loading and global MCP store lookup now also start in
     `codex-rs/cli/src/mcp_copy.rs` instead of staying inline in
     `codex-rs/cli/src/mcp_cmd.rs`
+  - CLI MCP transport assembly and global MCP store write now also start in
+    dedicated helpers inside `codex-rs/cli/src/mcp_cmd.rs`
   - network proxy config-layer bootstrap now starts in a dedicated helper
     inside `codex-rs/core/src/network_proxy_loader.rs` instead of keeping the
     fork-specific `CodexCompatible` loader wiring inline in the state builder
@@ -311,6 +316,8 @@ default during sync and conflict resolution.
     dedicated helper inside `codex-rs/core/src/network_proxy_loader.rs`
   - network proxy trusted-layer policy assembly now also starts in a dedicated
     helper inside `codex-rs/core/src/network_proxy_loader.rs`
+  - network proxy final config state/constraint composition now also starts in
+    a dedicated helper inside `codex-rs/core/src/network_proxy_loader.rs`
   - MCP startup/login guidance copy now starts in
     `codex-rs/core/src/mcp_connection_copy.rs` instead of staying inline in
     `codex-rs/core/src/mcp_connection_manager.rs`
@@ -319,8 +326,13 @@ default during sync and conflict resolution.
   - Codex Apps MCP cache reads and startup snapshot loading now also start in
     a dedicated cache-access helper inside
     `codex-rs/core/src/mcp_connection_manager.rs`
+  - Codex Apps MCP uncached tool refresh and cache-write metrics glue now also
+    start in a dedicated helper inside
+    `codex-rs/core/src/mcp_connection_manager.rs`
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
+  - TUI session header help/title copy, status title copy, and browser-open
+    user copy now also start in `codex-rs/tui/src/runtime_ui_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
     paths instead of adding new fork-specific copy there
 - Disable strategy:
