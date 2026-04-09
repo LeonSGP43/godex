@@ -301,6 +301,9 @@ default during sync and conflict resolution.
     adapter instead of keeping the fork copy inline
   - CLI MCP copy/config namespace selection now has a thin adapter at
     `codex-rs/cli/src/mcp_copy.rs`
+  - CLI MCP config loading and global MCP store lookup now also start in
+    `codex-rs/cli/src/mcp_copy.rs` instead of staying inline in
+    `codex-rs/cli/src/mcp_cmd.rs`
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
