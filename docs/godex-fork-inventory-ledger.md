@@ -164,9 +164,14 @@ This ledger is the current-state inventory of how this fork differs from officia
   - This is the real seam for external provider runtimes. It is the correct place for Gemini/Grok/Leonai-style workers.
   - Provider identity should live in backend configuration or backend commands, not in fake role names.
   - `0f918e28c5` advanced `patch/backend-contract` by centralizing spawn-time backend resolution, backend id normalization, and backend-specific model override selection in `multi_agents_common.rs`, removing duplicated policy from both `multi_agents/spawn.rs` and `multi_agents_v2/spawn.rs`.
+  - `f46eb549bd` advanced `patch/backend-contract` again by moving spawned-agent backend resolution, archived backend config restore, and handle construction behind helpers in `core/src/agent/backend.rs`, thinning backend-specific glue in `core/src/agent/control.rs`.
   - Targeted verification for that cut:
     - `cargo test -p codex-core spawn_agent_uses_explorer_role_and_preserves_approval_policy --manifest-path codex-rs/Cargo.toml -- --nocapture`
     - `cargo test -p codex-core spawn_agent_with_command_backend --manifest-path codex-rs/Cargo.toml -- --nocapture`
+  - Targeted verification for the latest cut:
+    - `cargo test -p codex-core command_backend_spawn_wait_and_close_round_trip --manifest-path codex-rs/Cargo.toml -- --nocapture`
+    - `cargo test -p codex-core close_agent_persists_closed_edge_for_claude_code_backend --manifest-path codex-rs/Cargo.toml -- --nocapture`
+    - `cargo test -p codex-core resume_thread_subagent_restores_stored_nickname_and_role --manifest-path codex-rs/Cargo.toml -- --nocapture`
 
 ## Legacy native Grok compatibility shim (`fork/native-grok-legacy`)
 
