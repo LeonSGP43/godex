@@ -7,7 +7,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use clap::ArgGroup;
 use codex_core::config::Config;
-use codex_core::config::ConfigNamespace;
 use codex_core::config::edit::ConfigEditsBuilder;
 use codex_core::config::find_home;
 use codex_core::config::load_global_mcp_servers;
@@ -27,6 +26,12 @@ use codex_rmcp_client::delete_oauth_tokens;
 use codex_rmcp_client::perform_oauth_login;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::format_env_display::format_env_display;
+
+use crate::mcp_copy::MCP_ADD_OVERRIDE_USAGE;
+use crate::mcp_copy::config_namespace_for_home_flag;
+use crate::mcp_copy::no_configured_servers_message;
+use crate::mcp_copy::remove_server_hint;
+use crate::mcp_copy::unknown_oauth_login_message;
 
 /// Subcommands:
 /// - `list`   — list configured servers (with `--json`)
@@ -75,7 +80,7 @@ pub struct GetArgs {
 }
 
 #[derive(Debug, clap::Parser)]
-#[command(override_usage = "godex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
+#[command(override_usage = MCP_ADD_OVERRIDE_USAGE)]
 pub struct AddArgs {
     /// Name for the MCP server configuration.
     pub name: String,
@@ -166,11 +171,7 @@ impl McpCli {
             use_godex_home,
             subcommand,
         } = self;
-        let config_namespace = if use_godex_home {
-            ConfigNamespace::GodexIsolated
-        } else {
-            ConfigNamespace::CodexCompatible
-        };
+        let config_namespace = config_namespace_for_home_flag(use_godex_home);
 
         match subcommand {
             McpSubcommand::List(args) => {
@@ -247,7 +248,7 @@ async fn perform_oauth_login_retry_without_scopes(
 
 async fn run_add(
     config_overrides: &CliConfigOverrides,
-    config_namespace: ConfigNamespace,
+    config_namespace: codex_core::config::ConfigNamespace,
     add_args: AddArgs,
 ) -> Result<()> {
     // Validate any provided overrides even though they are not currently applied.
@@ -356,10 +357,7 @@ async fn run_add(
             println!("Successfully logged in.");
         }
         McpOAuthLoginSupport::Unsupported => {}
-        McpOAuthLoginSupport::Unknown(_) => println!(
-            "MCP server may or may not require login. Run `{exe} mcp login {name}` to login.",
-            exe = codex_core::branding::APP_EXECUTABLE_NAME,
-        ),
+        McpOAuthLoginSupport::Unknown(_) => println!("{}", unknown_oauth_login_message(&name)),
     }
 
     Ok(())
@@ -367,7 +365,7 @@ async fn run_add(
 
 async fn run_remove(
     config_overrides: &CliConfigOverrides,
-    config_namespace: ConfigNamespace,
+    config_namespace: codex_core::config::ConfigNamespace,
     remove_args: RemoveArgs,
 ) -> Result<()> {
     config_overrides
@@ -558,10 +556,7 @@ async fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) ->
     }
 
     if entries.is_empty() {
-        println!(
-            "No MCP servers configured yet. Try `{exe} mcp add my-tool -- my-command`.",
-            exe = codex_core::branding::APP_EXECUTABLE_NAME,
-        );
+        println!("{}", no_configured_servers_message());
         return Ok(());
     }
 
@@ -891,7 +886,7 @@ async fn run_get(config_overrides: &CliConfigOverrides, get_args: GetArgs) -> Re
     if let Some(timeout) = server.tool_timeout_sec {
         println!("  tool_timeout_sec: {}", timeout.as_secs_f64());
     }
-    println!("  remove: codex mcp remove {}", get_args.name);
+    println!("{}", remove_server_hint(&get_args.name));
 
     Ok(())
 }

@@ -42,6 +42,7 @@ use supports_color::Stream;
 mod app_cmd;
 #[cfg(target_os = "macos")]
 mod desktop_app;
+mod mcp_copy;
 mod mcp_cmd;
 #[cfg(not(windows))]
 mod wsl_paths;
