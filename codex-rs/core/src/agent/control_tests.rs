@@ -2336,11 +2336,29 @@ async fn spawn_agent_with_fork_context_bridges_parent_history_for_claude_code_ba
         .await
         .expect("start parent thread with history");
     let parent_thread_id = parent.thread_id;
+    let mut child_config = harness.config.clone();
+    child_config.agent_backend_id = "claude_code".to_string();
+    let turn_context = parent.thread.codex.session.new_default_turn().await;
+    let parent_spawn_call = ResponseItem::FunctionCall {
+        id: None,
+        name: "spawn_agent".to_string(),
+        namespace: None,
+        arguments: "{}".to_string(),
+        call_id: "call-fork".to_string(),
+    };
+    parent
+        .thread
+        .codex
+        .session
+        .record_conversation_items(turn_context.as_ref(), &[parent_spawn_call])
+        .await;
+    parent.thread.codex.session.ensure_rollout_materialized().await;
+    parent.thread.codex.session.flush_rollout().await;
 
     let child_thread_id = harness
         .control
         .spawn_agent_with_metadata(
-            harness.config.clone(),
+            child_config,
             text_input("child task"),
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id,
