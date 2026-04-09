@@ -218,6 +218,17 @@ impl CodexAppsToolsCacheContext {
     }
 }
 
+fn codex_apps_tools_cache_context_for_server(
+    server_name: &str,
+    codex_home: &std::path::Path,
+    user_key: &CodexAppsToolsCacheKey,
+) -> Option<CodexAppsToolsCacheContext> {
+    (server_name == CODEX_APPS_MCP_SERVER_NAME).then(|| CodexAppsToolsCacheContext {
+        codex_home: codex_home.to_path_buf(),
+        user_key: user_key.clone(),
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CodexAppsToolsDiskCache {
     schema_version: u8,
@@ -647,14 +658,11 @@ impl McpConnectionManager {
                 },
             )
             .await;
-            let codex_apps_tools_cache_context = if server_name == CODEX_APPS_MCP_SERVER_NAME {
-                Some(CodexAppsToolsCacheContext {
-                    codex_home: codex_home.clone(),
-                    user_key: codex_apps_tools_cache_key.clone(),
-                })
-            } else {
-                None
-            };
+            let codex_apps_tools_cache_context = codex_apps_tools_cache_context_for_server(
+                &server_name,
+                &codex_home,
+                &codex_apps_tools_cache_key,
+            );
             let async_managed_client = AsyncManagedClient::new(
                 server_name.clone(),
                 cfg,
