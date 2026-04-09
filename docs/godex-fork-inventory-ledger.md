@@ -294,11 +294,11 @@ This ledger is the current-state inventory of how this fork differs from officia
   - config-home resolution and user-facing MCP copy are now adapterized through `mcp_copy.rs`
   - remaining MVP residue: transport assembly, config edit/write flow, and command-specific orchestration still live inline
 - `codex-rs/core/src/network_proxy_loader.rs`
-  - loader bootstrap and config-layer source path resolution are now adapterized helpers
-  - remaining MVP residue: trusted-layer policy assembly and final state/constraint composition are still in the hot file
+  - loader bootstrap, config-layer source path resolution, and trusted-layer policy assembly are now adapterized helpers
+  - remaining MVP residue: final state/constraint composition still lives in the hot file
 - `codex-rs/core/src/mcp_connection_manager.rs`
-  - startup/login copy and Codex Apps cache-context selection are now adapterized
-  - remaining MVP residue: Codex Apps cache read/write orchestration, startup event flow, and other fork-specific manager glue still live inline
+  - startup/login copy, Codex Apps cache-context selection, and cache read/startup snapshot access are now adapterized
+  - remaining MVP residue: cache-write metrics glue, startup event flow, and other fork-specific manager orchestration still live inline
 - `codex-rs/tui/src/app.rs`
   - not yet behind a dedicated thin adapter
   - still part of `patch/bootstrap-runtime-ui` MVP residue
