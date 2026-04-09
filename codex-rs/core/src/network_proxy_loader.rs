@@ -128,16 +128,24 @@ fn network_constraints_from_trusted_layers(
         ConfigLayerStackOrdering::LowestPrecedenceFirst,
         /*include_disabled*/ false,
     ) {
-        if is_user_controlled_layer(&layer.name) {
-            continue;
-        }
-
-        let parsed = network_tables_from_toml(&layer.config)?;
-        if let Some(network) = selected_network_from_tables(parsed)? {
-            apply_network_constraints(network, &mut constraints);
-        }
+        apply_trusted_network_constraints_from_layer(layer, &mut constraints)?;
     }
     Ok(constraints)
+}
+
+fn apply_trusted_network_constraints_from_layer(
+    layer: &codex_config::ConfigLayerEntry,
+    constraints: &mut NetworkProxyConstraints,
+) -> Result<()> {
+    if is_user_controlled_layer(&layer.name) {
+        return Ok(());
+    }
+
+    let parsed = network_tables_from_toml(&layer.config)?;
+    if let Some(network) = selected_network_from_tables(parsed)? {
+        apply_network_constraints(network, constraints);
+    }
+    Ok(())
 }
 
 fn apply_network_constraints(network: NetworkToml, constraints: &mut NetworkProxyConstraints) {
