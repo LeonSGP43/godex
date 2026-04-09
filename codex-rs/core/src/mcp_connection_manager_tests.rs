@@ -565,7 +565,8 @@ fn mcp_init_error_display_prompts_for_login_when_auth_required() {
     let display = mcp_init_error_display(server_name, /*entry*/ None, &err);
 
     let expected = format!(
-        "The {server_name} MCP server is not logged in. Run `codex mcp login {server_name}`."
+        "The {server_name} MCP server is not logged in. Run `{exe} mcp login {server_name}`.",
+        exe = crate::branding::APP_EXECUTABLE_NAME,
     );
 
     assert_eq!(expected, display);
