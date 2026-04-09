@@ -17,6 +17,9 @@ use codex_cli::login::run_login_with_api_key;
 use codex_cli::login::run_login_with_chatgpt;
 use codex_cli::login::run_login_with_device_code;
 use codex_cli::login::run_logout;
+use codex_cli::login_copy::API_KEY_FLAG_DEPRECATED_HELP;
+use codex_cli::login_copy::WITH_API_KEY_HELP;
+use codex_cli::login_copy::deprecated_api_key_flag_guidance;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
@@ -315,14 +318,14 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | godex login --with-api-key`)"
+        help = WITH_API_KEY_HELP
     )]
     with_api_key: bool,
 
     #[arg(
         long = "api-key",
         value_name = "API_KEY",
-        help = "(deprecated) Previously accepted the API key directly; now exits with guidance to use --with-api-key",
+        help = API_KEY_FLAG_DEPRECATED_HELP,
         hide = true
     )]
     api_key: Option<String>,
@@ -999,9 +1002,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         )
                         .await;
                     } else if login_cli.api_key.is_some() {
-                        eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
-                        );
+                        eprintln!("{}", deprecated_api_key_flag_guidance());
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
                         let api_key = read_api_key_from_stdin();
