@@ -20,13 +20,18 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
 use crate::auth::AuthCredentialsStoreMode;
 use crate::auth::AuthDotJson;
 use crate::auth::save_auth;
+use crate::copy::login_cancelled_message;
+use crate::copy::missing_authorization_code_message;
+use crate::copy::missing_codex_entitlement_message;
+use crate::copy::persist_failed_message;
+use crate::copy::redirect_failed_message;
+use crate::copy::success_page_body;
 use crate::default_client::originator;
 use crate::pkce::PkceCodes;
 use crate::pkce::generate_pkce;
@@ -36,7 +41,6 @@ use base64::Engine;
 use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_client::build_reqwest_client_with_custom_ca;
-use codex_utils_template::Template;
 use rand::RngCore;
 use serde_json::Value as JsonValue;
 use tiny_http::Header;
@@ -50,10 +54,6 @@ use tracing::warn;
 
 const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const DEFAULT_PORT: u16 = 1455;
-static LOGIN_ERROR_PAGE_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
-    Template::parse(include_str!("assets/error.html"))
-        .unwrap_or_else(|err| panic!("login error page template must parse: {err}"))
-});
 
 /// Options for launching the local login callback server.
 #[derive(Debug, Clone)]
@@ -320,7 +320,7 @@ async fn process_request(
                 Some(c) if !c.is_empty() => c.clone(),
                 _ => {
                     return login_error_response(
-                        "Missing authorization code. Sign-in could not be completed.",
+                        missing_authorization_code_message(),
                         io::ErrorKind::InvalidData,
                         Some("missing_authorization_code"),
                         /*error_description*/ None,
@@ -360,7 +360,7 @@ async fn process_request(
                     {
                         eprintln!("Persist error: {err}");
                         return login_error_response(
-                            "Sign-in completed but credentials could not be saved locally.",
+                            persist_failed_message(),
                             io::ErrorKind::Other,
                             Some("persist_failed"),
                             Some(&err.to_string()),
@@ -376,7 +376,7 @@ async fn process_request(
                     match tiny_http::Header::from_bytes(&b"Location"[..], success_url.as_bytes()) {
                         Ok(header) => HandledRequest::RedirectWithHeader(header),
                         Err(_) => login_error_response(
-                            "Sign-in completed but redirecting back to godex failed.",
+                            redirect_failed_message(),
                             io::ErrorKind::Other,
                             Some("redirect_failed"),
                             /*error_description*/ None,
@@ -396,7 +396,6 @@ async fn process_request(
             }
         }
         "/success" => {
-            let body = include_str!("assets/success.html");
             HandledRequest::ResponseAndExit {
                 headers: match Header::from_bytes(
                     &b"Content-Type"[..],
@@ -405,17 +404,14 @@ async fn process_request(
                     Ok(header) => vec![header],
                     Err(_) => Vec::new(),
                 },
-                body: body.as_bytes().to_vec(),
+                body: success_page_body(),
                 result: Ok(()),
             }
         }
         "/cancel" => HandledRequest::ResponseAndExit {
             headers: Vec::new(),
-            body: b"Login cancelled".to_vec(),
-            result: Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "Login cancelled",
-            )),
+            body: login_cancelled_message().as_bytes().to_vec(),
+            result: Err(io::Error::new(io::ErrorKind::Interrupted, login_cancelled_message())),
         },
         _ => HandledRequest::Response(Response::from_string("Not Found").with_status_code(404)),
     }
@@ -920,7 +916,7 @@ fn is_missing_codex_entitlement_error(error_code: &str, error_description: Optio
 /// Converts OAuth callback errors into a user-facing message.
 fn oauth_callback_error_message(error_code: &str, error_description: Option<&str>) -> String {
     if is_missing_codex_entitlement_error(error_code, error_description) {
-        return "godex is not enabled for your workspace. Contact your workspace administrator to request access to godex.".to_string();
+        return missing_codex_entitlement_message().to_string();
     }
 
     if let Some(description) = error_description
@@ -1008,51 +1004,17 @@ fn render_login_error_page(
     error_description: Option<&str>,
 ) -> Vec<u8> {
     let code = error_code.unwrap_or("unknown_error");
-    let (title, display_message, display_description, help_text) =
-        if is_missing_codex_entitlement_error(code, error_description) {
-            (
-                "You do not have access to godex".to_string(),
-                "This account is not currently authorized to use godex in this workspace."
-                    .to_string(),
-                "Contact your workspace administrator to request access to godex.".to_string(),
-                "Contact your workspace administrator to get access to godex, then return to godex and try again."
-                    .to_string(),
-            )
-        } else {
-            (
-                "Sign-in could not be completed".to_string(),
-                message.to_string(),
-                error_description.unwrap_or(message).to_string(),
-                "Return to godex to retry, switch accounts, or contact your workspace admin if access is restricted."
-                    .to_string(),
-            )
-        };
-    LOGIN_ERROR_PAGE_TEMPLATE
-        .render([
-            ("error_title", html_escape(&title)),
-            ("error_message", html_escape(&display_message)),
-            ("error_code", html_escape(code)),
-            ("error_description", html_escape(&display_description)),
-            ("error_help", html_escape(&help_text)),
-        ])
-        .unwrap_or_else(|err| panic!("login error page template must render: {err}"))
-        .into_bytes()
+    crate::copy::render_login_error_page(
+        message,
+        Some(code),
+        error_description,
+        is_missing_codex_entitlement_error(code, error_description),
+    )
 }
 
-/// Escapes error strings before inserting them into HTML.
+#[cfg(test)]
 fn html_escape(input: &str) -> String {
-    let mut escaped = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
+    crate::copy::html_escape(input)
 }
 
 /// Exchanges an authenticated ID token for an API-key style access token.
@@ -1231,7 +1193,7 @@ mod tests {
         ))
         .expect("login error page should be utf-8");
 
-        assert!(body.contains("You do not have access to Codex"));
+        assert!(body.contains("You do not have access to godex"));
         assert!(body.contains("Contact your workspace administrator"));
         assert!(!body.contains("missing_codex_entitlement"));
     }

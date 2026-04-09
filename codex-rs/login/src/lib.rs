@@ -4,6 +4,7 @@ pub mod token_data;
 mod device_code_auth;
 mod pkce;
 mod server;
+mod copy;
 
 pub use codex_client::BuildCustomCaTransportError as BuildLoginHttpClientError;
 pub use device_code_auth::DeviceCode;

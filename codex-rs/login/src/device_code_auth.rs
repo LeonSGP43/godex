@@ -6,14 +6,12 @@ use serde::de::{self};
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::copy::device_code_not_enabled_message;
+use crate::copy::format_device_code_prompt;
 use crate::pkce::PkceCodes;
 use crate::server::ServerOptions;
 use codex_client::build_reqwest_client_with_custom_ca;
 use std::io;
-
-const ANSI_BLUE: &str = "\x1b[94m";
-const ANSI_GRAY: &str = "\x1b[90m";
-const ANSI_RESET: &str = "\x1b[0m";
 
 #[derive(Debug, Clone)]
 pub struct DeviceCode {
@@ -82,7 +80,7 @@ async fn request_user_code(
         if status == StatusCode::NOT_FOUND {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "device code login is not enabled for this godex server. Use the browser login or verify the server URL.",
+                device_code_not_enabled_message(),
             ));
         }
 
@@ -146,14 +144,7 @@ async fn poll_for_token(
 }
 
 fn print_device_code_prompt(verification_url: &str, code: &str) {
-    let version = env!("CARGO_PKG_VERSION");
-    println!(
-        "\nWelcome to godex [v{ANSI_GRAY}{version}{ANSI_RESET}]\n{ANSI_GRAY}Your Codex-compatible command-line coding agent{ANSI_RESET}\n\
-\nFollow these steps to sign in with ChatGPT using device code authorization:\n\
-\n1. Open this link in your browser and sign in to your account\n   {ANSI_BLUE}{verification_url}{ANSI_RESET}\n\
-\n2. Enter this one-time code {ANSI_GRAY}(expires in 15 minutes){ANSI_RESET}\n   {ANSI_BLUE}{code}{ANSI_RESET}\n\
-\n{ANSI_GRAY}Device codes are a common phishing target. Never share this code.{ANSI_RESET}\n",
-    );
+    println!("{}", format_device_code_prompt(verification_url, code));
 }
 
 pub async fn request_device_code(opts: &ServerOptions) -> std::io::Result<DeviceCode> {
