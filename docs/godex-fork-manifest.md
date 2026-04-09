@@ -295,6 +295,11 @@ default during sync and conflict resolution.
 - Verification:
   - manual diff review during sync branches
   - targeted login, proxy, MCP, and TUI smoke after each upstream merge
+- Current shrink status:
+  - onboarding copy now has a thin adapter at
+    `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
+  - remaining residue should continue shrinking out of inline auth/login hot
+    paths instead of adding new fork-specific copy there
 - Disable strategy:
   - isolate behind thinner adapters or delete entirely; no new fork product
     depth should remain here
