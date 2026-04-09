@@ -115,6 +115,7 @@ use toml_edit::DocumentMut;
 
 pub(crate) mod agent_roles;
 pub mod edit;
+mod home_policy;
 mod managed_features;
 mod network_proxy_spec;
 mod permissions;
@@ -129,6 +130,12 @@ pub use codex_config::ConstraintError;
 pub use codex_config::ConstraintResult;
 pub use codex_network_proxy::NetworkProxyAuditMetadata;
 pub use codex_sandboxing::system_bwrap_warning;
+pub use home_policy::default_config_namespace;
+pub use home_policy::find_codex_home;
+pub use home_policy::find_home;
+pub use home_policy::infer_config_namespace;
+pub use home_policy::maybe_configure_isolated_godex_home_from_args;
+pub use home_policy::namespace_for_godex_home_flag;
 pub use managed_features::ManagedFeatures;
 pub use network_proxy_spec::NetworkProxySpec;
 pub use network_proxy_spec::StartedNetworkProxy;
@@ -679,8 +686,7 @@ impl ConfigBuilder {
             cloud_requirements,
             fallback_cwd,
         } = self;
-        let codex_home =
-            codex_home.map_or_else(|| find_home(config_namespace), std::io::Result::Ok)?;
+        let codex_home = home_policy::resolve_config_home(codex_home, config_namespace)?;
         let cli_overrides = cli_overrides.unwrap_or_default();
         let mut harness_overrides = harness_overrides.unwrap_or_default();
         let loader_overrides = loader_overrides.unwrap_or_default();
@@ -744,7 +750,7 @@ impl Config {
     pub fn load_default_with_cli_overrides(
         cli_overrides: Vec<(String, TomlValue)>,
     ) -> std::io::Result<Self> {
-        let codex_home = find_home(ConfigNamespace::CodexCompatible)?;
+        let codex_home = find_codex_home()?;
         let mut merged = toml::Value::try_from(ConfigToml::default()).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -978,7 +984,7 @@ pub async fn load_global_mcp_servers(
     let cwd: Option<AbsolutePathBuf> = None;
     let config_layer_stack = load_config_layers_state(
         codex_home,
-        ConfigNamespace::CodexCompatible,
+        default_config_namespace(),
         cwd,
         &cli_overrides,
         LoaderOverrides::default(),
@@ -3287,29 +3293,6 @@ fn toml_uses_deprecated_instructions_file(value: &TomlValue) -> bool {
             profile_table.contains_key("experimental_instructions_file")
         })
     })
-}
-
-/// Returns the path to the Codex configuration directory, which can be
-/// specified by the `CODEX_HOME` environment variable. If not set, defaults to
-/// `~/.codex`.
-///
-/// - If `CODEX_HOME` is set, the value must exist and be a directory. The
-///   value will be canonicalized and this function will Err otherwise.
-/// - If `CODEX_HOME` is not set, this function does not verify that the
-///   directory exists.
-pub fn find_codex_home() -> std::io::Result<PathBuf> {
-    find_home(ConfigNamespace::CodexCompatible)
-}
-
-pub fn find_home(namespace: ConfigNamespace) -> std::io::Result<PathBuf> {
-    codex_utils_home_dir::find_home(namespace)
-}
-
-pub fn infer_config_namespace(codex_home: &Path) -> ConfigNamespace {
-    match codex_home.file_name().and_then(|name| name.to_str()) {
-        Some(".godex") => ConfigNamespace::GodexIsolated,
-        _ => ConfigNamespace::CodexCompatible,
-    }
 }
 
 /// Returns the path to the folder where Codex logs are stored. Does not verify

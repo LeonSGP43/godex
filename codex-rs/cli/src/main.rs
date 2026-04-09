@@ -1,4 +1,3 @@
-use anyhow::Context;
 use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
@@ -52,6 +51,8 @@ use codex_core::config::ConfigNamespace;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEditsBuilder;
 use codex_core::config::find_home;
+use codex_core::config::maybe_configure_isolated_godex_home_from_args;
+use codex_core::config::namespace_for_godex_home_flag;
 use codex_features::FEATURES;
 use codex_features::Stage;
 use codex_features::is_known_feature_key;
@@ -760,38 +761,8 @@ fn stage_str(stage: Stage) -> &'static str {
     }
 }
 
-fn config_namespace(use_godex_home: bool) -> ConfigNamespace {
-    if use_godex_home {
-        ConfigNamespace::GodexIsolated
-    } else {
-        ConfigNamespace::CodexCompatible
-    }
-}
-
-fn maybe_configure_isolated_home_from_args() -> anyhow::Result<()> {
-    let use_godex_home = std::env::args_os()
-        .skip(1)
-        .any(|arg| arg == "-g" || arg == "--godex-home");
-    if !use_godex_home {
-        return Ok(());
-    }
-
-    let godex_home = find_home(ConfigNamespace::GodexIsolated)?;
-    std::fs::create_dir_all(&godex_home).with_context(|| {
-        format!(
-            "failed to initialize isolated godex home at {}",
-            godex_home.display()
-        )
-    })?;
-    unsafe {
-        std::env::set_var("GODEX_HOME", &godex_home);
-        std::env::set_var("CODEX_HOME", &godex_home);
-    }
-    Ok(())
-}
-
 fn main() -> anyhow::Result<()> {
-    maybe_configure_isolated_home_from_args()?;
+    maybe_configure_isolated_godex_home_from_args()?;
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         cli_main(arg0_paths).await?;
         Ok(())
@@ -808,7 +779,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
-    let config_namespace = config_namespace(use_godex_home);
+    let config_namespace = namespace_for_godex_home_flag(use_godex_home);
     interactive.use_godex_home = use_godex_home;
 
     // Fold --enable/--disable into config overrides so they flow to all subcommands.
@@ -1255,7 +1226,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
 
 async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
-    let codex_home = find_home(config_namespace(interactive.use_godex_home))?;
+    let codex_home = find_home(namespace_for_godex_home_flag(interactive.use_godex_home))?;
     ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
         .set_feature_enabled(feature, /*enabled*/ true)
@@ -1268,7 +1239,7 @@ async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow
 
 async fn disable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
-    let codex_home = find_home(config_namespace(interactive.use_godex_home))?;
+    let codex_home = find_home(namespace_for_godex_home_flag(interactive.use_godex_home))?;
     ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
         .set_feature_enabled(feature, /*enabled*/ false)
