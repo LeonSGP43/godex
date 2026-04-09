@@ -299,6 +299,8 @@ default during sync and conflict resolution.
   - CLI login copy now has a thin adapter at `codex-rs/cli/src/login_copy.rs`
   - `codex-rs/cli/src/main.rs` now consumes login help/guidance from that
     adapter instead of keeping the fork copy inline
+  - CLI MCP copy/config namespace selection now has a thin adapter at
+    `codex-rs/cli/src/mcp_copy.rs`
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
