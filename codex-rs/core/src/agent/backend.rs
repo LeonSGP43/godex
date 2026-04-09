@@ -118,12 +118,30 @@ pub(crate) fn backend_id_from_config(config: &crate::config::Config) -> Option<&
     Some(config.agent_backend_id.as_str())
 }
 
+pub(crate) fn resolve_spawned_agent_backend_from_config(
+    config: &crate::config::Config,
+) -> Result<ResolvedSpawnedAgentBackend, String> {
+    resolve_spawned_agent_backend(config, backend_id_from_config(config))
+}
+
 pub(crate) fn normalize_backend_id(value: Option<&str>) -> String {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("codex")
         .to_string()
+}
+
+pub(crate) fn apply_archived_spawned_agent_config(
+    config: &mut crate::config::Config,
+    snapshot: &ThreadConfigSnapshot,
+) {
+    config.agent_backend_id = snapshot.agent_backend_id.clone();
+    config.model = Some(snapshot.model.clone());
+    config.model_reasoning_effort = snapshot.reasoning_effort;
+    if let Ok(cwd) = codex_utils_absolute_path::AbsolutePathBuf::try_from(snapshot.cwd.clone()) {
+        config.cwd = cwd;
+    }
 }
 
 impl SpawnedAgentBackendKind {
@@ -240,6 +258,25 @@ impl SpawnedAgentHandle {
                 ))))
             }
         }
+    }
+
+    pub(crate) fn from_config(
+        manager: Weak<ThreadManagerState>,
+        config: &crate::config::Config,
+        agent_id: ThreadId,
+        config_snapshot: ThreadConfigSnapshot,
+        developer_instructions: Option<String>,
+    ) -> CodexResult<Option<Self>> {
+        let resolved_backend = resolve_spawned_agent_backend_from_config(config)
+            .map_err(CodexErr::UnsupportedOperation)?;
+        Self::from_resolved_backend(
+            manager,
+            config,
+            agent_id,
+            config_snapshot,
+            developer_instructions,
+            &resolved_backend,
+        )
     }
 
     pub(crate) async fn claude_code(

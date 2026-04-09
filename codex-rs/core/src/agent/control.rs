@@ -1,8 +1,7 @@
 use crate::agent::AgentStatus;
 use crate::agent::backend::ArchivedSpawnedAgentHandle;
 use crate::agent::backend::SpawnedAgentHandle;
-use crate::agent::backend::backend_id_from_config;
-use crate::agent::backend::resolve_spawned_agent_backend;
+use crate::agent::backend::apply_archived_spawned_agent_config;
 use crate::agent::registry::AgentMetadata;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::role::DEFAULT_ROLE_NAME;
@@ -285,9 +284,6 @@ impl AgentControl {
         options: SpawnAgentOptions,
     ) -> CodexResult<LiveAgent> {
         let state = self.upgrade()?;
-        let resolved_backend =
-            resolve_spawned_agent_backend(&config, backend_id_from_config(&config))
-                .map_err(CodexErr::UnsupportedOperation)?;
         let external_backend_config = config.clone();
         let external_developer_instructions = config.developer_instructions.clone();
         let mut reservation = self.state.reserve_spawn_slot(config.agent_max_threads)?;
@@ -402,13 +398,12 @@ impl AgentControl {
         agent_metadata.agent_id = Some(new_thread.thread_id);
         reservation.commit(agent_metadata.clone());
 
-        if let Some(handle) = SpawnedAgentHandle::from_resolved_backend(
+        if let Some(handle) = SpawnedAgentHandle::from_config(
             Arc::downgrade(&state),
             &external_backend_config,
             new_thread.thread_id,
             new_thread.thread.config_snapshot().await,
             external_developer_instructions,
-            &resolved_backend,
         )? {
             self.register_external_handle(handle).await;
         }
@@ -535,7 +530,7 @@ impl AgentControl {
     ) -> CodexResult<ThreadId> {
         let archived_external_handle = self.take_archived_external_handle(thread_id).await;
         if let Some(archived) = archived_external_handle.as_ref() {
-            apply_archived_external_config(&mut config, archived.config_snapshot());
+            apply_archived_spawned_agent_config(&mut config, archived.config_snapshot());
         }
         if let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { depth, .. }) = &session_source
             && *depth >= config.agent_max_depth
@@ -1341,18 +1336,6 @@ fn thread_last_message_matches(
         ContentItem::InputText { text } | ContentItem::OutputText { text } => text == expected_text,
         ContentItem::InputImage { .. } => false,
     })
-}
-
-fn apply_archived_external_config(
-    config: &mut crate::config::Config,
-    snapshot: &ThreadConfigSnapshot,
-) {
-    config.agent_backend_id = snapshot.agent_backend_id.clone();
-    config.model = Some(snapshot.model.clone());
-    config.model_reasoning_effort = snapshot.reasoning_effort;
-    if let Ok(cwd) = codex_utils_absolute_path::AbsolutePathBuf::try_from(snapshot.cwd.clone()) {
-        config.cwd = cwd;
-    }
 }
 
 fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
