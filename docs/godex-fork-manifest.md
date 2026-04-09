@@ -307,6 +307,8 @@ default during sync and conflict resolution.
   - network proxy config-layer bootstrap now starts in a dedicated helper
     inside `codex-rs/core/src/network_proxy_loader.rs` instead of keeping the
     fork-specific `CodexCompatible` loader wiring inline in the state builder
+  - network proxy config-layer source path resolution now also starts in a
+    dedicated helper inside `codex-rs/core/src/network_proxy_loader.rs`
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
