@@ -52,3 +52,15 @@ pub(crate) fn browser_open_failed_message(url: &str, err: &str) -> String {
 pub(crate) fn browser_opened_message(url: &str) -> String {
     format!("Opened {url} in your browser.")
 }
+
+pub(crate) fn permissions_updated_message(label: &str) -> String {
+    format!("Permissions updated to {label}")
+}
+
+pub(crate) fn status_line_save_failed_message(err: &str) -> String {
+    format!("Failed to save status line items: {err}")
+}
+
+pub(crate) fn terminal_title_save_failed_message(err: &str) -> String {
+    format!("Failed to save terminal title items: {err}")
+}

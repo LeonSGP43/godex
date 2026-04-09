@@ -42,15 +42,12 @@ use crate::pager_overlay::Overlay;
 use crate::read_session_model;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
-use crate::runtime_ui_copy::browser_open_failed_message;
-use crate::runtime_ui_copy::browser_opened_message;
 use crate::resume_picker::SessionSelection;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
-use crate::version::CODEX_CLI_VERSION;
 use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
@@ -150,6 +147,7 @@ mod app_server_adapter;
 mod app_server_requests;
 mod loaded_threads;
 mod pending_interactive_replay;
+mod runtime_ui;
 
 use self::agent_navigation::AgentNavigationDirection;
 use self::agent_navigation::AgentNavigationState;
@@ -1419,82 +1417,8 @@ impl App {
         }
 
         if let Some(label) = permissions_history_label {
-            self.chat_widget.add_info_message(
-                format!("Permissions updated to {label}"),
-                /*hint*/ None,
-            );
+            self.show_permissions_updated_message(&label);
         }
-    }
-
-    fn open_url_in_browser(&mut self, url: String) {
-        if let Err(err) = webbrowser::open(&url) {
-            self.chat_widget
-                .add_error_message(browser_open_failed_message(&url, &err.to_string()));
-            return;
-        }
-
-        self.chat_widget
-            .add_info_message(browser_opened_message(&url), /*hint*/ None);
-    }
-
-    fn clear_ui_header_lines_with_version(
-        &self,
-        width: u16,
-        version: &'static str,
-    ) -> Vec<Line<'static>> {
-        history_cell::SessionHeaderHistoryCell::new(
-            self.chat_widget.current_model().to_string(),
-            self.chat_widget.current_reasoning_effort(),
-            self.chat_widget.should_show_fast_status(
-                self.chat_widget.current_model(),
-                self.chat_widget.current_service_tier(),
-            ),
-            self.config.cwd.to_path_buf(),
-            version,
-        )
-        .display_lines(width)
-    }
-
-    fn clear_ui_header_lines(&self, width: u16) -> Vec<Line<'static>> {
-        self.clear_ui_header_lines_with_version(width, CODEX_CLI_VERSION)
-    }
-
-    fn queue_clear_ui_header(&mut self, tui: &mut tui::Tui) {
-        let width = tui.terminal.last_known_screen_size.width;
-        let header_lines = self.clear_ui_header_lines(width);
-        if !header_lines.is_empty() {
-            tui.insert_history_lines(header_lines);
-            self.has_emitted_history_lines = true;
-        }
-    }
-
-    fn clear_terminal_ui(&mut self, tui: &mut tui::Tui, redraw_header: bool) -> Result<()> {
-        let is_alt_screen_active = tui.is_alt_screen_active();
-
-        // Drop queued history insertions so stale transcript lines cannot be flushed after /clear.
-        tui.clear_pending_history_lines();
-
-        if is_alt_screen_active {
-            tui.terminal.clear_visible_screen()?;
-        } else {
-            // Some terminals (Terminal.app, Warp) do not reliably drop scrollback when purge and
-            // clear are emitted as separate backend commands. Prefer a single ANSI sequence.
-            tui.terminal.clear_scrollback_and_visible_screen_ansi()?;
-        }
-
-        let mut area = tui.terminal.viewport_area;
-        if area.y > 0 {
-            // After a full clear, anchor the inline viewport at the top and redraw a fresh header
-            // box. `insert_history_lines()` will shift the viewport down by the rendered height.
-            area.y = 0;
-            tui.terminal.set_viewport_area(area);
-        }
-        self.has_emitted_history_lines = false;
-
-        if redraw_header {
-            self.queue_clear_ui_header(tui);
-        }
-        Ok(())
     }
 
     fn reset_app_ui_state_after_clear(&mut self) {
@@ -5243,23 +5167,7 @@ impl App {
                 }
             }
             AppEvent::StatusLineSetup { items } => {
-                let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-                let edit = codex_core::config::edit::status_line_items_edit(&ids);
-                let apply_result = ConfigEditsBuilder::new(&self.config.codex_home)
-                    .with_edits([edit])
-                    .apply()
-                    .await;
-                match apply_result {
-                    Ok(()) => {
-                        self.config.tui_status_line = Some(ids.clone());
-                        self.chat_widget.setup_status_line(items);
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to persist status line items; keeping previous selection");
-                        self.chat_widget
-                            .add_error_message(format!("Failed to save status line items: {err}"));
-                    }
-                }
+                self.apply_status_line_setup(items).await;
             }
             AppEvent::StatusLineBranchUpdated { cwd, branch } => {
                 self.chat_widget.set_status_line_branch(cwd, branch);
@@ -5269,25 +5177,7 @@ impl App {
                 self.chat_widget.cancel_status_line_setup();
             }
             AppEvent::TerminalTitleSetup { items } => {
-                let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-                let edit = codex_core::config::edit::terminal_title_items_edit(&ids);
-                let apply_result = ConfigEditsBuilder::new(&self.config.codex_home)
-                    .with_edits([edit])
-                    .apply()
-                    .await;
-                match apply_result {
-                    Ok(()) => {
-                        self.config.tui_terminal_title = Some(ids.clone());
-                        self.chat_widget.setup_terminal_title(items);
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to persist terminal title items; keeping previous selection");
-                        self.chat_widget.revert_terminal_title_setup_preview();
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to save terminal title items: {err}"
-                        ));
-                    }
-                }
+                self.apply_terminal_title_setup(items).await;
             }
             AppEvent::TerminalTitleSetupPreview { items } => {
                 self.chat_widget.preview_terminal_title(items);

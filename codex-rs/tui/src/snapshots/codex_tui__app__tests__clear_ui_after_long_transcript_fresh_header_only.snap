@@ -1,9 +1,10 @@
 ---
 source: tui/src/app.rs
+assertion_line: 8590
 expression: rendered
 ---
 ╭─────────────────────────────────────────────╮
-│ >_ godex (v<VERSION>)                      │
+│ >_ godex (v<VERSION>)                       │
 │                                             │
 │ model:     gpt-test high   /model to change │
 │ directory: /tmp/project                     │
