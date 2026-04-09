@@ -4,21 +4,21 @@ This ledger is the current-state inventory of how this fork differs from officia
 
 ## Snapshot
 
-- Generated on: `2026-04-08`
-- Compared head: `1c2b2c1b2f`
-- Compared upstream base: `upstream/main` at `d47b755aa2`
-- Divergence: `behind 212` / `ahead 97`
-- Diff surface: `169 files changed, 18565 insertions(+), 1163 deletions(-)`
+- Generated on: `2026-04-09`
+- Compared head: `8d47f6ed8a`
+- Compared upstream base: `upstream/main` at `22d07e7f8f`
+- Divergence: `behind 248` / `ahead 141`
+- Diff surface: `184 files changed, 20239 insertions(+), 1583 deletions(-)`
 - Current top hot directories:
-  - `codex-rs/core/src`: 44 changed paths
-  - `codex-rs/tui/src`: 29 changed paths
+  - `codex-rs/core/src`: 48 changed paths
+  - `codex-rs/tui/src`: 32 changed paths
   - `codex-rs/state/src`: 8 changed paths
   - `codex-rs/rollout/src`: 6 changed paths
   - `codex-rs/examples/external_agent_backends`: 4 changed paths
-  - `codex-rs/login/src`: 4 changed paths
+  - `codex-rs/login/src`: 6 changed paths
   - `.codex/skills/godex-release-distributor`: 3 changed paths
   - `.codex/skills/godex-upstream-reviewer`: 3 changed paths
-  - `codex-rs/cli/src`: 3 changed paths
+  - `codex-rs/cli/src`: 6 changed paths
   - `codex-rs/core/tests`: 3 changed paths
 
 ## Reading Rules
@@ -289,7 +289,8 @@ This ledger is the current-state inventory of how this fork differs from officia
 
 - `codex-rs/cli/src/login.rs` and `codex-rs/login/src/**`
   - thin adapters already exist for CLI/onboarding copy, and CLI auth entrypoints now also share helperized forced-method guards, server-option assembly, browser fallback reuse, and result/exit handling
-  - remaining MVP residue: deeper auth behavior and branded login/error assets still live in `codex-rs/login/src/**`, and `login status` / `logout` still keep direct CLI flow inline
+  - device-code prompt copy, OAuth error copy, success/cancel body text, and branded login error-page rendering now also start in `codex-rs/login/src/copy.rs`
+  - remaining MVP residue: deeper auth behavior and branded HTML assets still live in `codex-rs/login/src/**`, and `login status` / `logout` still keep direct CLI flow inline
 - `codex-rs/cli/src/mcp_cmd.rs`
   - config-home resolution and user-facing MCP copy are now adapterized through `mcp_copy.rs`
   - transport assembly and global MCP store write now also start in dedicated helpers inside `codex-rs/cli/src/mcp_cmd.rs`
@@ -305,7 +306,8 @@ This ledger is the current-state inventory of how this fork differs from officia
   - remaining MVP residue: update-notice insertion and other runtime presentation orchestration still live inline
 - `codex-rs/tui/src/history_cell.rs` and `codex-rs/tui/src/status/**`
   - session header help/title copy and status title copy now start in `codex-rs/tui/src/runtime_ui_copy.rs`
-  - remaining MVP residue: broader runtime presentation drift and related snapshots still need sync-only review
+  - status snapshot baselines are now resynced to the current `godex` version header (`v0.2.17`)
+  - remaining MVP residue: broader runtime presentation drift still needs sync-only review, but the status snapshot lane is no longer carrying stale version-header churn
 
 ## Patch-Layer Decomposition Ledger
 
@@ -325,8 +327,8 @@ This section is the higher-resolution ledger for future fork-patch work. It maps
 | `patch/memory-state-runtime` | `fork/memory-system` | Persist scope metadata and thread/runtime hooks needed by scoped memories. | `codex-rs/state/migrations/0023_threads_memory_scope.sql`, `codex-rs/state/src/fork_patch/mod.rs`, `codex-rs/state/src/fork_patch/memory_repo.rs`, `codex-rs/state/src/model/thread_metadata.rs`, `codex-rs/state/src/runtime/memories.rs`, `codex-rs/state/src/runtime/threads.rs`, `codex-rs/rollout/src/**`, `codex-rs/protocol/src/protocol.rs` | `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`; rollout/state targeted suites | Upstream state/runtime grows a compatible memory-scope model and the fork can map onto native metadata |
 | `patch/config-home-namespace` | `fork/config-namespace-home` | Keep `godex`/`godex -g` home behavior, config namespace policy, and schema exposure coherent. | `codex-rs/cli/src/main.rs`, `codex-rs/cli/tests/godex_home.rs`, `codex-rs/core/src/config/home_policy.rs`, `codex-rs/core/src/config/mod.rs`, `codex-rs/core/src/config_loader/**`, `codex-rs/utils/home-dir/src/lib.rs`, `codex-rs/core/config.schema.json`, `docs/config.md` | `cargo test -p codex-cli --test godex_home --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-core home_policy --manifest-path codex-rs/Cargo.toml -- --nocapture`; `godex --memory-scope project --version` | Upstream exposes the same namespace/home policy hooks or the fork splits this into a dedicated wrapper crate |
 | `patch/release-distribution` | `fork/distribution-release` | Own fork package names, installers, npm staging, and release workflows. | `codex-cli/**`, `scripts/install/**`, `scripts/godex-release*.sh`, `.github/workflows/rust-release*.yml`, `codex-rs/Cargo.toml`, `codex-rs/Cargo.lock`, `VERSION`, `CHANGELOG.md` | `bash scripts/godex-maintain.sh release-preflight`; install dry-run; version/changelog gate | Only partial replacement is possible; artifact naming and release channels stay fork-owned |
-| `patch/bootstrap-login-auth` | `fork/bootstrap-residue` | Residual auth/login divergence that should either migrate into a thinner adapter or disappear. The onboarding copy layer now starts in `codex-rs/tui/src/onboarding/bootstrap_copy.rs`, CLI login copy/guidance now starts in `codex-rs/cli/src/login_copy.rs`, and CLI auth entrypoints now also share helperized forced-method guards, server-option assembly, browser fallback reuse, and result/exit handling instead of repeating that flow inline in `codex-rs/cli/src/login.rs`. | `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/login_copy.rs`, `codex-rs/cli/src/main.rs`, `codex-rs/login/src/**`, `codex-rs/tui/src/onboarding/bootstrap_copy.rs`, `codex-rs/tui/src/onboarding/**` | `cargo check -p codex-cli --manifest-path codex-rs/Cargo.toml`; `cargo test -p codex-tui welcome_renders_animation_on_first_draw --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-tui cancel_active_attempt_notifies_device_code_login --manifest-path codex-rs/Cargo.toml -- --nocapture`; targeted login smoke after sync; diff review around auth entrypoints | Upstream closes the behavior gap or fork-specific auth UX moves to isolated adapters |
-| `patch/bootstrap-runtime-ui` | `fork/bootstrap-residue` | Residual TUI/runtime presentation drift not yet grouped into a durable fork patch. Session header help/title copy, status title copy, and browser-open user copy now start in `codex-rs/tui/src/runtime_ui_copy.rs` instead of staying inline across `app.rs`, `history_cell.rs`, and `status/card.rs`. | `codex-rs/tui/src/app.rs`, `codex-rs/tui/src/history_cell.rs`, `codex-rs/tui/src/runtime_ui_copy.rs`, `codex-rs/tui/src/status/**`, `codex-rs/tui/src/slash_command.rs`, related snapshots | `cargo check -p codex-tui --manifest-path codex-rs/Cargo.toml`; `cargo test -p codex-tui welcome_renders_animation_on_first_draw --manifest-path codex-rs/Cargo.toml -- --nocapture`; targeted TUI snapshot review and smoke after each sync | Fork either deletes the drift or promotes a subset into a named durable patch group |
+| `patch/bootstrap-login-auth` | `fork/bootstrap-residue` | Residual auth/login divergence that should either migrate into a thinner adapter or disappear. The onboarding copy layer now starts in `codex-rs/tui/src/onboarding/bootstrap_copy.rs`, CLI login copy/guidance now starts in `codex-rs/cli/src/login_copy.rs`, CLI auth entrypoints now also share helperized forced-method guards, server-option assembly, browser fallback reuse, and result/exit handling instead of repeating that flow inline in `codex-rs/cli/src/login.rs`, and login-scoped device-code prompt/error-page/success-copy rendering now also starts in `codex-rs/login/src/copy.rs`. | `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/login_copy.rs`, `codex-rs/cli/src/main.rs`, `codex-rs/login/src/**`, `codex-rs/tui/src/onboarding/bootstrap_copy.rs`, `codex-rs/tui/src/onboarding/**` | `cargo check -p codex-cli --manifest-path codex-rs/Cargo.toml`; `cargo check -p codex-login --manifest-path codex-rs/Cargo.toml`; `cargo test -p codex-login --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-tui welcome_renders_animation_on_first_draw --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-tui cancel_active_attempt_notifies_device_code_login --manifest-path codex-rs/Cargo.toml -- --nocapture`; targeted login smoke after sync; diff review around auth entrypoints | Upstream closes the behavior gap or fork-specific auth UX moves to isolated adapters |
+| `patch/bootstrap-runtime-ui` | `fork/bootstrap-residue` | Residual TUI/runtime presentation drift not yet grouped into a durable fork patch. Session header help/title copy, status title copy, and browser-open user copy now start in `codex-rs/tui/src/runtime_ui_copy.rs` instead of staying inline across `app.rs`, `history_cell.rs`, and `status/card.rs`, and the status snapshot baseline now matches the current `godex` version header so routine TUI syncs do not keep reintroducing stale snapshot churn. | `codex-rs/tui/src/app.rs`, `codex-rs/tui/src/history_cell.rs`, `codex-rs/tui/src/runtime_ui_copy.rs`, `codex-rs/tui/src/status/**`, `codex-rs/tui/src/slash_command.rs`, related snapshots | `cargo check -p codex-tui --manifest-path codex-rs/Cargo.toml`; `cargo test -p codex-tui welcome_renders_animation_on_first_draw --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-tui cancel_active_attempt_notifies_device_code_login --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-tui status_snapshot_ --manifest-path codex-rs/Cargo.toml -- --nocapture`; targeted TUI snapshot review and smoke after each sync | Fork either deletes the drift or promotes a subset into a named durable patch group |
 | `patch/bootstrap-proxy-mcp` | `fork/bootstrap-residue` | Residual proxy/MCP hot-path changes that still sit directly in upstream-heavy files. CLI MCP copy, config-namespace selection, config loading, and global MCP store lookup now start in `codex-rs/cli/src/mcp_copy.rs`; CLI MCP transport assembly and global store write now also start in dedicated helpers inside `codex-rs/cli/src/mcp_cmd.rs`; network proxy config-layer bootstrap, config-layer source path resolution, trusted-layer policy assembly, and final state/constraint composition now start in dedicated helpers inside `codex-rs/core/src/network_proxy_loader.rs`; MCP startup/login guidance copy now starts in `codex-rs/core/src/mcp_connection_copy.rs`; Codex Apps MCP cache-context selection, cache reads/startup snapshot loading, and uncached tool refresh plus cache-write metrics glue now also start in dedicated helpers inside `codex-rs/core/src/mcp_connection_manager.rs` instead of repeating inline option/result orchestration. | `codex-rs/core/src/network_proxy_loader.rs`, `codex-rs/core/src/mcp_connection_manager.rs`, `codex-rs/core/src/mcp_connection_copy.rs`, `codex-rs/cli/src/mcp_cmd.rs`, `codex-rs/cli/src/mcp_copy.rs`, `codex-rs/cli/src/main.rs` | `cargo test -p codex-core start_managed_network_proxy_ --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-core mcp_init_error_display_ --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-core codex_apps_tools_cache_ --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-core list_all_tools_uses_startup_snapshot_while_client_is_pending --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo check -p codex-core --manifest-path codex-rs/Cargo.toml`; `cargo check -p codex-cli --manifest-path codex-rs/Cargo.toml`; sync diff review | Upstream adds equivalent hooks or fork-specific behavior moves to dedicated adapters |
 
 ### Immediate Extraction Order

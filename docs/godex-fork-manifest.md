@@ -302,6 +302,10 @@ default during sync and conflict resolution.
   - CLI login entrypoints now also share helperized forced-method guards,
     server-option assembly, browser fallback reuse, and result/exit handling
     inside `codex-rs/cli/src/login.rs`
+  - login-scoped device-code prompt copy, OAuth error-page copy, and
+    success/cancel page bodies now also start in `codex-rs/login/src/copy.rs`
+    instead of staying inline in `codex-rs/login/src/device_code_auth.rs` and
+    `codex-rs/login/src/server.rs`
   - CLI MCP copy/config namespace selection now has a thin adapter at
     `codex-rs/cli/src/mcp_copy.rs`
   - CLI MCP config loading and global MCP store lookup now also start in
@@ -333,6 +337,9 @@ default during sync and conflict resolution.
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - TUI session header help/title copy, status title copy, and browser-open
     user copy now also start in `codex-rs/tui/src/runtime_ui_copy.rs`
+  - the `codex-rs/tui/src/status/**` snapshot baseline now matches the current
+    `godex` version header, removing stale version-only snapshot churn from the
+    runtime-ui lane
   - remaining residue should continue shrinking out of inline auth/login hot
     paths instead of adding new fork-specific copy there
 - Disable strategy:
