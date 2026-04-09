@@ -123,6 +123,7 @@ This ledger is the current-state inventory of how this fork differs from officia
   - `f6f9d17207 feat(godex): publish fork cli and release workflow`
   - `61d8d2f7b2 fix(godex): initialize isolated home on first -g run`
   - `709c379ab2 feat(godex): add cli memory scope override`
+  - `ee670278a0 refactor(config): extract home namespace policy adapter`
 - Owner files / globs:
   - `codex-rs/cli/src/main.rs`
   - `codex-rs/cli/tests/godex_home.rs`
@@ -132,11 +133,14 @@ This ledger is the current-state inventory of how this fork differs from officia
   - `codex-rs/utils/home-dir/src/lib.rs`
   - `docs/config.md`
 - Current verification:
-  - `cargo test -p codex-cli godex_home -- --nocapture`
+  - `cargo test -p codex-cli --test godex_home --manifest-path codex-rs/Cargo.toml -- --nocapture`
+  - `cargo test -p codex-core home_policy --manifest-path codex-rs/Cargo.toml -- --nocapture`
   - `godex --memory-scope project --version`
   - `manual smoke with godex and godex -g`
 - Upstream replacement possibility: Low for namespace behavior; medium for adjacent config parsing details if upstream adds equivalent hooks.
 - Current recommendation: Keep the policy, but continue extracting fork-specific behavior out of `cli/src/main.rs` and `core/src/config/mod.rs` into dedicated adapters.
+- Notes:
+  - `ee670278a0` advanced `patch/config-home-namespace` by moving namespace selection, default-home inference, isolated-home bootstrap, and config-home resolution behind `core/src/config/home_policy.rs`, reducing fork-policy ownership in both `cli/src/main.rs` and `core/src/config/mod.rs`.
 
 ## External spawned-agent backends (`fork/provider-backends`)
 
@@ -297,7 +301,7 @@ This section is the higher-resolution ledger for future fork-patch work. It maps
 | `patch/memory-read-path` | `fork/memory-system` | Control quick-pass instructions, summary embedding, and recall hint assembly. | `codex-rs/core/src/fork_patch/memory.rs`, `codex-rs/core/src/memories/prompts.rs`, `codex-rs/core/src/memories/prompts_tests.rs`, `codex-rs/core/templates/memories/read_path.md` | `cargo test -p codex-core prompts::tests::memory_quick_pass_instructions_remain_stable --manifest-path codex-rs/Cargo.toml` | Upstream adds comparable prompt/read-path behavior or the fork can express the same policy purely as data/templates |
 | `patch/memory-recall-engine` | `fork/memory-system` | Own semantic index, QMD export, hybrid retrieval, and recall tuning. | `codex-rs/core/src/memories/semantic_index.rs`, `codex-rs/core/src/memories/usage.rs`, `codex-rs/core/src/memories/tests.rs`, `codex-rs/core/templates/memories/consolidation.md` | `cargo test -p codex-core memories:: -- --nocapture`; semantic recall fixture tests | Upstream introduces a better recall/indexing engine and the fork can delete or delegate the QMD/vector implementation |
 | `patch/memory-state-runtime` | `fork/memory-system` | Persist scope metadata and thread/runtime hooks needed by scoped memories. | `codex-rs/state/migrations/0023_threads_memory_scope.sql`, `codex-rs/state/src/fork_patch/mod.rs`, `codex-rs/state/src/fork_patch/memory_repo.rs`, `codex-rs/state/src/model/thread_metadata.rs`, `codex-rs/state/src/runtime/memories.rs`, `codex-rs/state/src/runtime/threads.rs`, `codex-rs/rollout/src/**`, `codex-rs/protocol/src/protocol.rs` | `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`; rollout/state targeted suites | Upstream state/runtime grows a compatible memory-scope model and the fork can map onto native metadata |
-| `patch/config-home-namespace` | `fork/config-namespace-home` | Keep `godex`/`godex -g` home behavior, config namespace policy, and schema exposure coherent. | `codex-rs/utils/home-dir/src/lib.rs`, `codex-rs/core/src/config_loader/**`, `codex-rs/core/config.schema.json`, `docs/config.md` | `cargo test -p codex-cli godex_home -- --nocapture`; `godex --memory-scope project --version` | Upstream exposes the same namespace/home policy hooks or the fork splits this into a dedicated wrapper crate |
+| `patch/config-home-namespace` | `fork/config-namespace-home` | Keep `godex`/`godex -g` home behavior, config namespace policy, and schema exposure coherent. | `codex-rs/cli/src/main.rs`, `codex-rs/cli/tests/godex_home.rs`, `codex-rs/core/src/config/home_policy.rs`, `codex-rs/core/src/config/mod.rs`, `codex-rs/core/src/config_loader/**`, `codex-rs/utils/home-dir/src/lib.rs`, `codex-rs/core/config.schema.json`, `docs/config.md` | `cargo test -p codex-cli --test godex_home --manifest-path codex-rs/Cargo.toml -- --nocapture`; `cargo test -p codex-core home_policy --manifest-path codex-rs/Cargo.toml -- --nocapture`; `godex --memory-scope project --version` | Upstream exposes the same namespace/home policy hooks or the fork splits this into a dedicated wrapper crate |
 | `patch/release-distribution` | `fork/distribution-release` | Own fork package names, installers, npm staging, and release workflows. | `codex-cli/**`, `scripts/install/**`, `scripts/godex-release*.sh`, `.github/workflows/rust-release*.yml`, `codex-rs/Cargo.toml`, `codex-rs/Cargo.lock`, `VERSION`, `CHANGELOG.md` | `bash scripts/godex-maintain.sh release-preflight`; install dry-run; version/changelog gate | Only partial replacement is possible; artifact naming and release channels stay fork-owned |
 | `patch/bootstrap-login-auth` | `fork/bootstrap-residue` | Residual auth/login divergence that should either migrate into a thinner adapter or disappear. | `codex-rs/cli/src/login.rs`, `codex-rs/login/src/**`, `codex-rs/tui/src/onboarding/**` | targeted login smoke after sync; diff review around auth entrypoints | Upstream closes the behavior gap or fork-specific auth UX moves to isolated adapters |
 | `patch/bootstrap-runtime-ui` | `fork/bootstrap-residue` | Residual TUI/runtime presentation drift not yet grouped into a durable fork patch. | `codex-rs/tui/src/app.rs`, `codex-rs/tui/src/history_cell.rs`, `codex-rs/tui/src/status/**`, `codex-rs/tui/src/slash_command.rs`, related snapshots | targeted TUI snapshot review and smoke after each sync | Fork either deletes the drift or promotes a subset into a named durable patch group |
