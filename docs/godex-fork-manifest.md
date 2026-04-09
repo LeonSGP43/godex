@@ -309,6 +309,9 @@ default during sync and conflict resolution.
     fork-specific `CodexCompatible` loader wiring inline in the state builder
   - network proxy config-layer source path resolution now also starts in a
     dedicated helper inside `codex-rs/core/src/network_proxy_loader.rs`
+  - MCP startup/login guidance copy now starts in
+    `codex-rs/core/src/mcp_connection_copy.rs` instead of staying inline in
+    `codex-rs/core/src/mcp_connection_manager.rs`
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
