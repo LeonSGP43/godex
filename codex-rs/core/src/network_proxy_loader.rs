@@ -61,11 +61,8 @@ async fn build_config_state_with_mtimes() -> Result<(ConfigState, Vec<LayerMtime
         );
     }
 
-    let config = config_from_layers(&config_layer_stack, &exec_policy)?;
-
-    let constraints = enforce_trusted_constraints(&config_layer_stack, &config)?;
     let layer_mtimes = collect_layer_mtimes(&config_layer_stack);
-    let state = build_config_state(config, constraints)?;
+    let state = build_network_proxy_config_state(&config_layer_stack, &exec_policy)?;
     Ok((state, layer_mtimes))
 }
 
@@ -118,6 +115,15 @@ fn enforce_trusted_constraints(
         .map_err(NetworkProxyConstraintError::into_anyhow)
         .context("network proxy constraints")?;
     Ok(constraints)
+}
+
+fn build_network_proxy_config_state(
+    layers: &ConfigLayerStack,
+    exec_policy: &codex_execpolicy::Policy,
+) -> Result<ConfigState> {
+    let config = config_from_layers(layers, exec_policy)?;
+    let constraints = enforce_trusted_constraints(layers, &config)?;
+    build_config_state(config, constraints)
 }
 
 fn network_constraints_from_trusted_layers(
