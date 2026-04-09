@@ -163,6 +163,10 @@ This ledger is the current-state inventory of how this fork differs from officia
 - Notes:
   - This is the real seam for external provider runtimes. It is the correct place for Gemini/Grok/Leonai-style workers.
   - Provider identity should live in backend configuration or backend commands, not in fake role names.
+  - `0f918e28c5` advanced `patch/backend-contract` by centralizing spawn-time backend resolution, backend id normalization, and backend-specific model override selection in `multi_agents_common.rs`, removing duplicated policy from both `multi_agents/spawn.rs` and `multi_agents_v2/spawn.rs`.
+  - Targeted verification for that cut:
+    - `cargo test -p codex-core spawn_agent_uses_explorer_role_and_preserves_approval_policy --manifest-path codex-rs/Cargo.toml -- --nocapture`
+    - `cargo test -p codex-core spawn_agent_with_command_backend --manifest-path codex-rs/Cargo.toml -- --nocapture`
 
 ## Legacy native Grok compatibility shim (`fork/native-grok-legacy`)
 
