@@ -6,10 +6,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
 use clap::ArgGroup;
-use codex_core::config::Config;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_core::config::find_home;
-use codex_core::config::load_global_mcp_servers;
 use codex_core::config::types::McpServerConfig;
 use codex_core::config::types::McpServerTransportConfig;
 use codex_core::mcp::McpManager;
@@ -29,9 +26,12 @@ use codex_utils_cli::format_env_display::format_env_display;
 
 use crate::mcp_copy::MCP_ADD_OVERRIDE_USAGE;
 use crate::mcp_copy::config_namespace_for_home_flag;
+use crate::mcp_copy::load_cli_config;
+use crate::mcp_copy::load_global_mcp_store;
 use crate::mcp_copy::no_configured_servers_message;
 use crate::mcp_copy::remove_server_hint;
 use crate::mcp_copy::unknown_oauth_login_message;
+use crate::mcp_copy::validate_cli_overrides;
 
 /// Subcommands:
 /// - `list`   — list configured servers (with `--json`)
@@ -251,13 +251,7 @@ async fn run_add(
     config_namespace: codex_core::config::ConfigNamespace,
     add_args: AddArgs,
 ) -> Result<()> {
-    // Validate any provided overrides even though they are not currently applied.
-    let overrides = config_overrides
-        .parse_overrides()
-        .map_err(anyhow::Error::msg)?;
-    let config = Config::load_with_cli_overrides(overrides)
-        .await
-        .context("failed to load configuration")?;
+    let config = load_cli_config(config_overrides).await?;
 
     let AddArgs {
         name,
@@ -266,10 +260,7 @@ async fn run_add(
 
     validate_server_name(&name)?;
 
-    let codex_home = find_home(config_namespace).context("failed to resolve config home")?;
-    let mut servers = load_global_mcp_servers(&codex_home)
-        .await
-        .with_context(|| format!("failed to load MCP servers from {}", codex_home.display()))?;
+    let (codex_home, mut servers) = load_global_mcp_store(config_namespace).await?;
 
     let transport = match transport_args {
         AddMcpTransportArgs {
@@ -368,18 +359,13 @@ async fn run_remove(
     config_namespace: codex_core::config::ConfigNamespace,
     remove_args: RemoveArgs,
 ) -> Result<()> {
-    config_overrides
-        .parse_overrides()
-        .map_err(anyhow::Error::msg)?;
+    validate_cli_overrides(config_overrides)?;
 
     let RemoveArgs { name } = remove_args;
 
     validate_server_name(&name)?;
 
-    let codex_home = find_home(config_namespace).context("failed to resolve config home")?;
-    let mut servers = load_global_mcp_servers(&codex_home)
-        .await
-        .with_context(|| format!("failed to load MCP servers from {}", codex_home.display()))?;
+    let (codex_home, mut servers) = load_global_mcp_store(config_namespace).await?;
 
     let removed = servers.remove(&name).is_some();
 
@@ -401,12 +387,7 @@ async fn run_remove(
 }
 
 async fn run_login(config_overrides: &CliConfigOverrides, login_args: LoginArgs) -> Result<()> {
-    let overrides = config_overrides
-        .parse_overrides()
-        .map_err(anyhow::Error::msg)?;
-    let config = Config::load_with_cli_overrides(overrides)
-        .await
-        .context("failed to load configuration")?;
+    let config = load_cli_config(config_overrides).await?;
     let mcp_manager = McpManager::new(Arc::new(PluginsManager::new(config.codex_home.clone())));
     let mcp_servers = mcp_manager.effective_servers(&config, /*auth*/ None);
 
@@ -452,12 +433,7 @@ async fn run_login(config_overrides: &CliConfigOverrides, login_args: LoginArgs)
 }
 
 async fn run_logout(config_overrides: &CliConfigOverrides, logout_args: LogoutArgs) -> Result<()> {
-    let overrides = config_overrides
-        .parse_overrides()
-        .map_err(anyhow::Error::msg)?;
-    let config = Config::load_with_cli_overrides(overrides)
-        .await
-        .context("failed to load configuration")?;
+    let config = load_cli_config(config_overrides).await?;
     let mcp_manager = McpManager::new(Arc::new(PluginsManager::new(config.codex_home.clone())));
     let mcp_servers = mcp_manager.effective_servers(&config, /*auth*/ None);
 
@@ -482,12 +458,7 @@ async fn run_logout(config_overrides: &CliConfigOverrides, logout_args: LogoutAr
 }
 
 async fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) -> Result<()> {
-    let overrides = config_overrides
-        .parse_overrides()
-        .map_err(anyhow::Error::msg)?;
-    let config = Config::load_with_cli_overrides(overrides)
-        .await
-        .context("failed to load configuration")?;
+    let config = load_cli_config(config_overrides).await?;
     let mcp_manager = McpManager::new(Arc::new(PluginsManager::new(config.codex_home.clone())));
     let mcp_servers = mcp_manager.effective_servers(&config, /*auth*/ None);
 
@@ -731,12 +702,7 @@ async fn run_list(config_overrides: &CliConfigOverrides, list_args: ListArgs) ->
 }
 
 async fn run_get(config_overrides: &CliConfigOverrides, get_args: GetArgs) -> Result<()> {
-    let overrides = config_overrides
-        .parse_overrides()
-        .map_err(anyhow::Error::msg)?;
-    let config = Config::load_with_cli_overrides(overrides)
-        .await
-        .context("failed to load configuration")?;
+    let config = load_cli_config(config_overrides).await?;
     let mcp_manager = McpManager::new(Arc::new(PluginsManager::new(config.codex_home.clone())));
     let mcp_servers = mcp_manager.effective_servers(&config, /*auth*/ None);
 
