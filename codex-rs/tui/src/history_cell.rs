@@ -25,6 +25,8 @@ use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
 use crate::render::renderable::Renderable;
+use crate::runtime_ui_copy::branded_title_line;
+use crate::runtime_ui_copy::session_header_help_lines;
 use crate::style::proposed_plan_style;
 use crate::style::user_message_style;
 #[cfg(test)]
@@ -1240,40 +1242,9 @@ pub(crate) fn new_session_info(
     let mut parts: Vec<Box<dyn HistoryCell>> = vec![Box::new(header)];
 
     if is_first_event {
-        // Help lines below the header (new copy and list)
-        let help_lines: Vec<Line<'static>> = vec![
-            "  To get started, describe a task or try one of these commands:"
-                .dim()
-                .into(),
-            Line::from(""),
-            Line::from(vec![
-                "  ".into(),
-                "/init".into(),
-                " - create an AGENTS.md file with instructions for godex".dim(),
-            ]),
-            Line::from(vec![
-                "  ".into(),
-                "/status".into(),
-                " - show current session configuration".dim(),
-            ]),
-            Line::from(vec![
-                "  ".into(),
-                "/permissions".into(),
-                " - choose what godex is allowed to do".dim(),
-            ]),
-            Line::from(vec![
-                "  ".into(),
-                "/model".into(),
-                " - choose what model and reasoning effort to use".dim(),
-            ]),
-            Line::from(vec![
-                "  ".into(),
-                "/review".into(),
-                " - review any changes and find issues".dim(),
-            ]),
-        ];
-
-        parts.push(Box::new(PlainHistoryCell { lines: help_lines }));
+        parts.push(Box::new(PlainHistoryCell {
+            lines: session_header_help_lines(),
+        }));
     } else {
         if config.show_tooltips
             && let Some(tooltips) = tooltip_override
@@ -1408,12 +1379,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
         let make_row = |spans: Vec<Span<'static>>| Line::from(spans);
 
         // Title line rendered inside the box: ">_ godex (vX)"
-        let title_spans: Vec<Span<'static>> = vec![
-            Span::from(">_ ").dim(),
-            Span::from(codex_core::branding::APP_DISPLAY_NAME).bold(),
-            Span::from(" ").dim(),
-            Span::from(format!("(v{})", self.version)).dim(),
-        ];
+        let title_spans = branded_title_line("", &self.version).spans;
 
         const CHANGE_MODEL_HINT_COMMAND: &str = "/model";
         const CHANGE_MODEL_HINT_EXPLANATION: &str = " to change";

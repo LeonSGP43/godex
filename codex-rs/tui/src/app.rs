@@ -42,6 +42,8 @@ use crate::pager_overlay::Overlay;
 use crate::read_session_model;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
+use crate::runtime_ui_copy::browser_open_failed_message;
+use crate::runtime_ui_copy::browser_opened_message;
 use crate::resume_picker::SessionSelection;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
@@ -1427,12 +1429,12 @@ impl App {
     fn open_url_in_browser(&mut self, url: String) {
         if let Err(err) = webbrowser::open(&url) {
             self.chat_widget
-                .add_error_message(format!("Failed to open browser for {url}: {err}"));
+                .add_error_message(browser_open_failed_message(&url, &err.to_string()));
             return;
         }
 
         self.chat_widget
-            .add_info_message(format!("Opened {url} in your browser."), /*hint*/ None);
+            .add_info_message(browser_opened_message(&url), /*hint*/ None);
     }
 
     fn clear_ui_header_lines_with_version(
