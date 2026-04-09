@@ -27,6 +27,7 @@ use codex_network_proxy::build_config_state;
 use codex_network_proxy::normalize_host;
 use codex_network_proxy::validate_policy_against_constraints;
 use serde::Deserialize;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -44,18 +45,7 @@ pub async fn build_network_proxy_state_and_reloader() -> Result<(ConfigState, Mt
 
 async fn build_config_state_with_mtimes() -> Result<(ConfigState, Vec<LayerMtime>)> {
     let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
-    let cli_overrides = Vec::new();
-    let overrides = LoaderOverrides::default();
-    let config_layer_stack = load_config_layers_state(
-        &codex_home,
-        ConfigNamespace::CodexCompatible,
-        /*cwd*/ None,
-        &cli_overrides,
-        overrides,
-        CloudRequirementsLoader::default(),
-    )
-    .await
-    .context("failed to load Codex config")?;
+    let config_layer_stack = load_codex_compatible_config_layers(&codex_home).await?;
 
     let (exec_policy, warning) = match load_exec_policy(&config_layer_stack).await {
         Ok(policy) => (policy, None),
@@ -77,6 +67,20 @@ async fn build_config_state_with_mtimes() -> Result<(ConfigState, Vec<LayerMtime
     let layer_mtimes = collect_layer_mtimes(&config_layer_stack);
     let state = build_config_state(config, constraints)?;
     Ok((state, layer_mtimes))
+}
+
+async fn load_codex_compatible_config_layers(codex_home: &Path) -> Result<ConfigLayerStack> {
+    let cli_overrides = Vec::new();
+    load_config_layers_state(
+        codex_home,
+        ConfigNamespace::CodexCompatible,
+        /*cwd*/ None,
+        &cli_overrides,
+        LoaderOverrides::default(),
+        CloudRequirementsLoader::default(),
+    )
+    .await
+    .context("failed to load Codex config")
 }
 
 fn collect_layer_mtimes(stack: &ConfigLayerStack) -> Vec<LayerMtime> {
