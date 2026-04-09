@@ -1,4 +1,6 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -246,6 +248,58 @@ async fn perform_oauth_login_retry_without_scopes(
     }
 }
 
+fn transport_from_add_args(transport_args: AddMcpTransportArgs) -> Result<McpServerTransportConfig> {
+    match transport_args {
+        AddMcpTransportArgs {
+            stdio: Some(stdio), ..
+        } => {
+            let mut command_parts = stdio.command.into_iter();
+            let command_bin = command_parts
+                .next()
+                .ok_or_else(|| anyhow!("command is required"))?;
+            let command_args: Vec<String> = command_parts.collect();
+
+            let env_map = if stdio.env.is_empty() {
+                None
+            } else {
+                Some(stdio.env.into_iter().collect::<HashMap<_, _>>())
+            };
+            Ok(McpServerTransportConfig::Stdio {
+                command: command_bin,
+                args: command_args,
+                env: env_map,
+                env_vars: Vec::new(),
+                cwd: None,
+            })
+        }
+        AddMcpTransportArgs {
+            streamable_http:
+                Some(AddMcpStreamableHttpArgs {
+                    url,
+                    bearer_token_env_var,
+                }),
+            ..
+        } => Ok(McpServerTransportConfig::StreamableHttp {
+            url,
+            bearer_token_env_var,
+            http_headers: None,
+            env_http_headers: None,
+        }),
+        AddMcpTransportArgs { .. } => bail!("exactly one of --command or --url must be provided"),
+    }
+}
+
+async fn replace_global_mcp_servers(
+    codex_home: &Path,
+    servers: &BTreeMap<String, McpServerConfig>,
+) -> Result<()> {
+    ConfigEditsBuilder::new(codex_home)
+        .replace_mcp_servers(servers)
+        .apply()
+        .await
+        .with_context(|| format!("failed to write MCP servers to {}", codex_home.display()))
+}
+
 async fn run_add(
     config_overrides: &CliConfigOverrides,
     config_namespace: codex_core::config::ConfigNamespace,
@@ -261,45 +315,7 @@ async fn run_add(
     validate_server_name(&name)?;
 
     let (codex_home, mut servers) = load_global_mcp_store(config_namespace).await?;
-
-    let transport = match transport_args {
-        AddMcpTransportArgs {
-            stdio: Some(stdio), ..
-        } => {
-            let mut command_parts = stdio.command.into_iter();
-            let command_bin = command_parts
-                .next()
-                .ok_or_else(|| anyhow!("command is required"))?;
-            let command_args: Vec<String> = command_parts.collect();
-
-            let env_map = if stdio.env.is_empty() {
-                None
-            } else {
-                Some(stdio.env.into_iter().collect::<HashMap<_, _>>())
-            };
-            McpServerTransportConfig::Stdio {
-                command: command_bin,
-                args: command_args,
-                env: env_map,
-                env_vars: Vec::new(),
-                cwd: None,
-            }
-        }
-        AddMcpTransportArgs {
-            streamable_http:
-                Some(AddMcpStreamableHttpArgs {
-                    url,
-                    bearer_token_env_var,
-                }),
-            ..
-        } => McpServerTransportConfig::StreamableHttp {
-            url,
-            bearer_token_env_var,
-            http_headers: None,
-            env_http_headers: None,
-        },
-        AddMcpTransportArgs { .. } => bail!("exactly one of --command or --url must be provided"),
-    };
+    let transport = transport_from_add_args(transport_args)?;
 
     let new_entry = McpServerConfig {
         transport: transport.clone(),
@@ -316,12 +332,7 @@ async fn run_add(
     };
 
     servers.insert(name.clone(), new_entry);
-
-    ConfigEditsBuilder::new(&codex_home)
-        .replace_mcp_servers(&servers)
-        .apply()
-        .await
-        .with_context(|| format!("failed to write MCP servers to {}", codex_home.display()))?;
+    replace_global_mcp_servers(&codex_home, &servers).await?;
 
     println!("Added global MCP server '{name}'.");
 
@@ -370,11 +381,7 @@ async fn run_remove(
     let removed = servers.remove(&name).is_some();
 
     if removed {
-        ConfigEditsBuilder::new(&codex_home)
-            .replace_mcp_servers(&servers)
-            .apply()
-            .await
-            .with_context(|| format!("failed to write MCP servers to {}", codex_home.display()))?;
+        replace_global_mcp_servers(&codex_home, &servers).await?;
     }
 
     if removed {
