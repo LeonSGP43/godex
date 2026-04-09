@@ -23,6 +23,9 @@ use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use crate::mcp::ToolPluginProvenance;
 use crate::mcp::auth::McpAuthStatusEntry;
 use crate::mcp::sanitize_responses_api_tool_name;
+use crate::mcp_connection_copy::github_mcp_personal_access_token_message;
+use crate::mcp_connection_copy::mcp_login_required_message;
+use crate::mcp_connection_copy::mcp_startup_timeout_message;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
@@ -1640,14 +1643,9 @@ fn mcp_init_error_display(
         && bearer_token_env_var.is_none()
         && http_headers.as_ref().map(HashMap::is_empty).unwrap_or(true)
     {
-        format!(
-            "GitHub MCP does not support OAuth. Log in by adding a personal access token (https://github.com/settings/personal-access-tokens) to your environment and config.toml:\n[mcp_servers.{server_name}]\nbearer_token_env_var = CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
-        )
+        github_mcp_personal_access_token_message(server_name)
     } else if is_mcp_client_auth_required_error(err) {
-        format!(
-            "The {server_name} MCP server is not logged in. Run `{exe} mcp login {server_name}`.",
-            exe = crate::branding::APP_EXECUTABLE_NAME,
-        )
+        mcp_login_required_message(server_name)
     } else if is_mcp_client_startup_timeout_error(err) {
         let startup_timeout_secs = match entry {
             Some(entry) => match entry.config.startup_timeout_sec {
@@ -1657,9 +1655,7 @@ fn mcp_init_error_display(
             None => DEFAULT_STARTUP_TIMEOUT,
         }
         .as_secs();
-        format!(
-            "MCP client for `{server_name}` timed out after {startup_timeout_secs} seconds. Add or adjust `startup_timeout_sec` in your config.toml:\n[mcp_servers.{server_name}]\nstartup_timeout_sec = XX"
-        )
+        mcp_startup_timeout_message(server_name, startup_timeout_secs)
     } else {
         format!("MCP client for `{server_name}` failed to start: {err:#}")
     }

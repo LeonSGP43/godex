@@ -48,6 +48,7 @@ mod hook_runtime;
 pub mod instructions;
 pub mod landlock;
 pub mod mcp;
+mod mcp_connection_copy;
 mod mcp_connection_manager;
 mod mcp_tool_approval_templates;
 pub mod models_manager;
