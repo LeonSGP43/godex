@@ -829,26 +829,16 @@ impl McpConnectionManager {
             .context("failed to get client")?;
 
         let list_start = Instant::now();
-        let fetch_start = Instant::now();
-        let tools = list_tools_for_client_uncached(
+        let tools = fetch_and_cache_tools_for_server(
             CODEX_APPS_MCP_SERVER_NAME,
             &managed_client.client,
             managed_client.tool_timeout,
+            managed_client.codex_apps_tools_cache_context.as_ref(),
         )
         .await
         .with_context(|| {
             format!("failed to refresh tools for MCP server '{CODEX_APPS_MCP_SERVER_NAME}'")
         })?;
-        emit_duration(
-            MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC,
-            fetch_start.elapsed(),
-            &[],
-        );
-
-        write_cached_codex_apps_tools_if_needed(
-            managed_client.codex_apps_tools_cache_context.as_ref(),
-            &tools,
-        );
         emit_duration(
             MCP_TOOLS_LIST_DURATION_METRIC,
             list_start.elapsed(),
@@ -1363,19 +1353,14 @@ async fn start_server_task(
         .map_err(StartupOutcomeError::from)?;
 
     let list_start = Instant::now();
-    let fetch_start = Instant::now();
-    let tools = list_tools_for_client_uncached(&server_name, &client, startup_timeout)
+    let tools = fetch_and_cache_tools_for_server(
+        &server_name,
+        &client,
+        startup_timeout,
+        codex_apps_tools_cache_context.as_ref(),
+    )
         .await
         .map_err(StartupOutcomeError::from)?;
-    emit_duration(
-        MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC,
-        fetch_start.elapsed(),
-        &[],
-    );
-    write_cached_codex_apps_tools_if_needed(
-        codex_apps_tools_cache_context.as_ref(),
-        &tools,
-    );
     if server_name == CODEX_APPS_MCP_SERVER_NAME {
         emit_duration(
             MCP_TOOLS_LIST_DURATION_METRIC,
@@ -1459,6 +1444,23 @@ async fn make_rmcp_client(
             .map_err(StartupOutcomeError::from)
         }
     }
+}
+
+async fn fetch_and_cache_tools_for_server(
+    server_name: &str,
+    client: &Arc<RmcpClient>,
+    timeout: Option<Duration>,
+    cache_context: Option<&CodexAppsToolsCacheContext>,
+) -> Result<Vec<ToolInfo>> {
+    let fetch_start = Instant::now();
+    let tools = list_tools_for_client_uncached(server_name, client, timeout).await?;
+    emit_duration(
+        MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC,
+        fetch_start.elapsed(),
+        &[],
+    );
+    write_cached_codex_apps_tools_if_needed(cache_context, &tools);
+    Ok(tools)
 }
 
 fn write_cached_codex_apps_tools_if_needed(
