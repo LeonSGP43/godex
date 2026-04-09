@@ -312,6 +312,8 @@ default during sync and conflict resolution.
   - MCP startup/login guidance copy now starts in
     `codex-rs/core/src/mcp_connection_copy.rs` instead of staying inline in
     `codex-rs/core/src/mcp_connection_manager.rs`
+  - Codex Apps MCP cache-context selection now also starts in a dedicated
+    helper inside `codex-rs/core/src/mcp_connection_manager.rs`
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
