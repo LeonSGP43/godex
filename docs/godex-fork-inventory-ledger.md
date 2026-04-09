@@ -285,6 +285,27 @@ This ledger is the current-state inventory of how this fork differs from officia
 - Notes:
   - The initial `feat(godex): publish fork cli and release workflow` commit mixed too many concerns into one patch. This ledger treats that mixed residue as first-class debt rather than as a good pattern to preserve.
 
+### Current MVP residue checklist
+
+- `codex-rs/cli/src/login.rs` and `codex-rs/login/src/**`
+  - thin adapters already exist for CLI/onboarding copy, but auth and login behavior still owns fork-specific flow in hot files
+  - next MVP target: keep shrinking copy/prompt/policy glue out of command/runtime entrypoints before any deeper auth redesign
+- `codex-rs/cli/src/mcp_cmd.rs`
+  - config-home resolution and user-facing MCP copy are now adapterized through `mcp_copy.rs`
+  - remaining MVP residue: transport assembly, config edit/write flow, and command-specific orchestration still live inline
+- `codex-rs/core/src/network_proxy_loader.rs`
+  - loader bootstrap and config-layer source path resolution are now adapterized helpers
+  - remaining MVP residue: trusted-layer policy assembly and final state/constraint composition are still in the hot file
+- `codex-rs/core/src/mcp_connection_manager.rs`
+  - startup/login copy and Codex Apps cache-context selection are now adapterized
+  - remaining MVP residue: Codex Apps cache read/write orchestration, startup event flow, and other fork-specific manager glue still live inline
+- `codex-rs/tui/src/app.rs`
+  - not yet behind a dedicated thin adapter
+  - still part of `patch/bootstrap-runtime-ui` MVP residue
+- `codex-rs/tui/src/history_cell.rs` and `codex-rs/tui/src/status/**`
+  - not yet behind dedicated thin adapters
+  - still part of `patch/bootstrap-runtime-ui` MVP residue, together with related snapshots
+
 ## Patch-Layer Decomposition Ledger
 
 This section is the higher-resolution ledger for future fork-patch work. It maps the current diff to narrower patch groups that can each be carried, validated, migrated, or deleted independently during upstream sync.
