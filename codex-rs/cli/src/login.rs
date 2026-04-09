@@ -7,16 +7,15 @@
 //! into a one-shot CLI command while still producing a durable `codex-login.log` artifact that
 //! support can request from users.
 
+use codex_core::CodexAuth;
+use codex_core::auth::AuthCredentialsStoreMode;
+use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::logout;
-use codex_core::auth::AuthCredentialsStoreMode;
-use codex_core::auth::AuthMode;
-use codex_core::auth::CLIENT_ID;
 use codex_core::config::Config;
-use codex_core::CodexAuth;
+use codex_login::ServerOptions;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
-use codex_login::ServerOptions;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
 use std::fs::OpenOptions;
@@ -25,16 +24,19 @@ use std::io::Read;
 use std::path::PathBuf;
 use tracing_appender::non_blocking;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::login_copy::api_key_stdin_guidance;
-use crate::login_copy::login_server_start_message;
 use crate::login_copy::API_KEY_LOGIN_DISABLED_MESSAGE;
 use crate::login_copy::CHATGPT_LOGIN_DISABLED_MESSAGE;
 use crate::login_copy::LOGIN_SUCCESS_MESSAGE;
+use crate::login_copy::api_key_stdin_guidance;
+use crate::login_copy::login_server_start_message;
+use crate::login_state::exit_with_login_command_result;
+use crate::login_state::login_status_exit;
+use crate::login_state::logout_exit;
 
 /// Installs a small file-backed tracing layer for direct `codex login` flows.
 ///
@@ -181,10 +183,10 @@ pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) ->
     let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
     exit_login_result(
         login_with_chatgpt(
-        config.codex_home,
-        forced_chatgpt_workspace_id,
-        config.cli_auth_credentials_store_mode,
-    )
+            config.codex_home,
+            forced_chatgpt_workspace_id,
+            config.cli_auth_credentials_store_mode,
+        )
         .await,
         "Error logging in",
     )
@@ -279,10 +281,7 @@ pub async fn run_login_with_device_code_fallback_to_browser(
                 eprintln!("Device code login is not enabled; falling back to browser login.");
                 exit_login_result(run_login_server_flow(opts).await, "Error logging in")
             } else {
-                exit_login_result(
-                    Err(e),
-                    "Error logging in with device code",
-                )
+                exit_login_result(Err(e), "Error logging in with device code")
             }
         }
     }
@@ -290,52 +289,18 @@ pub async fn run_login_with_device_code_fallback_to_browser(
 
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
-
-    match CodexAuth::from_auth_storage(&config.codex_home, config.cli_auth_credentials_store_mode) {
-        Ok(Some(auth)) => match auth.auth_mode() {
-            AuthMode::ApiKey => match auth.get_token() {
-                Ok(api_key) => {
-                    eprintln!("Logged in using an API key - {}", safe_format_key(&api_key));
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    eprintln!("Unexpected error retrieving API key: {e}");
-                    std::process::exit(1);
-                }
-            },
-            AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => {
-                eprintln!("Logged in using ChatGPT");
-                std::process::exit(0);
-            }
-        },
-        Ok(None) => {
-            eprintln!("Not logged in");
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("Error checking login status: {e}");
-            std::process::exit(1);
-        }
-    }
+    exit_with_login_command_result(login_status_exit(CodexAuth::from_auth_storage(
+        &config.codex_home,
+        config.cli_auth_credentials_store_mode,
+    )))
 }
 
 pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
-
-    match logout(&config.codex_home, config.cli_auth_credentials_store_mode) {
-        Ok(true) => {
-            eprintln!("Successfully logged out");
-            std::process::exit(0);
-        }
-        Ok(false) => {
-            eprintln!("Not logged in");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging out: {e}");
-            std::process::exit(1);
-        }
-    }
+    exit_with_login_command_result(logout_exit(logout(
+        &config.codex_home,
+        config.cli_auth_credentials_store_mode,
+    )))
 }
 
 async fn load_config_or_exit(cli_config_overrides: CliConfigOverrides) -> Config {
@@ -353,31 +318,5 @@ async fn load_config_or_exit(cli_config_overrides: CliConfigOverrides) -> Config
             eprintln!("Error loading configuration: {e}");
             std::process::exit(1);
         }
-    }
-}
-
-fn safe_format_key(key: &str) -> String {
-    if key.len() <= 13 {
-        return "***".to_string();
-    }
-    let prefix = &key[..8];
-    let suffix = &key[key.len() - 5..];
-    format!("{prefix}***{suffix}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::safe_format_key;
-
-    #[test]
-    fn formats_long_key() {
-        let key = "sk-proj-1234567890ABCDE";
-        assert_eq!(safe_format_key(key), "sk-proj-***ABCDE");
-    }
-
-    #[test]
-    fn short_key_returns_stars() {
-        let key = "sk-proj-12345";
-        assert_eq!(safe_format_key(key), "***");
     }
 }
