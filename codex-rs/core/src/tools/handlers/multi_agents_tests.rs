@@ -5,6 +5,9 @@ use crate::ThreadManager;
 use crate::built_in_model_providers;
 use crate::codex::make_session_and_context;
 use crate::config::DEFAULT_AGENT_MAX_DEPTH;
+use crate::config::SpawnedAgentBackendConfig;
+use crate::config::SpawnedAgentBackendProtocol;
+use crate::config::SpawnedAgentBackendType;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::function_tool::FunctionCallError;
 use crate::protocol::AgentStatus;
@@ -44,6 +47,7 @@ use core_test_support::TempDirExt;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -84,6 +88,23 @@ fn thread_manager() -> ThreadManager {
         CodexAuth::from_api_key("dummy"),
         built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone(),
     )
+}
+
+fn command_backend_config(command: Vec<String>) -> SpawnedAgentBackendConfig {
+    SpawnedAgentBackendConfig {
+        backend_type: SpawnedAgentBackendType::Command,
+        protocol: SpawnedAgentBackendProtocol::JsonStdioV1,
+        command,
+        working_dir: None,
+        env: BTreeMap::new(),
+        healthcheck: None,
+        healthcheck_timeout_seconds: None,
+        turn_timeout_seconds: None,
+        max_retries: 0,
+        default_model: Some("gemini-2.5-pro".to_string()),
+        supports_resume: false,
+        supports_interrupt: true,
+    }
 }
 
 fn history_contains_inter_agent_communication(
@@ -320,6 +341,105 @@ async fn spawn_agent_returns_agent_id_without_task_name() {
     assert!(result.get("task_name").is_none());
     assert!(result.get("nickname").is_some());
     assert_eq!(success, Some(true));
+}
+
+#[tokio::test]
+async fn spawn_agent_with_command_backend_uses_backend_default_model_and_backend_id() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    session.services.agent_control = manager.agent_control();
+
+    let mut config = (*turn.config).clone();
+    config.agent_backends = BTreeMap::from([(
+        "gemini_worker".to_string(),
+        command_backend_config(vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            r#"cat >/dev/null; printf '{"message":"ok"}'"#.to_string(),
+        ]),
+    )]);
+    turn.config = Arc::new(config);
+
+    let output = SpawnAgentHandler
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "backend": "gemini_worker"
+            })),
+        ))
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = parse_agent_id(&result.agent_id);
+
+    let snapshot = manager
+        .get_thread(agent_id)
+        .await
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
+        .await;
+    assert_eq!(snapshot.agent_backend_id, "gemini_worker");
+    assert_eq!(snapshot.model, "gemini-2.5-pro");
+}
+
+#[tokio::test]
+async fn spawn_agent_with_command_backend_prefers_requested_model() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    session.services.agent_control = manager.agent_control();
+
+    let mut config = (*turn.config).clone();
+    config.agent_backends = BTreeMap::from([(
+        "gemini_worker".to_string(),
+        command_backend_config(vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            r#"cat >/dev/null; printf '{"message":"ok"}'"#.to_string(),
+        ]),
+    )]);
+    turn.config = Arc::new(config);
+
+    let output = SpawnAgentHandler
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "backend": "gemini_worker",
+                "model": "gemini-2.5-flash"
+            })),
+        ))
+        .await
+        .expect("spawn_agent should succeed");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let agent_id = parse_agent_id(&result.agent_id);
+
+    let snapshot = manager
+        .get_thread(agent_id)
+        .await
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
+        .await;
+    assert_eq!(snapshot.agent_backend_id, "gemini_worker");
+    assert_eq!(snapshot.model, "gemini-2.5-flash");
 }
 
 #[tokio::test]

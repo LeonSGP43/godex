@@ -1,7 +1,4 @@
 use super::*;
-use crate::agent::backend::SpawnedAgentBackendKind;
-use crate::agent::backend::normalize_backend_id;
-use crate::agent::backend::resolve_spawned_agent_backend;
 use crate::agent::control::SpawnAgentOptions;
 use crate::agent::control::render_input_preview;
 use crate::agent::next_thread_spawn_depth;
@@ -35,9 +32,6 @@ impl ToolHandler for Handler {
         } = invocation;
         let arguments = function_arguments(payload)?;
         let args: SpawnAgentArgs = parse_arguments(&arguments)?;
-        let resolved_backend = resolve_spawned_agent_backend(&turn.config, args.backend.as_deref())
-            .map_err(FunctionCallError::RespondToModel)?;
-        let backend_kind = resolved_backend.kind;
         let role_name = args
             .agent_type
             .as_deref()
@@ -46,6 +40,14 @@ impl ToolHandler for Handler {
 
         let initial_operation = parse_collab_input(args.message, args.items)?;
         let prompt = render_input_preview(&initial_operation);
+        let (mut config, resolved_backend) = build_spawn_agent_config_for_backend(
+            &session,
+            turn.as_ref(),
+            args.backend.as_deref(),
+            args.model.as_deref(),
+            args.reasoning_effort,
+        )
+        .await?;
 
         let session_source = turn.session_source.clone();
         let child_depth = next_thread_spawn_depth(&session_source);
@@ -68,29 +70,6 @@ impl ToolHandler for Handler {
                 .into(),
             )
             .await;
-        let mut config =
-            build_agent_spawn_config(&session.get_base_instructions().await, turn.as_ref())?;
-        config.agent_backend_id = normalize_backend_id(args.backend.as_deref());
-        match backend_kind {
-            SpawnedAgentBackendKind::Codex => {
-                apply_requested_spawn_agent_model_overrides(
-                    &session,
-                    turn.as_ref(),
-                    &mut config,
-                    args.model.as_deref(),
-                    args.reasoning_effort,
-                )
-                .await?;
-            }
-            SpawnedAgentBackendKind::ClaudeCode | SpawnedAgentBackendKind::Command => {
-                apply_requested_external_backend_overrides(
-                    &mut config,
-                    args.model.as_deref(),
-                    args.reasoning_effort,
-                    &resolved_backend,
-                )?;
-            }
-        }
         apply_role_to_config(&mut config, role_name)
             .await
             .map_err(FunctionCallError::RespondToModel)?;

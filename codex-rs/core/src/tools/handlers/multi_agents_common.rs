@@ -221,6 +221,45 @@ pub(crate) fn build_agent_resume_config(
     Ok(config)
 }
 
+pub(crate) async fn build_spawn_agent_config_for_backend(
+    session: &Session,
+    turn: &TurnContext,
+    backend_id: Option<&str>,
+    requested_model: Option<&str>,
+    requested_reasoning_effort: Option<ReasoningEffort>,
+) -> Result<(Config, ResolvedSpawnedAgentBackend), FunctionCallError> {
+    let resolved_backend =
+        crate::agent::backend::resolve_spawned_agent_backend(&turn.config, backend_id)
+            .map_err(FunctionCallError::RespondToModel)?;
+
+    let mut config = build_agent_spawn_config(&session.get_base_instructions().await, turn)?;
+    config.agent_backend_id = crate::agent::backend::normalize_backend_id(backend_id);
+
+    match resolved_backend.kind {
+        crate::agent::backend::SpawnedAgentBackendKind::Codex => {
+            apply_requested_spawn_agent_model_overrides(
+                session,
+                turn,
+                &mut config,
+                requested_model,
+                requested_reasoning_effort,
+            )
+            .await?;
+        }
+        crate::agent::backend::SpawnedAgentBackendKind::ClaudeCode
+        | crate::agent::backend::SpawnedAgentBackendKind::Command => {
+            apply_requested_external_backend_overrides(
+                &mut config,
+                requested_model,
+                requested_reasoning_effort,
+                &resolved_backend,
+            )?;
+        }
+    }
+
+    Ok((config, resolved_backend))
+}
+
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallError> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
