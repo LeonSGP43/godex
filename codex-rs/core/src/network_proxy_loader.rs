@@ -90,22 +90,23 @@ fn collect_layer_mtimes(stack: &ConfigLayerStack) -> Vec<LayerMtime> {
             /*include_disabled*/ false,
         )
         .iter()
-        .filter_map(|layer| {
-            let path = match &layer.name {
-                ConfigLayerSource::System { file } => Some(file.as_path().to_path_buf()),
-                ConfigLayerSource::User { file } => Some(file.as_path().to_path_buf()),
-                ConfigLayerSource::Project { dot_codex_folder } => dot_codex_folder
-                    .join(CONFIG_TOML_FILE)
-                    .ok()
-                    .map(|p| p.as_path().to_path_buf()),
-                ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => {
-                    Some(file.as_path().to_path_buf())
-                }
-                _ => None,
-            };
-            path.map(LayerMtime::new)
-        })
+        .filter_map(|layer| config_layer_source_path(&layer.name).map(LayerMtime::new))
         .collect()
+}
+
+fn config_layer_source_path(source: &ConfigLayerSource) -> Option<PathBuf> {
+    match source {
+        ConfigLayerSource::System { file } => Some(file.as_path().to_path_buf()),
+        ConfigLayerSource::User { file } => Some(file.as_path().to_path_buf()),
+        ConfigLayerSource::Project { dot_codex_folder } => dot_codex_folder
+            .join(CONFIG_TOML_FILE)
+            .ok()
+            .map(|p| p.as_path().to_path_buf()),
+        ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => {
+            Some(file.as_path().to_path_buf())
+        }
+        _ => None,
+    }
 }
 
 fn enforce_trusted_constraints(
