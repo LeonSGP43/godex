@@ -108,6 +108,56 @@ fn print_login_server_start(actual_port: u16, auth_url: &str) {
     eprintln!("{}", login_server_start_message(actual_port, auth_url));
 }
 
+fn ensure_chatgpt_login_enabled(forced_login_method: Option<&ForcedLoginMethod>) {
+    if matches!(forced_login_method, Some(ForcedLoginMethod::Api)) {
+        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
+        std::process::exit(1);
+    }
+}
+
+fn ensure_api_key_login_enabled(forced_login_method: Option<&ForcedLoginMethod>) {
+    if matches!(forced_login_method, Some(ForcedLoginMethod::Chatgpt)) {
+        eprintln!("{API_KEY_LOGIN_DISABLED_MESSAGE}");
+        std::process::exit(1);
+    }
+}
+
+fn build_server_options(
+    config: &Config,
+    issuer_base_url: Option<String>,
+    client_id: Option<String>,
+) -> ServerOptions {
+    let mut opts = ServerOptions::new(
+        config.codex_home.clone(),
+        client_id.unwrap_or(CLIENT_ID.to_string()),
+        config.forced_chatgpt_workspace_id.clone(),
+        config.cli_auth_credentials_store_mode,
+    );
+    if let Some(iss) = issuer_base_url {
+        opts.issuer = iss;
+    }
+    opts
+}
+
+async fn run_login_server_flow(opts: ServerOptions) -> std::io::Result<()> {
+    let server = run_login_server(opts)?;
+    print_login_server_start(server.actual_port, &server.auth_url);
+    server.block_until_done().await
+}
+
+fn exit_login_result(result: std::io::Result<()>, error_prefix: &str) -> ! {
+    match result {
+        Ok(()) => {
+            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
+            std::process::exit(0);
+        }
+        Err(err) => {
+            eprintln!("{error_prefix}: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
 pub async fn login_with_chatgpt(
     codex_home: PathBuf,
     forced_chatgpt_workspace_id: Option<String>,
@@ -119,41 +169,25 @@ pub async fn login_with_chatgpt(
         forced_chatgpt_workspace_id,
         cli_auth_credentials_store_mode,
     );
-    let server = run_login_server(opts)?;
-
-    print_login_server_start(server.actual_port, &server.auth_url);
-
-    server.block_until_done().await
+    run_login_server_flow(opts).await
 }
 
 pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting browser login flow");
-
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
+    ensure_chatgpt_login_enabled(config.forced_login_method.as_ref());
 
     let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
-
-    match login_with_chatgpt(
+    exit_login_result(
+        login_with_chatgpt(
         config.codex_home,
         forced_chatgpt_workspace_id,
         config.cli_auth_credentials_store_mode,
     )
-    .await
-    {
-        Ok(_) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in: {e}");
-            std::process::exit(1);
-        }
-    }
+        .await,
+        "Error logging in",
+    )
 }
 
 pub async fn run_login_with_api_key(
@@ -163,12 +197,7 @@ pub async fn run_login_with_api_key(
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting api key login flow");
-
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Chatgpt)) {
-        eprintln!("{API_KEY_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-
+    ensure_api_key_login_enabled(config.forced_login_method.as_ref());
     match login_with_api_key(
         &config.codex_home,
         &api_key,
@@ -219,30 +248,12 @@ pub async fn run_login_with_device_code(
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting device code login flow");
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-    let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
-    let mut opts = ServerOptions::new(
-        config.codex_home,
-        client_id.unwrap_or(CLIENT_ID.to_string()),
-        forced_chatgpt_workspace_id,
-        config.cli_auth_credentials_store_mode,
-    );
-    if let Some(iss) = issuer_base_url {
-        opts.issuer = iss;
-    }
-    match run_device_code_login(opts).await {
-        Ok(()) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in with device code: {e}");
-            std::process::exit(1);
-        }
-    }
+    ensure_chatgpt_login_enabled(config.forced_login_method.as_ref());
+    let opts = build_server_options(&config, issuer_base_url, client_id);
+    exit_login_result(
+        run_device_code_login(opts).await,
+        "Error logging in with device code",
+    )
 }
 
 /// Prefers device-code login (with `open_browser = false`) when headless environment is detected, but keeps
@@ -257,53 +268,21 @@ pub async fn run_login_with_device_code_fallback_to_browser(
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting login flow with device code fallback");
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-
-    let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
-    let mut opts = ServerOptions::new(
-        config.codex_home,
-        client_id.unwrap_or(CLIENT_ID.to_string()),
-        forced_chatgpt_workspace_id,
-        config.cli_auth_credentials_store_mode,
-    );
-    if let Some(iss) = issuer_base_url {
-        opts.issuer = iss;
-    }
+    ensure_chatgpt_login_enabled(config.forced_login_method.as_ref());
+    let mut opts = build_server_options(&config, issuer_base_url, client_id);
     opts.open_browser = false;
 
     match run_device_code_login(opts.clone()).await {
-        Ok(()) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
+        Ok(()) => exit_login_result(Ok(()), "Error logging in with device code"),
         Err(e) => {
             if e.kind() == std::io::ErrorKind::NotFound {
                 eprintln!("Device code login is not enabled; falling back to browser login.");
-                match run_login_server(opts) {
-                    Ok(server) => {
-                        print_login_server_start(server.actual_port, &server.auth_url);
-                        match server.block_until_done().await {
-                            Ok(()) => {
-                                eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-                                std::process::exit(0);
-                            }
-                            Err(e) => {
-                                eprintln!("Error logging in: {e}");
-                                std::process::exit(1);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error logging in: {e}");
-                        std::process::exit(1);
-                    }
-                }
+                exit_login_result(run_login_server_flow(opts).await, "Error logging in")
             } else {
-                eprintln!("Error logging in with device code: {e}");
-                std::process::exit(1);
+                exit_login_result(
+                    Err(e),
+                    "Error logging in with device code",
+                )
             }
         }
     }
