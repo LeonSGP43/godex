@@ -297,6 +297,8 @@ default during sync and conflict resolution.
   - targeted login, proxy, MCP, and TUI smoke after each upstream merge
 - Current shrink status:
   - CLI login copy now has a thin adapter at `codex-rs/cli/src/login_copy.rs`
+  - `codex-rs/cli/src/main.rs` now consumes login help/guidance from that
+    adapter instead of keeping the fork copy inline
   - onboarding copy now has a thin adapter at
     `codex-rs/tui/src/onboarding/bootstrap_copy.rs`
   - remaining residue should continue shrinking out of inline auth/login hot
