@@ -88,6 +88,7 @@ use super::bootstrap_copy::paid_plan_login_prompt;
 use super::onboarding_screen::StepState;
 
 mod headless_chatgpt_login;
+mod local_chatgpt_auth;
 
 #[derive(Clone)]
 pub(crate) enum SignInState {

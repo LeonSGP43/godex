@@ -19,8 +19,6 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::sync::Notify;
 
-use crate::local_chatgpt_auth::LocalChatgptAuth;
-use crate::local_chatgpt_auth::load_local_chatgpt_auth;
 use crate::shimmer::shimmer_spans;
 use crate::tui::FrameRequester;
 
@@ -28,6 +26,8 @@ use super::AuthModeWidget;
 use super::ContinueInBrowserState;
 use super::ContinueWithDeviceCodeState;
 use super::SignInState;
+use super::local_chatgpt_auth::LocalChatgptAuth;
+use super::local_chatgpt_auth::load_local_chatgpt_auth;
 use super::mark_url_hyperlink;
 use super::maybe_open_auth_url_in_browser;
 use super::onboarding_request_id;
