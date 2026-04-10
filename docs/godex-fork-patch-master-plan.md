@@ -360,6 +360,22 @@ Current MVP status (`2026-04-10`):
 - remaining work in these lanes is sync-time maintenance, not prerequisite MVP
   architecture work
 
+### Frozen lane reopen contract
+
+From this point forward, the default action is to keep these lanes closed:
+
+- `patch/backend-contract` and `patch/config-home-namespace`
+  - structurally closed unless upstream changes reopen the seam
+- `fork/memory-system`
+  - frozen at the MVP cutline unless validation fails, a real sync conflict
+    appears, a user-visible bug appears, or an explicit refinement phase is
+    approved
+- `fork/bootstrap-residue`
+  - maintenance-only at the current MVP cutline
+  - no new feature depth is allowed here
+  - structural cleanup reopens only for sync conflicts, regressions, or an
+    explicitly approved cleanup phase
+
 ### Phase 6: Upstream replacement loop
 
 Goal:

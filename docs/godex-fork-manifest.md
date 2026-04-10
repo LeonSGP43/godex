@@ -269,6 +269,10 @@ default during sync and conflict resolution.
   - runtime config disable for scope selection and summary sizing where
     applicable; patch subgroups may also be deleted individually when upstream
     replacements arrive
+- Operating mode:
+  - treat the current lane as frozen at the MVP cutline by default
+  - reopen only for failing validation, real sync conflicts, user-visible
+    memory bugs, or an explicitly approved refinement phase
 - Upstream replacement trigger:
   - upstream lands memory partitioning, recall, or runtime metadata features
     that match or beat the fork implementation
@@ -353,6 +357,13 @@ default during sync and conflict resolution.
 - Disable strategy:
   - isolate behind thinner adapters or delete entirely; no new fork product
     depth should remain here
+- Operating mode:
+  - keep this group in maintenance-only mode at the current MVP cutline
+  - reopen structural cleanup only when a sync conflict, regression, or
+    explicitly approved cleanup phase exposes new residue worth shrinking
+- Admission rule:
+  - new behavioral work in these files must justify why it cannot live in a
+    named durable patch group instead
 - Upstream replacement trigger:
   - upstream catches up on the behavior, or the fork extracts the remaining
     logic into a named durable patch group

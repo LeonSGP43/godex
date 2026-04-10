@@ -38,8 +38,8 @@ This ledger is the current-state inventory of how this fork differs from officia
 | `fork/config-namespace-home` | durable fork patch with hot-file overlap | 11 | Keep the policy, but continue extracting fork-specific behavior out of `cli/src/main.rs` and `core/src/config/mod.rs` into dedicated adapters. |
 | `fork/provider-backends` | durable fork patch | 21 | Keep. This is the right long-term direction for provider integration work. |
 | `fork/native-grok-legacy` | legacy compatibility patch | 0 | Freeze and migrate out. Do not expand this surface further. |
-| `fork/memory-system` | durable fork patch with the highest merge cost | 30 | Keep the behavior, but refactor it into a fork patch-layer before the next large upstream sync. |
-| `fork/bootstrap-residue` | mixed bootstrap residue | 43 | Shrink aggressively. This is the main non-systematic residue that still inflates merge cost. |
+| `fork/memory-system` | durable fork patch with the highest merge cost | 30 | Keep the behavior and the current validated seams; treat the lane as frozen at the MVP cutline unless a real reopen trigger appears. |
+| `fork/bootstrap-residue` | mixed bootstrap residue | 43 | Keep frozen at the current MVP cutline in maintenance-only mode; reopen only for sync conflicts, regressions, or an explicit cleanup phase. |
 
 ## Identity, branding, and fork governance (`fork/identity-governance`)
 
@@ -231,10 +231,11 @@ This ledger is the current-state inventory of how this fork differs from officia
   - `cargo test -p codex-core prompts::tests::memory_quick_pass_instructions_remain_stable`
   - `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`
 - Upstream replacement possibility: Medium to high. Upstream may eventually add scoped memories or better recall; the semantic/QMD engine is the most likely patch to become replaceable.
-- Current recommendation: Keep the behavior, but refactor it into a fork patch-layer before the next large upstream sync.
+- Current recommendation: Keep the behavior and the current validated patch seams. The lane is frozen at the MVP cutline by default; reopen only for failing validation, real sync conflicts, user-visible memory bugs, or an explicitly approved refinement phase.
 - Notes:
   - This is the highest merge-cost patch group because it crosses config, CLI, rollout metadata, state schema/runtime, prompt assembly, and retrieval logic.
   - The follow-up design for shrinking this intrusion is documented in `docs/godex-memory-patch-layer-plan.md`.
+  - The current freeze/reopen contract is documented in `docs/godex-memory-mvp-closure.md`; do not restart cleanup-only micro-refactors by default.
   - Progress since the previous ledger snapshot:
     - `ce26159c05` and `9695d4fc05` advanced `patch/memory-facade` and `patch/memory-artifact-contract` by moving scope/artifact-root helpers and artifact path helpers behind `fork_patch::memory`.
     - `ce89803488` advanced `patch/memory-artifact-contract` by moving empty-consolidation artifact cleanup target ownership out of `core/src/memories/storage.rs` and into `core/src/fork_patch/memory.rs`.
@@ -286,9 +287,10 @@ This ledger is the current-state inventory of how this fork differs from officia
   - `manual diff review during sync branches`
   - `targeted TUI/login smoke after each upstream merge`
 - Upstream replacement possibility: High. Most of this should either migrate into thinner adapters or disappear once upstream sync catches up.
-- Current recommendation: Shrink aggressively. This is the main non-systematic residue that still inflates merge cost.
+- Current recommendation: Keep this group frozen at the current MVP cutline in maintenance-only mode. Reopen structural cleanup only for real sync conflicts, regressions, or an explicitly approved cleanup phase.
 - Notes:
   - The initial `feat(godex): publish fork cli and release workflow` commit mixed too many concerns into one patch. This ledger treats that mixed residue as first-class debt rather than as a good pattern to preserve.
+  - New behavioral work in these files must justify why it cannot live in a named durable patch group instead of expanding the residue surface.
 
 ### Current MVP residue checklist
 
@@ -542,6 +544,6 @@ Shared hot files can be mentioned in multiple detailed patch groups above, but i
 
 - Keep: `fork/provider-backends`, `fork/config-namespace-home`, `fork/identity-governance`, `fork/distribution-release`, and `fork/maintenance-automation`. These define the fork on purpose.
 - Freeze then migrate out: `fork/native-grok-legacy`. It should not receive new product work.
-- Refactor next: `fork/memory-system`. The behavior should stay, but the implementation should move behind a thinner patch-layer.
-- Shrink aggressively: `fork/bootstrap-residue`. This is the biggest source of avoidable future merge pain.
+- Freeze at the MVP cutline: `fork/memory-system`. Reopen only when explicit validation, sync, or user-bug triggers justify more work.
+- Keep maintenance-only: `fork/bootstrap-residue`. Reopen only for sync conflicts, regressions, or an explicitly approved cleanup phase.
 - Future best practice: every new fork feature should land in a named patch group first, then in a narrow module tree, and only then touch hot upstream files through thin adapters.
