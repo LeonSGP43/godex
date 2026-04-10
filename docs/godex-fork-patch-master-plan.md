@@ -342,6 +342,18 @@ Exit criteria:
 
 - bootstrap residue is no longer the largest merge-cost multiplier
 
+Current MVP status (`2026-04-10`):
+
+- `patch/bootstrap-proxy-mcp` has been reduced to thin helper seams for CLI
+  MCP OAuth orchestration and MCP startup status flow
+- `patch/bootstrap-login-auth` has been reduced to onboarding/login adapters,
+  including a local ChatGPT auth handoff under the onboarding boundary and
+  template-driven branded login pages
+- `patch/bootstrap-runtime-ui` has been reduced to thin runtime UI helpers for
+  startup notices and other presentation copy
+- remaining work in these lanes is sync-time maintenance, not prerequisite MVP
+  architecture work
+
 ### Phase 6: Upstream replacement loop
 
 Goal:
@@ -446,7 +458,8 @@ This plan **does** promise a better operating model:
 1. treat the current memory work as frozen at the MVP cutline
 2. make `patch/backend-contract` the highest-priority structural lane
 3. extract `patch/config-home-namespace` into thinner adapters
-4. start systematically shrinking `fork/bootstrap-residue`
+4. keep `fork/bootstrap-residue` frozen at the current MVP cut unless real sync
+   conflicts or regressions require reopening a lane
 5. for every later fork feature, require:
    - manifest entry
    - patch group
