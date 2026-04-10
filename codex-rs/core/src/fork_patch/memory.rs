@@ -1,8 +1,8 @@
-use crate::config::types::MemoriesConfig;
 use crate::memories;
 use crate::memories::SemanticRecallMatch;
 use crate::memories::SemanticRecallOptions;
 use crate::memories::semantic_recall;
+use codex_config::types::MemoriesConfig;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::truncate_text;
 use codex_utils_template::Template;

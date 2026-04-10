@@ -37,7 +37,7 @@ Folder structure (under {{ memory_root }}/):
   - Recap of the rollout, including lessons learned, reusable knowledge,
     pointers/references, and pruned raw evidence snippets. Distilled version of
     everything valuable from the raw rollout.
-
+{{ memory_extensions_folder_structure }}
 ============================================================
 GLOBAL SAFETY, HYGIENE, AND NO-FILLER RULES (STRICT)
 ============================================================
@@ -143,7 +143,7 @@ Under `{{ memory_root }}/`:
   - use as lightweight semantic fallback evidence source before broad scans
 - `skills/*`
   - read existing skills so updates are incremental and non-duplicative
-
+{{ memory_extensions_primary_inputs }}
 Mode selection:
 
 - INIT phase: existing artifacts are missing/empty (especially `memory_summary.md`

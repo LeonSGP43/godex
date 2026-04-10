@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use regex_lite::Regex;
 use reqwest::header::ACCEPT;
 use reqwest::header::AUTHORIZATION;
@@ -10,9 +9,6 @@ use std::env;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
-use crate::config::types::GrokConfig as RuntimeGrokConfig;
-use crate::config::types::GrokPresetId;
-use crate::default_client::build_reqwest_client;
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
@@ -20,6 +16,10 @@ use crate::tools::context::ToolPayload;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
+use codex_config::types::GrokConfig as RuntimeGrokConfig;
+use codex_config::types::GrokPresetId;
+use codex_config::types::GrokPresetsConfig;
+use codex_login::default_client::build_reqwest_client;
 
 pub(crate) const GROK_TOOL_NAME: &str = "grok";
 
@@ -56,7 +56,7 @@ struct GrokToolConfig {
     api_key: String,
     default_dynamic_model: String,
     default_preset: GrokPresetId,
-    presets: crate::config::types::GrokPresetsConfig,
+    presets: GrokPresetsConfig,
 }
 
 #[derive(Clone)]
@@ -72,7 +72,6 @@ struct SourceNote {
     url: String,
 }
 
-#[async_trait]
 impl ToolHandler for GrokHandler {
     type Output = FunctionToolOutput;
 
@@ -402,8 +401,9 @@ mod tests {
     use super::*;
     use crate::codex::make_session_and_context;
     use crate::config::test_config;
-    use crate::config::types::GrokPresetId;
     use crate::turn_diff_tracker::TurnDiffTracker;
+    use codex_config::types::GrokConfig;
+    use codex_config::types::GrokPresetId;
     use serial_test::serial;
     use std::env;
     use std::ffi::OsStr;
@@ -516,7 +516,7 @@ mod tests {
 
         let _api_key = EnvVarGuard::set("MY_GROK_KEY", OsStr::new("test-key"));
         let mut config = test_config();
-        config.grok = crate::config::types::GrokConfig::default();
+        config.grok = GrokConfig::default();
         config.grok.base_origin = server.uri();
         config.grok.api_key_env = "MY_GROK_KEY".to_string();
         config.grok.default_preset = GrokPresetId::Thinking41;

@@ -8,7 +8,7 @@ use codex_core::config::Config;
 use codex_core::config::ConfigNamespace;
 use codex_core::config::find_home;
 use codex_core::config::load_global_mcp_servers;
-use codex_core::config::types::McpServerConfig;
+use codex_config::types::McpServerConfig;
 use codex_utils_cli::CliConfigOverrides;
 
 pub(crate) const MCP_ADD_OVERRIDE_USAGE: &str =

@@ -5,12 +5,14 @@ use chrono::Duration;
 use chrono::Utc;
 use codex_core::branding;
 use codex_core::config::Config;
-use codex_core::default_client::create_client;
+use codex_login::default_client::create_client;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
+
+use crate::version::CODEX_CLI_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GodexUpdateNotice {
@@ -415,6 +417,38 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     let min = iter.next()?.parse::<u64>().ok()?;
     let pat = iter.next()?.parse::<u64>().ok()?;
     Some((maj, min, pat))
+}
+
+pub fn get_upgrade_version(config: &Config) -> Option<String> {
+    if is_source_build_version(CODEX_CLI_VERSION) {
+        return None;
+    }
+
+    get_godex_update_notice(config).map(|notice| notice.latest_version)
+}
+
+fn extract_version_from_latest_tag(latest_tag_name: &str) -> anyhow::Result<String> {
+    extract_version_from_release_tag(latest_tag_name)
+}
+
+/// Returns the latest version to show in a popup, if it should be shown.
+/// This respects the user's dismissal choice for the current latest version.
+pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
+    if is_source_build_version(CODEX_CLI_VERSION) {
+        return None;
+    }
+
+    get_godex_update_notice_for_popup(config).map(|notice| notice.latest_version)
+}
+
+/// Persist a dismissal for the current latest version so we don't show
+/// the update popup again for this version.
+pub async fn dismiss_version(config: &Config, version: &str) -> anyhow::Result<()> {
+    dismiss_godex_version(config, version).await
+}
+
+fn is_source_build_version(version: &str) -> bool {
+    parse_version(version) == Some((0, 0, 0))
 }
 
 #[cfg(test)]

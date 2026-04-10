@@ -17,6 +17,7 @@ use crate::memories::semantic_index::semantic_recall;
 use crate::memories::semantic_index::write_memory_index_qmd;
 use chrono::TimeZone;
 use chrono::Utc;
+use codex_config::types::DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION;
 use codex_protocol::ThreadId;
 use codex_state::Stage1Output;
 use pretty_assertions::assert_eq;
@@ -620,7 +621,6 @@ task_outcome: success
 }
 
 mod phase2 {
-    use crate::CodexAuth;
     use crate::ThreadManager;
     use crate::agent::AgentControl;
     use crate::codex::Session;
@@ -638,6 +638,7 @@ mod phase2 {
     use crate::memories::phase2;
     use chrono::Utc;
     use codex_config::Constrained;
+    use codex_login::CodexAuth;
     use codex_protocol::ThreadId;
     use codex_protocol::protocol::AskForApproval;
     use codex_protocol::protocol::Op;
@@ -904,7 +905,7 @@ mod phase2 {
         let rollout_path = subagent
             .rollout_path()
             .expect("consolidation thread should have a rollout path");
-        crate::state_db::read_repair_rollout_path(
+        codex_rollout::state_db::read_repair_rollout_path(
             Some(harness.state_db.as_ref()),
             Some(thread_id),
             Some(/*archived_only*/ false),

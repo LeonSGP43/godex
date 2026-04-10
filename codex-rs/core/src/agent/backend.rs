@@ -2,14 +2,15 @@ use crate::agent::AgentStatus;
 use crate::codex_thread::ThreadConfigSnapshot;
 use crate::config::SpawnedAgentBackendConfig;
 use crate::config::SpawnedAgentBackendProtocol;
-use crate::error::CodexErr;
-use crate::error::Result as CodexResult;
 use crate::rollout::RolloutRecorder;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::ThreadId;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
 use serde::Serialize;
@@ -1719,7 +1720,7 @@ async fn load_rollout_messages(
         .get_rollout_items()
         .into_iter()
         .filter_map(|item| match item {
-            crate::protocol::RolloutItem::ResponseItem(ResponseItem::Message {
+            RolloutItem::ResponseItem(ResponseItem::Message {
                 role,
                 content,
                 ..

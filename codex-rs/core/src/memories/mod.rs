@@ -36,10 +36,15 @@ pub(crate) use semantic_index::semantic_recall;
 /// This is the entry point to read and understand this module.
 pub(crate) use start::start_memories_startup_task;
 
+mod artifacts {
+    pub(super) const EXTENSIONS_SUBDIR: &str = "memories_extensions";
+    pub(super) const ROLLOUT_SUMMARIES_SUBDIR: &str = "rollout_summaries";
+    pub(super) const RAW_MEMORIES_FILENAME: &str = "raw_memories.md";
+}
 /// Phase 1 (startup extraction).
 mod phase_one {
     /// Default model used for phase 1.
-    pub(super) const MODEL: &str = "gpt-5.1-codex-mini";
+    pub(super) const MODEL: &str = "gpt-5.4-mini";
     /// Default reasoning effort used for phase 1.
     pub(super) const REASONING_EFFORT: super::ReasoningEffort = super::ReasoningEffort::Low;
     /// Prompt used for phase 1.
@@ -106,6 +111,17 @@ pub fn memory_root(codex_home: &Path) -> PathBuf {
     codex_home.join("memories")
 }
 
+fn rollout_summaries_dir(root: &Path) -> PathBuf {
+    root.join(artifacts::ROLLOUT_SUMMARIES_SUBDIR)
+}
+
+fn memory_extensions_root(root: &Path) -> PathBuf {
+    root.with_file_name(artifacts::EXTENSIONS_SUBDIR)
+}
+
+fn raw_memories_file(root: &Path) -> PathBuf {
+    root.join(artifacts::RAW_MEMORIES_FILENAME)
+}
 async fn ensure_layout(root: &Path) -> std::io::Result<()> {
     tokio::fs::create_dir_all(crate::fork_patch::memory::rollout_summaries_dir(root)).await
 }

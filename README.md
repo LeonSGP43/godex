@@ -254,7 +254,9 @@ godex -g
 
 ### Sign In
 
-Run `godex` and select **Sign in with ChatGPT** if you want to use the same authentication flow supported by upstream Codex. You can also use an API key with the same underlying Codex authentication model.
+Run `godex` and select **Sign in with ChatGPT** if you want to use the same authentication flow supported by upstream Codex. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
+
+You can also use `godex` with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
 
 ## Docs
 

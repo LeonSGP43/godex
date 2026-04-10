@@ -1,4 +1,4 @@
-use codex_core::CodexAuth;
+use codex_login::CodexAuth;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoginCommandExit {
@@ -74,7 +74,7 @@ mod tests {
     use super::login_status_exit;
     use super::logout_exit;
     use super::safe_format_key;
-    use codex_core::CodexAuth;
+    use codex_login::CodexAuth;
     use std::io;
 
     #[test]

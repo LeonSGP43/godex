@@ -1,5 +1,5 @@
-use crate::config::types::MemoriesConfig;
-use crate::config::types::MemoryScopeMode;
+use codex_config::types::MemoriesConfig;
+use codex_config::types::MemoryScopeMode;
 use std::path::Path;
 use std::path::PathBuf;
 
