@@ -42,21 +42,21 @@ use supports_color::Stream;
 mod app_cmd;
 #[cfg(target_os = "macos")]
 mod desktop_app;
-mod mcp_copy;
 mod mcp_cmd;
+mod mcp_copy;
+mod root_cli_policy;
 #[cfg(not(windows))]
 mod wsl_paths;
 
 use crate::mcp_cmd::McpCli;
+use crate::root_cli_policy::RootCliPolicy;
 
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigNamespace;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_core::config::find_home;
 use codex_core::config::maybe_configure_isolated_godex_home_from_args;
-use codex_core::config::namespace_for_godex_home_flag;
 use codex_features::FEATURES;
 use codex_features::Stage;
 use codex_features::is_known_feature_key;
@@ -777,32 +777,25 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     let MultitoolCli {
         use_godex_home,
         memory_scope,
-        config_overrides: mut root_config_overrides,
+        config_overrides: root_config_overrides,
         feature_toggles,
         remote,
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
-    let config_namespace = namespace_for_godex_home_flag(use_godex_home);
-    interactive.use_godex_home = use_godex_home;
-
-    // Fold --enable/--disable into config overrides so they flow to all subcommands.
-    let toggle_overrides = feature_toggles.to_overrides()?;
-    root_config_overrides.raw_overrides.extend(toggle_overrides);
-    if let Some(memory_scope) = memory_scope {
-        root_config_overrides
-            .raw_overrides
-            .push(memory_scope.raw_override());
-    }
+    let root_cli_policy = RootCliPolicy::from_root_args(
+        use_godex_home,
+        memory_scope,
+        feature_toggles,
+        root_config_overrides,
+    )?;
+    root_cli_policy.apply_to_interactive(&mut interactive);
     let root_remote = remote.remote;
     let root_remote_auth_token_env = remote.remote_auth_token_env;
 
     match subcommand {
         None => {
-            prepend_config_flags(
-                &mut interactive.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut interactive.config_overrides);
             let exit_info = run_interactive_tui(
                 interactive,
                 root_remote.clone(),
@@ -818,10 +811,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "exec",
             )?;
-            prepend_config_flags(
-                &mut exec_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut exec_cli.config_overrides);
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
         }
         Some(Subcommand::Review(review_args)) => {
@@ -833,10 +823,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             let mut exec_cli =
                 ExecCli::try_parse_from([codex_core::branding::APP_EXECUTABLE_NAME, "exec"])?;
             exec_cli.command = Some(ExecCommand::Review(review_args));
-            prepend_config_flags(
-                &mut exec_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut exec_cli.config_overrides);
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
         }
         Some(Subcommand::McpServer) => {
@@ -845,7 +832,11 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "mcp-server",
             )?;
-            codex_mcp_server::run_main(arg0_paths.clone(), root_config_overrides).await?;
+            codex_mcp_server::run_main(
+                arg0_paths.clone(),
+                root_cli_policy.cloned_root_config_overrides(),
+            )
+            .await?;
         }
         Some(Subcommand::Mcp(mut mcp_cli)) => {
             reject_remote_mode_for_subcommand(
@@ -853,8 +844,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "mcp",
             )?;
-            // Propagate any root-level config overrides (e.g. `-c key=value`).
-            prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
+            root_cli_policy.prepend_root_config_overrides(&mut mcp_cli.config_overrides);
             mcp_cli.use_godex_home = use_godex_home;
             mcp_cli.run().await?;
         }
@@ -876,7 +866,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     let auth = auth.try_into_settings()?;
                     codex_app_server::run_main_with_transport(
                         arg0_paths.clone(),
-                        root_config_overrides,
+                        root_cli_policy.cloned_root_config_overrides(),
                         codex_core::config_loader::LoaderOverrides::default(),
                         analytics_default_enabled,
                         transport,
@@ -926,14 +916,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         })) => {
             interactive = finalize_resume_interactive(
                 interactive,
-                root_config_overrides.clone(),
+                root_cli_policy.cloned_root_config_overrides(),
                 session_id,
                 last,
                 all,
                 include_non_interactive,
                 config_overrides,
             );
-            interactive.use_godex_home = use_godex_home;
+            root_cli_policy.apply_to_interactive(&mut interactive);
             let exit_info = run_interactive_tui(
                 interactive,
                 remote.remote.or(root_remote.clone()),
@@ -954,13 +944,13 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         })) => {
             interactive = finalize_fork_interactive(
                 interactive,
-                root_config_overrides.clone(),
+                root_cli_policy.cloned_root_config_overrides(),
                 session_id,
                 last,
                 all,
                 config_overrides,
             );
-            interactive.use_godex_home = use_godex_home;
+            root_cli_policy.apply_to_interactive(&mut interactive);
             let exit_info = run_interactive_tui(
                 interactive,
                 remote.remote.or(root_remote.clone()),
@@ -978,7 +968,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "sync-upstream",
             )?;
-            run_sync_upstream_command(cmd, config_namespace).await?;
+            run_sync_upstream_command(cmd, root_cli_policy.config_namespace).await?;
         }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(
@@ -986,10 +976,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "login",
             )?;
-            prepend_config_flags(
-                &mut login_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut login_cli.config_overrides);
             match login_cli.action {
                 Some(LoginSubcommand::Status) => {
                     run_login_status(login_cli.config_overrides).await;
@@ -1020,10 +1007,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "logout",
             )?;
-            prepend_config_flags(
-                &mut logout_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut logout_cli.config_overrides);
             run_logout(logout_cli.config_overrides).await;
         }
         Some(Subcommand::Completion(completion_cli)) => {
@@ -1040,10 +1024,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "cloud",
             )?;
-            prepend_config_flags(
-                &mut cloud_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut cloud_cli.config_overrides);
             codex_cloud_tasks::run_main(cloud_cli, arg0_paths.codex_linux_sandbox_exe.clone())
                 .await?;
         }
@@ -1054,10 +1035,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     root_remote_auth_token_env.as_deref(),
                     "sandbox macos",
                 )?;
-                prepend_config_flags(
-                    &mut seatbelt_cli.config_overrides,
-                    root_config_overrides.clone(),
-                );
+                root_cli_policy.prepend_root_config_overrides(&mut seatbelt_cli.config_overrides);
                 codex_cli::debug_sandbox::run_command_under_seatbelt(
                     seatbelt_cli,
                     arg0_paths.codex_linux_sandbox_exe.clone(),
@@ -1070,10 +1048,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     root_remote_auth_token_env.as_deref(),
                     "sandbox linux",
                 )?;
-                prepend_config_flags(
-                    &mut landlock_cli.config_overrides,
-                    root_config_overrides.clone(),
-                );
+                root_cli_policy.prepend_root_config_overrides(&mut landlock_cli.config_overrides);
                 codex_cli::debug_sandbox::run_command_under_landlock(
                     landlock_cli,
                     arg0_paths.codex_linux_sandbox_exe.clone(),
@@ -1086,10 +1061,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     root_remote_auth_token_env.as_deref(),
                     "sandbox windows",
                 )?;
-                prepend_config_flags(
-                    &mut windows_cli.config_overrides,
-                    root_config_overrides.clone(),
-                );
+                root_cli_policy.prepend_root_config_overrides(&mut windows_cli.config_overrides);
                 codex_cli::debug_sandbox::run_command_under_windows(
                     windows_cli,
                     arg0_paths.codex_linux_sandbox_exe.clone(),
@@ -1112,7 +1084,11 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     root_remote_auth_token_env.as_deref(),
                     "debug clear-memories",
                 )?;
-                run_debug_clear_memories_command(&root_config_overrides, &interactive).await?;
+                run_debug_clear_memories_command(
+                    &root_cli_policy.cloned_root_config_overrides(),
+                    &interactive,
+                )
+                .await?;
             }
         },
         Some(Subcommand::Execpolicy(ExecpolicyCommand { sub })) => match sub {
@@ -1131,10 +1107,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_remote_auth_token_env.as_deref(),
                 "apply",
             )?;
-            prepend_config_flags(
-                &mut apply_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
+            root_cli_policy.prepend_root_config_overrides(&mut apply_cli.config_overrides);
             run_apply_command(apply_cli, /*cwd*/ None).await?;
         }
         Some(Subcommand::ResponsesApiProxy(args)) => {
@@ -1164,7 +1137,8 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     "features list",
                 )?;
                 // Respect root-level `-c` overrides plus top-level flags like `--profile`.
-                let mut cli_kv_overrides = root_config_overrides
+                let mut cli_kv_overrides = root_cli_policy
+                    .cloned_root_config_overrides()
                     .parse_overrides()
                     .map_err(anyhow::Error::msg)?;
 
@@ -1210,7 +1184,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     root_remote_auth_token_env.as_deref(),
                     "features enable",
                 )?;
-                enable_feature_in_config(&interactive, &feature).await?;
+                enable_feature_in_config(&root_cli_policy, &interactive, &feature).await?;
             }
             FeaturesSubcommand::Disable(FeatureSetArgs { feature }) => {
                 reject_remote_mode_for_subcommand(
@@ -1218,7 +1192,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     root_remote_auth_token_env.as_deref(),
                     "features disable",
                 )?;
-                disable_feature_in_config(&interactive, &feature).await?;
+                disable_feature_in_config(&root_cli_policy, &interactive, &feature).await?;
             }
         },
     }
@@ -1226,9 +1200,13 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
+async fn enable_feature_in_config(
+    root_cli_policy: &RootCliPolicy,
+    interactive: &TuiCli,
+    feature: &str,
+) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
-    let codex_home = find_home(namespace_for_godex_home_flag(interactive.use_godex_home))?;
+    let codex_home = root_cli_policy.resolve_config_home()?;
     ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
         .set_feature_enabled(feature, /*enabled*/ true)
@@ -1239,9 +1217,13 @@ async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow
     Ok(())
 }
 
-async fn disable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
+async fn disable_feature_in_config(
+    root_cli_policy: &RootCliPolicy,
+    interactive: &TuiCli,
+    feature: &str,
+) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
-    let codex_home = find_home(namespace_for_godex_home_flag(interactive.use_godex_home))?;
+    let codex_home = root_cli_policy.resolve_config_home()?;
     ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
         .set_feature_enabled(feature, /*enabled*/ false)
