@@ -376,7 +376,7 @@ async fn process_request(
                     match tiny_http::Header::from_bytes(&b"Location"[..], success_url.as_bytes()) {
                         Ok(header) => HandledRequest::RedirectWithHeader(header),
                         Err(_) => login_error_response(
-                            redirect_failed_message(),
+                            &redirect_failed_message(),
                             io::ErrorKind::Other,
                             Some("redirect_failed"),
                             /*error_description*/ None,
@@ -395,23 +395,24 @@ async fn process_request(
                 }
             }
         }
-        "/success" => {
-            HandledRequest::ResponseAndExit {
-                headers: match Header::from_bytes(
-                    &b"Content-Type"[..],
-                    &b"text/html; charset=utf-8"[..],
-                ) {
-                    Ok(header) => vec![header],
-                    Err(_) => Vec::new(),
-                },
-                body: success_page_body(),
-                result: Ok(()),
-            }
-        }
+        "/success" => HandledRequest::ResponseAndExit {
+            headers: match Header::from_bytes(
+                &b"Content-Type"[..],
+                &b"text/html; charset=utf-8"[..],
+            ) {
+                Ok(header) => vec![header],
+                Err(_) => Vec::new(),
+            },
+            body: success_page_body(),
+            result: Ok(()),
+        },
         "/cancel" => HandledRequest::ResponseAndExit {
             headers: Vec::new(),
             body: login_cancelled_message().as_bytes().to_vec(),
-            result: Err(io::Error::new(io::ErrorKind::Interrupted, login_cancelled_message())),
+            result: Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                login_cancelled_message(),
+            )),
         },
         _ => HandledRequest::Response(Response::from_string("Not Found").with_status_code(404)),
     }
@@ -1193,7 +1194,7 @@ mod tests {
         ))
         .expect("login error page should be utf-8");
 
-        assert!(body.contains("You do not have access to godex"));
+        assert!(body.contains(&format!("You do not have access to {}", "godex")));
         assert!(body.contains("Contact your workspace administrator"));
         assert!(!body.contains("missing_codex_entitlement"));
     }
