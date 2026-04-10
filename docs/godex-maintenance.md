@@ -30,6 +30,9 @@ Use the repo wrapper instead of ad-hoc git/cargo sequences:
 # Inspect remotes, branch drift, config, and local install state
 bash scripts/godex-maintain.sh status
 
+# Inspect which patch groups and hot files a diff range touches
+bash scripts/godex-maintain.sh review-scope
+
 # Preview the next upstream sync without changing the repo
 bash scripts/godex-maintain.sh sync --dry-run
 
@@ -67,14 +70,16 @@ Recommended version cadence:
 
 1. Start from a clean `main` worktree.
 2. Run `bash scripts/godex-maintain.sh status`.
-3. Refresh `upstream-main`.
-4. Create `sync/<upstream-sha-or-date>` from `main`.
-5. Run `bash scripts/godex-maintain.sh sync --dry-run`.
-6. If the plan looks right, merge upstream on the sync branch.
-7. Run all acceptance gates from `docs/godex-fork-guidelines.md`.
-8. Reinstall with `bash scripts/install/install-godex-from-source.sh`.
-9. Merge back to `main` only after validation passes.
-10. Before pushing `main`, bump the version and pass `bash scripts/godex-maintain.sh release-preflight`.
+3. Review the reported patch-group overlap and hot-file hits, or run
+   `bash scripts/godex-maintain.sh review-scope` directly for a custom range.
+4. Refresh `upstream-main`.
+5. Create `sync/<upstream-sha-or-date>` from `main`.
+6. Run `bash scripts/godex-maintain.sh sync --dry-run`.
+7. If the plan looks right, merge upstream on the sync branch.
+8. Run all acceptance gates from `docs/godex-fork-guidelines.md`.
+9. Reinstall with `bash scripts/install/install-godex-from-source.sh`.
+10. Merge back to `main` only after validation passes.
+11. Before pushing `main`, bump the version and pass `bash scripts/godex-maintain.sh release-preflight`.
 
 ## Policy Documents
 

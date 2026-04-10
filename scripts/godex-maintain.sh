@@ -19,6 +19,7 @@ Usage: godex-maintain.sh <command> [options]
 
 Commands:
   status                Show fork maintenance status for this repo
+  review-scope [range]  Show which fork patch groups and hot files a diff range touches
   sync [options]        Fetch official Codex, refresh upstream-main, merge into current branch, and rebuild
   check                 Run cargo check for the godex CLI
   smoke                 Verify a runnable godex binary reports its version
@@ -29,6 +30,330 @@ Sync options:
   --ff-only             Require merge to fast-forward
   --no-build            Skip the rebuild step after merge
 EOF
+}
+
+declare -a PATCH_GROUPS=(
+  "fork/provider-backends"
+  "fork/config-namespace-home"
+  "fork/native-grok-legacy"
+  "fork/memory-system"
+  "fork/bootstrap-residue"
+  "fork/identity-governance"
+  "fork/distribution-release"
+  "fork/maintenance-automation"
+)
+
+patch_group_patterns() {
+  case "$1" in
+    fork/provider-backends)
+      cat <<'EOF'
+codex-rs/core/src/agent/
+codex-rs/core/src/tools/handlers/multi_agents
+codex-rs/core/src/tools/spec.rs
+docs/agent-roles.md
+docs/external-agent-backends.md
+codex-rs/examples/external_agent_backends/
+EOF
+      ;;
+    fork/config-namespace-home)
+      cat <<'EOF'
+codex-rs/cli/src/main.rs
+codex-rs/cli/src/root_cli_policy.rs
+codex-rs/cli/tests/godex_home.rs
+codex-rs/core/src/config/
+codex-rs/core/src/config_loader/
+codex-rs/core/config.schema.json
+codex-rs/utils/home-dir/src/lib.rs
+docs/config.md
+EOF
+      ;;
+    fork/native-grok-legacy)
+      cat <<'EOF'
+codex-rs/core/src/agent/builtins/grok.toml
+codex-rs/core/src/agent/role.rs
+codex-rs/core/src/tools/handlers/grok_research.rs
+codex-rs/core/src/tools/spec.rs
+docs/agent-roles.md
+docs/config.md
+EOF
+      ;;
+    fork/memory-system)
+      cat <<'EOF'
+codex-rs/core/src/memories/
+codex-rs/core/src/fork_patch/memory.rs
+codex-rs/core/src/fork_patch/mod.rs
+codex-rs/core/templates/memories/
+codex-rs/state/src/fork_patch/
+codex-rs/state/src/runtime/memories.rs
+codex-rs/state/src/runtime/threads.rs
+codex-rs/state/src/model/thread_metadata.rs
+codex-rs/rollout/src/
+codex-rs/state/migrations/0023_threads_memory_scope.sql
+docs/godex-memory-system.md
+docs/godex-memory-patch-layer-plan.md
+docs/godex-memory-mvp-closure.md
+EOF
+      ;;
+    fork/bootstrap-residue)
+      cat <<'EOF'
+codex-rs/cli/src/login.rs
+codex-rs/cli/src/login_copy.rs
+codex-rs/cli/src/mcp_cmd.rs
+codex-rs/cli/src/mcp_copy.rs
+codex-rs/login/src/
+codex-rs/core/src/network_proxy_loader.rs
+codex-rs/core/src/mcp_connection_manager.rs
+codex-rs/core/src/mcp_connection_copy.rs
+codex-rs/tui/src/app.rs
+codex-rs/tui/src/app/runtime_ui.rs
+codex-rs/tui/src/history_cell.rs
+codex-rs/tui/src/runtime_ui_copy.rs
+codex-rs/tui/src/status/
+codex-rs/tui/src/slash_command.rs
+EOF
+      ;;
+    fork/identity-governance)
+      cat <<'EOF'
+README.md
+CHANGELOG.md
+VERSION
+announcement_tip.toml
+docs/godex-
+docs/reports/upstream-review-
+codex-rs/core/src/branding.rs
+codex-rs/tui/src/tooltips.rs
+codex-rs/tui/src/updates.rs
+codex-rs/tui/src/update_action.rs
+codex-rs/tui/src/update_prompt.rs
+EOF
+      ;;
+    fork/distribution-release)
+      cat <<'EOF'
+codex-cli/
+.github/workflows/rust-release
+scripts/install/
+scripts/godex-release
+scripts/stage_npm_packages.py
+codex-rs/Cargo.toml
+codex-rs/Cargo.lock
+codex-rs/cli/Cargo.toml
+codex-rs/README.md
+docs/install.md
+EOF
+      ;;
+    fork/maintenance-automation)
+      cat <<'EOF'
+.codex/config.toml
+.codex/skills/godex-
+scripts/godex-maintain.sh
+docs/godex-maintenance.md
+docs/godex-fork-guidelines.md
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+patch_group_hot_files() {
+  case "$1" in
+    fork/provider-backends)
+      cat <<'EOF'
+codex-rs/core/src/agent/backend.rs
+codex-rs/core/src/agent/mod.rs
+codex-rs/core/src/agent/control.rs
+codex-rs/core/src/tools/spec.rs
+codex-rs/core/src/tools/handlers/multi_agents/spawn.rs
+codex-rs/core/src/tools/handlers/multi_agents_v2/spawn.rs
+EOF
+      ;;
+    fork/config-namespace-home)
+      cat <<'EOF'
+codex-rs/cli/src/main.rs
+codex-rs/core/src/config/mod.rs
+codex-rs/core/src/config_loader/mod.rs
+EOF
+      ;;
+    fork/native-grok-legacy)
+      cat <<'EOF'
+codex-rs/core/src/agent/role.rs
+codex-rs/core/src/tools/spec.rs
+EOF
+      ;;
+    fork/memory-system)
+      cat <<'EOF'
+codex-rs/cli/src/main.rs
+codex-rs/core/src/config/mod.rs
+codex-rs/core/src/memories/prompts.rs
+codex-rs/core/src/memories/storage.rs
+codex-rs/state/src/runtime/memories.rs
+codex-rs/state/src/runtime/threads.rs
+EOF
+      ;;
+    fork/bootstrap-residue)
+      cat <<'EOF'
+codex-rs/cli/src/login.rs
+codex-rs/cli/src/mcp_cmd.rs
+codex-rs/core/src/network_proxy_loader.rs
+codex-rs/core/src/mcp_connection_manager.rs
+codex-rs/tui/src/app.rs
+codex-rs/tui/src/history_cell.rs
+EOF
+      ;;
+    fork/identity-governance)
+      cat <<'EOF'
+codex-rs/core/src/branding.rs
+codex-rs/tui/src/tooltips.rs
+codex-rs/tui/src/updates.rs
+EOF
+      ;;
+    fork/distribution-release)
+      cat <<'EOF'
+codex-rs/Cargo.toml
+codex-rs/Cargo.lock
+codex-rs/cli/Cargo.toml
+EOF
+      ;;
+    fork/maintenance-automation)
+      cat <<'EOF'
+.codex/config.toml
+scripts/godex-maintain.sh
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+path_matches_pattern() {
+  local file="$1"
+  local pattern="$2"
+  if [[ "$pattern" == */ ]]; then
+    [[ "$file" == "$pattern"* ]]
+  else
+    [[ "$file" == "$pattern" || "$file" == "$pattern"* ]]
+  fi
+}
+
+collect_matching_files() {
+  local changed_file="$1"
+  shift
+
+  local pattern
+  for pattern in "$@"; do
+    if path_matches_pattern "$changed_file" "$pattern"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+count_nonempty_lines() {
+  local text="$1"
+  if [[ -z "$text" ]]; then
+    printf '0\n'
+    return
+  fi
+
+  printf '%s\n' "$text" | awk 'NF { count += 1 } END { print count + 0 }'
+}
+
+print_bullet_block() {
+  local label="$1"
+  local block="$2"
+  local limit="${3:-0}"
+
+  [[ -n "$block" ]] || return
+
+  printf '%s\n' "$label"
+  if [[ "$limit" -gt 0 ]]; then
+    block="$(printf '%s\n' "$block" | sed -n "1,${limit}p")"
+  fi
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    printf '  - %s\n' "$item"
+  done <<< "$block"
+}
+
+path_matches_any_block() {
+  local file="$1"
+  local patterns="$2"
+  local pattern
+
+  while IFS= read -r pattern; do
+    [[ -n "$pattern" ]] || continue
+    if path_matches_pattern "$file" "$pattern"; then
+      return 0
+    fi
+  done <<< "$patterns"
+
+  return 1
+}
+
+show_patch_review_scope() {
+  ensure_repo
+
+  local revspec="${1:-$UPSTREAM_REMOTE/$UPSTREAM_BRANCH...HEAD}"
+  local changed_output
+  if ! changed_output="$(git -C "$REPO_ROOT" diff --name-only "$revspec")"; then
+    die "invalid review range: $revspec"
+  fi
+
+  step "Patch review scope"
+  printf 'range: %s\n' "$revspec"
+
+  if [[ -z "$changed_output" ]]; then
+    printf 'changed_paths: 0\n'
+    printf 'patch_groups: none\n'
+    return
+  fi
+
+  printf 'changed_paths: %s\n' "$(count_nonempty_lines "$changed_output")"
+
+  local group
+  local touched_groups=0
+  for group in "${PATCH_GROUPS[@]}"; do
+    local patterns_output hot_output
+    patterns_output="$(patch_group_patterns "$group")"
+    hot_output="$(patch_group_hot_files "$group")"
+
+    local matched_files=""
+    local file
+    while IFS= read -r file; do
+      [[ -n "$file" ]] || continue
+      if path_matches_any_block "$file" "$patterns_output"; then
+        matched_files+="${file}"$'\n'
+      fi
+    done <<< "$changed_output"
+
+    matched_files="${matched_files%$'\n'}"
+    if [[ -z "$matched_files" ]]; then
+      continue
+    fi
+
+    local matched_hot=""
+    local hot_file
+    while IFS= read -r hot_file; do
+      [[ -n "$hot_file" ]] || continue
+      if printf '%s\n' "$matched_files" | rg -Fxq "$hot_file"; then
+        matched_hot+="${hot_file}"$'\n'
+      fi
+    done <<< "$hot_output"
+    matched_hot="${matched_hot%$'\n'}"
+
+    touched_groups=$((touched_groups + 1))
+    printf 'patch_group: %s\n' "$group"
+    printf '  touched_paths: %s\n' "$(count_nonempty_lines "$matched_files")"
+    print_bullet_block '  sample_paths:' "$matched_files" 6
+    print_bullet_block '  hot_overlap:' "$matched_hot" 0
+  done
+
+  if [[ "$touched_groups" -eq 0 ]]; then
+    printf 'patch_groups: none matched the built-in fork inventory map\n'
+  fi
 }
 
 step() {
@@ -138,6 +463,8 @@ show_repo_status() {
   else
     printf 'godex_on_path: missing\n'
   fi
+
+  show_patch_review_scope "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH...HEAD"
 }
 
 sync_upstream() {
@@ -285,6 +612,9 @@ main() {
   case "$cmd" in
     status)
       show_repo_status
+      ;;
+    review-scope)
+      show_patch_review_scope "$@"
       ;;
     sync)
       sync_upstream "$@"
