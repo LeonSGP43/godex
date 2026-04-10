@@ -89,6 +89,10 @@ Use these documents together:
   - branch policy, patch isolation rules, acceptance gates
 - `docs/godex-fork-manifest.md`
   - source of truth for long-lived fork-specific behavior
+- `docs/godex-sync-review-checklist.md`
+  - keep/adapt/delete procedure for touched patch groups during sync
+- `docs/godex-fork-acceptance-matrix.md`
+  - verification rows to run for each touched patch group
 
 ## Why this layout
 

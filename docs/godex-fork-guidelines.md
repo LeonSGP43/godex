@@ -143,6 +143,8 @@ During sync:
 2. resolve conflicts with the goal of preserving fork behavior through the
    smallest possible adapter changes
 3. do not add new features, refactors, or formatting-only edits
+4. classify touched patch groups as `keep`, `adapt`, or `delete` using
+   `docs/godex-sync-review-checklist.md`
 
 After sync:
 
@@ -189,6 +191,9 @@ Recommended gate:
 
 - compare `upstream-main...main` diff against the fork manifest
   - if changes spread beyond expected fork touchpoints, stop and review manually
+- use `bash scripts/godex-maintain.sh review-scope` plus
+  `docs/godex-fork-acceptance-matrix.md` to decide which patch-group rows must
+  pass before merge-back
 
 ## Conflict Resolution Rules
 
