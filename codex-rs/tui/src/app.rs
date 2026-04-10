@@ -28,8 +28,6 @@ use crate::external_editor;
 use crate::file_search::FileSearchManager;
 use crate::history_cell;
 use crate::history_cell::HistoryCell;
-#[cfg(not(debug_assertions))]
-use crate::history_cell::UpdateAvailableHistoryCell;
 use crate::model_catalog::ModelCatalog;
 use crate::model_migration::ModelMigrationOutcome;
 use crate::model_migration::migration_copy_for_models;
@@ -3569,48 +3567,14 @@ impl App {
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
 
         #[cfg(not(debug_assertions))]
-        let pre_loop_exit_reason = {
-            let mut exit_reason = None;
-            if let Some(notice) = godex_update_notice {
-                let control = app
-                    .handle_event(
-                        tui,
-                        &mut app_server,
-                        AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                            notice.current_version,
-                            notice.latest_version,
-                            notice.release_notes_url,
-                            crate::update_action::get_update_action(&app.config),
-                        ))),
-                    )
-                    .await?;
-                if let AppRunControl::Exit(reason) = control {
-                    exit_reason = Some(reason);
-                }
-            }
-            if exit_reason.is_none()
-                && let Some(notice) = upstream_release_gap_notice
-            {
-                let control = app
-                    .handle_event(
-                        tui,
-                        &mut app_server,
-                        AppEvent::InsertHistoryCell(Box::new(
-                            crate::history_cell::UpstreamVersionGapHistoryCell::new(
-                                notice.current_version,
-                                notice.latest_version,
-                                notice.releases_ahead,
-                                notice.release_notes_url,
-                            ),
-                        )),
-                    )
-                    .await?;
-                if let AppRunControl::Exit(reason) = control {
-                    exit_reason = Some(reason);
-                }
-            }
-            exit_reason
-        };
+        let pre_loop_exit_reason = app
+            .show_startup_notices(
+                tui,
+                &mut app_server,
+                godex_update_notice,
+                upstream_release_gap_notice,
+            )
+            .await?;
         #[cfg(debug_assertions)]
         let pre_loop_exit_reason: Option<ExitReason> = None;
 

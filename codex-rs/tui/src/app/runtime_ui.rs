@@ -1,20 +1,95 @@
 use super::App;
+#[cfg(not(debug_assertions))]
+use super::AppRunControl;
+#[cfg(not(debug_assertions))]
+use super::ExitReason;
+#[cfg(not(debug_assertions))]
+use crate::app_event::AppEvent;
+#[cfg(not(debug_assertions))]
+use crate::app_server_session::AppServerSession;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::history_cell;
 use crate::history_cell::HistoryCell;
+#[cfg(not(debug_assertions))]
+use crate::history_cell::UpdateAvailableHistoryCell;
 use crate::runtime_ui_copy::browser_open_failed_message;
 use crate::runtime_ui_copy::browser_opened_message;
 use crate::runtime_ui_copy::permissions_updated_message;
 use crate::runtime_ui_copy::status_line_save_failed_message;
 use crate::runtime_ui_copy::terminal_title_save_failed_message;
 use crate::tui;
+#[cfg(not(debug_assertions))]
+use crate::updates::GodexUpdateNotice;
+#[cfg(not(debug_assertions))]
+use crate::updates::UpstreamReleaseGapNotice;
 use crate::version::CODEX_CLI_VERSION;
 use codex_core::config::edit::ConfigEditsBuilder;
 use color_eyre::eyre::Result;
 use ratatui::text::Line;
 
 impl App {
+    #[cfg(not(debug_assertions))]
+    async fn insert_startup_history_cell(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        cell: Box<dyn HistoryCell>,
+    ) -> Result<Option<ExitReason>> {
+        let control = self
+            .handle_event(tui, app_server, AppEvent::InsertHistoryCell(cell))
+            .await?;
+        Ok(match control {
+            AppRunControl::Continue => None,
+            AppRunControl::Exit(reason) => Some(reason),
+        })
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub(super) async fn show_startup_notices(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        godex_update_notice: Option<GodexUpdateNotice>,
+        upstream_release_gap_notice: Option<UpstreamReleaseGapNotice>,
+    ) -> Result<Option<ExitReason>> {
+        if let Some(notice) = godex_update_notice {
+            let update_action = crate::update_action::get_update_action(&self.config);
+            if let Some(reason) = self
+                .insert_startup_history_cell(
+                    tui,
+                    app_server,
+                    Box::new(UpdateAvailableHistoryCell::new(
+                        notice.current_version,
+                        notice.latest_version,
+                        notice.release_notes_url,
+                        update_action,
+                    )),
+                )
+                .await?
+            {
+                return Ok(Some(reason));
+            }
+        }
+
+        if let Some(notice) = upstream_release_gap_notice {
+            return self
+                .insert_startup_history_cell(
+                    tui,
+                    app_server,
+                    Box::new(history_cell::UpstreamVersionGapHistoryCell::new(
+                        notice.current_version,
+                        notice.latest_version,
+                        notice.releases_ahead,
+                        notice.release_notes_url,
+                    )),
+                )
+                .await;
+        }
+
+        Ok(None)
+    }
+
     pub(super) fn show_permissions_updated_message(&mut self, label: &str) {
         self.chat_widget
             .add_info_message(permissions_updated_message(label), /*hint*/ None);
