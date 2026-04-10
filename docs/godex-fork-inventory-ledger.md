@@ -169,6 +169,7 @@ This ledger is the current-state inventory of how this fork differs from officia
 - Notes:
   - This is the real seam for external provider runtimes. It is the correct place for Gemini/Grok/Leonai-style workers.
   - Provider identity should live in backend configuration or backend commands, not in fake role names.
+  - New provider execution work should be admitted only through `[agent_backends.<name>]` plus backend workers; provider-branded roles are acceptable only as migration shims with a deletion path.
   - `0f918e28c5` advanced `patch/backend-contract` by centralizing spawn-time backend resolution, backend id normalization, and backend-specific model override selection in `multi_agents_common.rs`, removing duplicated policy from both `multi_agents/spawn.rs` and `multi_agents_v2/spawn.rs`.
   - `f46eb549bd` advanced `patch/backend-contract` again by moving spawned-agent backend resolution, archived backend config restore, and handle construction behind helpers in `core/src/agent/backend.rs`, thinning backend-specific glue in `core/src/agent/control.rs`.
   - `923758b5ff` advanced `patch/backend-contract` again by deleting obsolete non-external spawned-agent handle residue from `core/src/agent/backend.rs`, leaving `SpawnedAgentHandle` scoped to real external backends and reducing future sync churn around dead internal paths.
@@ -202,6 +203,7 @@ This ledger is the current-state inventory of how this fork differs from officia
 - Current recommendation: Freeze and migrate out. Do not expand this surface further.
 - Notes:
   - This group intentionally overlaps with the provider-backend surface, but it is tracked separately because its desired end-state is deletion.
+  - This lane may accept compatibility-only maintenance, migration steps, or retirement work, but it is not an approved landing zone for new provider capability.
 
 ## Scoped memory pipeline and hybrid recall (`fork/memory-system`)
 

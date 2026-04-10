@@ -25,6 +25,8 @@ Codex supports built-in and user-defined agent roles for `spawn_agent`.
   `[agent_backends.<name>]` instead of `[agents.<role>]`.
 - A custom role such as `gemini25p` or `grok_external` is only prompt/config
   layering unless the spawned call also selects a non-native `backend`.
+- New provider capability should be added behind `[agent_backends.<name>]`; do
+  not use new provider-branded roles as the primary integration surface.
 
 ## External spawned-agent backends
 
@@ -117,6 +119,15 @@ present:
 - `error`: optional structured error object with `message`, optional `code`, and
   optional `retryable`
 
+Provider migration rule:
+
+- `backend = "gemini_worker"` or `backend = "grok_worker"` is the real
+  provider-hosted runtime path
+- `[grok]` plus `agent_type = "grok"` remains a native compatibility path for
+  the built-in Grok research workflow
+- if you are adding or extending provider execution, prefer the backend worker
+  path unless the work is explicitly part of retiring the native Grok shim
+
 ## External Claude backend command prefix
 
 `claude_code` remains a built-in backend shortcut. When using
@@ -141,6 +152,10 @@ non-interactive JSON output flags automatically:
 The native Grok research tools and Grok-focused built-in agent roles now read
 their routing defaults from `config.toml` instead of relying only on ad-hoc
 environment variables.
+
+This section configures the native compatibility path only. It does not replace
+`backend = "grok_worker"` when your goal is a real external spawned-agent
+runtime.
 
 The top-level section is `[grok]`. It controls:
 

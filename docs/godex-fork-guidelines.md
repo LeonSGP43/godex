@@ -103,6 +103,9 @@ For provider integrations:
   possible
 - treat any native provider-specific tool or built-in provider role as a legacy
   compatibility shim that needs an extraction plan
+- do not admit new provider product work through provider-branded roles or
+  native provider tools unless the change is explicitly a migration or
+  retirement step for an existing legacy shim
 
 ## Hot Files
 

@@ -2,6 +2,27 @@
 
 External spawned-agent backends let `spawn_agent` talk to real provider runtimes that live outside the Codex binary.
 
+## Provider extension policy
+
+For this fork, external backends are the default and preferred way to add real
+provider execution.
+
+Rules:
+
+- use `[agent_backends.<backend-id>]` for new provider integrations
+- keep provider HTTP/auth/retry logic in the backend worker, not in native
+  spawned-agent hot paths
+- treat provider-branded roles as prompt layering only unless the call also
+  selects a non-native `backend`
+- treat the native Grok role/tool path as a migration-only compatibility seam,
+  not as the template for future provider work
+
+Recommended shape:
+
+- `agent_type`: task posture such as `worker`, `explorer`, or `claude-style`
+- `backend`: provider runtime bridge such as `gemini_worker` or `grok_worker`
+- backend code on disk: actual provider call logic
+
 ## Best-practice layout
 
 When you expect to maintain multiple backends, keep runtime code outside `config.toml` and organize it like this:
@@ -99,6 +120,10 @@ They demonstrate:
 - structured retryable errors
 - `--healthcheck` handling
 - a clean place to factor shared client code when you add more backends
+
+They are also the reference implementation for future provider growth. New
+provider onboarding should start by copying one of these workers, not by adding
+another provider-branded built-in role or native tool path.
 
 The Gemini sample expects:
 

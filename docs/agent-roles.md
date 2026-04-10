@@ -37,9 +37,9 @@ Codex sub-agent thread, but with a stronger analysis/review posture.
 
 ## `grok`
 
-This built-in role is for teams that want Grok to behave like a dedicated
-research employee inside Codex's native spawned-agent runtime rather than as a
-top-level model provider swap.
+This built-in role is now a migration-only compatibility surface for teams that
+still need the native Grok research workflow while external backends take over
+real provider hosting.
 
 What they change:
 
@@ -57,6 +57,13 @@ What they do not change:
 - they do not bundle credentials into the child; the Grok tools still require
   a reachable Grok API plus credentials in the environment
 
+What they are not for:
+
+- they are not the recommended way to add a new Grok integration
+- they are not a template for Gemini-style provider roles
+- they should not receive new provider-specific product depth unless that work
+  is explicitly part of deleting the legacy native Grok path
+
 This role is designed to pair with Codex's built-in `grok` tool. The built-in
 instructions tell the child to:
 
@@ -66,6 +73,10 @@ instructions tell the child to:
 
 That means `spawn_agent(agent_type = "grok")` still creates a normal native
 Codex child thread, but with a much stronger research-worker posture.
+
+If your goal is a real provider-hosted child runtime, use
+`backend = "grok_worker"` or another configured `[agent_backends.<name>]`
+entry instead of creating a provider-branded role.
 
 If you need to repoint the Grok gateway or remap which model each preset uses,
 change the top-level `[grok]` and `[grok.presets.*]` entries in
@@ -90,6 +101,15 @@ Avoid registering provider-branded custom roles such as `gemini25p`,
 `grok_external`, or similar names when the goal is to reach a real provider.
 Those role files only change prompt/config layering unless the call also
 selects a non-native `backend`.
+
+Admission rule for future fork work:
+
+- new provider capability must land behind `[agent_backends.<name>]`
+- built-in or user-defined provider-branded roles are allowed only as temporary
+  migration shims with a documented deletion path
+- native Grok-specific role or tool changes should be treated as
+  `fork/native-grok-legacy` maintenance, not as the default runtime expansion
+  lane
 
 Today, all built-in roles still run on the native Codex spawned-agent runtime.
 User-defined roles selected through `agent_type` also stay on the native Codex

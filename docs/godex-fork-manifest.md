@@ -188,6 +188,10 @@ default during sync and conflict resolution.
 - Disable strategy:
   - runtime config and registration disable through `[agent_backends.*]` and
     backend selection; provider workers stay optional external processes
+- Admission rule:
+  - new provider execution work must land behind `[agent_backends.<name>]`
+  - provider-branded roles are allowed only as prompt layering or temporary
+    migration shims with a documented deletion path
 - Upstream replacement trigger:
   - upstream lands a stable external backend or plugin seam that can express
     command or json-stdio workers without fork-only contract types
@@ -217,6 +221,10 @@ default during sync and conflict resolution.
 - Disable strategy:
   - registration disable or manifest-level deletion; no new product expansion is
     allowed here
+- Admission rule:
+  - this patch group may accept only compatibility, migration, or retirement
+    work
+  - new provider capability must not be routed here by default
 - Upstream replacement trigger:
   - external `grok_worker` becomes the only supported real Grok path, or
     upstream provides a better native equivalent
