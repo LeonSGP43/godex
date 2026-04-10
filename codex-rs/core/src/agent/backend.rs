@@ -10,7 +10,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::Op;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
 use serde::Serialize;
@@ -160,7 +159,6 @@ impl SpawnedAgentBackendKind {
 #[derive(Clone)]
 /// Per-agent runtime handle for spawned agents.
 pub(crate) enum SpawnedAgentHandle {
-    Codex(CodexSpawnedAgentHandle),
     ClaudeCode(ClaudeCodeSpawnedAgentHandle),
     Command(CommandSpawnedAgentHandle),
 }
@@ -172,13 +170,6 @@ pub(crate) enum ArchivedSpawnedAgentHandle {
 }
 
 impl ArchivedSpawnedAgentHandle {
-    pub(crate) fn agent_id(&self) -> ThreadId {
-        match self {
-            Self::ClaudeCode(state) => state.agent_id,
-            Self::Command(state) => state.agent_id,
-        }
-    }
-
     pub(crate) fn config_snapshot(&self) -> &ThreadConfigSnapshot {
         match self {
             Self::ClaudeCode(state) => &state.config_snapshot,
@@ -199,10 +190,6 @@ impl ArchivedSpawnedAgentHandle {
 }
 
 impl SpawnedAgentHandle {
-    pub(crate) fn codex(manager: Weak<ThreadManagerState>, agent_id: ThreadId) -> Self {
-        Self::Codex(CodexSpawnedAgentHandle::new(manager, agent_id))
-    }
-
     pub(crate) fn from_resolved_backend(
         manager: Weak<ThreadManagerState>,
         config: &crate::config::Config,
@@ -279,37 +266,6 @@ impl SpawnedAgentHandle {
         )
     }
 
-    pub(crate) async fn claude_code(
-        manager: Weak<ThreadManagerState>,
-        agent_id: ThreadId,
-        config_snapshot: ThreadConfigSnapshot,
-        developer_instructions: Option<String>,
-        items: Vec<UserInput>,
-        command: ClaudeCodeCommand,
-    ) -> CodexResult<Self> {
-        let handle = ClaudeCodeSpawnedAgentHandle::new(
-            manager,
-            agent_id,
-            config_snapshot,
-            developer_instructions,
-            command,
-            AgentStatus::PendingInit,
-            /*session_id*/ None,
-            /*total_token_usage*/ None,
-        );
-        handle.send_input(items).await?;
-        Ok(Self::ClaudeCode(handle))
-    }
-
-    pub(crate) fn resumed_claude_code(
-        manager: Weak<ThreadManagerState>,
-        state: ClaudeCodeResumeState,
-    ) -> Self {
-        Self::ClaudeCode(ClaudeCodeSpawnedAgentHandle::from_resume_state(
-            manager, state,
-        ))
-    }
-
     #[cfg(test)]
     pub(crate) async fn claude_code_for_test(
         agent_id: ThreadId,
@@ -334,7 +290,6 @@ impl SpawnedAgentHandle {
 
     pub(crate) fn agent_id(&self) -> ThreadId {
         match self {
-            Self::Codex(handle) => handle.agent_id,
             Self::ClaudeCode(handle) => handle.agent_id(),
             Self::Command(handle) => handle.agent_id(),
         }
@@ -342,7 +297,6 @@ impl SpawnedAgentHandle {
 
     pub(crate) async fn send_input(&self, items: Vec<UserInput>) -> CodexResult<String> {
         match self {
-            Self::Codex(handle) => handle.send_input(items).await,
             Self::ClaudeCode(handle) => handle.send_input(items).await,
             Self::Command(handle) => handle.send_input(items).await,
         }
@@ -350,23 +304,13 @@ impl SpawnedAgentHandle {
 
     pub(crate) async fn interrupt(&self) -> CodexResult<String> {
         match self {
-            Self::Codex(handle) => handle.interrupt().await,
             Self::ClaudeCode(handle) => handle.interrupt().await,
             Self::Command(handle) => handle.interrupt().await,
         }
     }
 
-    pub(crate) async fn cleanup_after_internal_death(&self) {
-        match self {
-            Self::Codex(handle) => handle.cleanup_after_internal_death().await,
-            Self::ClaudeCode(handle) => handle.cleanup_after_internal_death().await,
-            Self::Command(handle) => handle.cleanup_after_internal_death().await,
-        }
-    }
-
     pub(crate) async fn shutdown_live(&self) -> CodexResult<String> {
         match self {
-            Self::Codex(handle) => handle.shutdown_live().await,
             Self::ClaudeCode(handle) => handle.shutdown_live().await,
             Self::Command(handle) => handle.shutdown_live().await,
         }
@@ -374,7 +318,6 @@ impl SpawnedAgentHandle {
 
     pub(crate) async fn status(&self) -> AgentStatus {
         match self {
-            Self::Codex(handle) => handle.status().await,
             Self::ClaudeCode(handle) => handle.status().await,
             Self::Command(handle) => handle.status().await,
         }
@@ -382,7 +325,6 @@ impl SpawnedAgentHandle {
 
     pub(crate) async fn config_snapshot(&self) -> Option<ThreadConfigSnapshot> {
         match self {
-            Self::Codex(handle) => handle.config_snapshot().await,
             Self::ClaudeCode(handle) => handle.config_snapshot().await,
             Self::Command(handle) => handle.config_snapshot().await,
         }
@@ -390,7 +332,6 @@ impl SpawnedAgentHandle {
 
     pub(crate) async fn subscribe_status(&self) -> CodexResult<watch::Receiver<AgentStatus>> {
         match self {
-            Self::Codex(handle) => handle.subscribe_status().await,
             Self::ClaudeCode(handle) => handle.subscribe_status().await,
             Self::Command(handle) => handle.subscribe_status().await,
         }
@@ -398,7 +339,6 @@ impl SpawnedAgentHandle {
 
     pub(crate) async fn total_token_usage(&self) -> Option<TokenUsage> {
         match self {
-            Self::Codex(handle) => handle.total_token_usage().await,
             Self::ClaudeCode(handle) => handle.total_token_usage().await,
             Self::Command(handle) => handle.total_token_usage().await,
         }
@@ -413,93 +353,7 @@ impl SpawnedAgentHandle {
                 .resume_state()
                 .await
                 .map(ArchivedSpawnedAgentHandle::Command),
-            Self::Codex(_) => None,
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct CodexSpawnedAgentHandle {
-    manager: Weak<ThreadManagerState>,
-    agent_id: ThreadId,
-}
-
-impl CodexSpawnedAgentHandle {
-    pub(crate) fn new(manager: Weak<ThreadManagerState>, agent_id: ThreadId) -> Self {
-        Self { manager, agent_id }
-    }
-
-    async fn send_input(&self, items: Vec<UserInput>) -> CodexResult<String> {
-        self.manager()?
-            .send_op(
-                self.agent_id,
-                Op::UserInput {
-                    items,
-                    final_output_json_schema: None,
-                },
-            )
-            .await
-    }
-
-    async fn interrupt(&self) -> CodexResult<String> {
-        self.manager()?.send_op(self.agent_id, Op::Interrupt).await
-    }
-
-    async fn cleanup_after_internal_death(&self) {
-        if let Ok(state) = self.manager() {
-            let _ = state.remove_thread(&self.agent_id).await;
-        }
-    }
-
-    async fn shutdown_live(&self) -> CodexResult<String> {
-        let state = self.manager()?;
-        let result = if let Ok(thread) = state.get_thread(self.agent_id).await {
-            thread.codex.session.ensure_rollout_materialized().await;
-            thread.codex.session.flush_rollout().await;
-            if matches!(thread.agent_status().await, AgentStatus::Shutdown) {
-                Ok(String::new())
-            } else {
-                state.send_op(self.agent_id, Op::Shutdown {}).await
-            }
-        } else {
-            state.send_op(self.agent_id, Op::Shutdown {}).await
-        };
-        let _ = state.remove_thread(&self.agent_id).await;
-        result
-    }
-
-    async fn status(&self) -> AgentStatus {
-        let Ok(state) = self.manager() else {
-            return AgentStatus::NotFound;
-        };
-        let Ok(thread) = state.get_thread(self.agent_id).await else {
-            return AgentStatus::NotFound;
-        };
-        thread.agent_status().await
-    }
-
-    async fn config_snapshot(&self) -> Option<ThreadConfigSnapshot> {
-        let state = self.manager().ok()?;
-        let thread = state.get_thread(self.agent_id).await.ok()?;
-        Some(thread.config_snapshot().await)
-    }
-
-    async fn subscribe_status(&self) -> CodexResult<watch::Receiver<AgentStatus>> {
-        let state = self.manager()?;
-        let thread = state.get_thread(self.agent_id).await?;
-        Ok(thread.subscribe_status())
-    }
-
-    async fn total_token_usage(&self) -> Option<TokenUsage> {
-        let state = self.manager().ok()?;
-        let thread = state.get_thread(self.agent_id).await.ok()?;
-        thread.total_token_usage().await
-    }
-
-    fn manager(&self) -> CodexResult<Arc<ThreadManagerState>> {
-        self.manager
-            .upgrade()
-            .ok_or_else(|| CodexErr::UnsupportedOperation("thread manager dropped".to_string()))
     }
 }
 
@@ -657,8 +511,6 @@ impl ClaudeCodeSpawnedAgentHandle {
         self.finish_process(exit_status).await;
         Ok(String::new())
     }
-
-    async fn cleanup_after_internal_death(&self) {}
 
     async fn shutdown_live(&self) -> CodexResult<String> {
         let _guard = self.state.turn_lock.lock().await;
@@ -977,8 +829,6 @@ impl CommandSpawnedAgentHandle {
         }
         self.kill_running_process(/*shutdown*/ false).await
     }
-
-    async fn cleanup_after_internal_death(&self) {}
 
     async fn shutdown_live(&self) -> CodexResult<String> {
         self.kill_running_process(/*shutdown*/ true).await
@@ -1574,10 +1424,6 @@ impl CommandBackendCommand {
         config.healthcheck.clone().map(|command| {
             Self::from_parts(command, config.working_dir.clone(), config.env.clone())
         })
-    }
-
-    fn from_prefix(command_prefix: Vec<String>) -> Self {
-        Self::from_parts(command_prefix, None, BTreeMap::new())
     }
 
     fn from_parts(
