@@ -248,7 +248,87 @@ async fn perform_oauth_login_retry_without_scopes(
     }
 }
 
-fn transport_from_add_args(transport_args: AddMcpTransportArgs) -> Result<McpServerTransportConfig> {
+#[derive(Clone)]
+struct StreamableHttpOauthTransport {
+    url: String,
+    http_headers: Option<HashMap<String, String>>,
+    env_http_headers: Option<HashMap<String, String>>,
+}
+
+fn oauth_login_transport(
+    transport: &McpServerTransportConfig,
+) -> Result<StreamableHttpOauthTransport> {
+    match transport {
+        McpServerTransportConfig::StreamableHttp {
+            url,
+            http_headers,
+            env_http_headers,
+            ..
+        } => Ok(StreamableHttpOauthTransport {
+            url: url.clone(),
+            http_headers: http_headers.clone(),
+            env_http_headers: env_http_headers.clone(),
+        }),
+        _ => bail!("OAuth login is only supported for streamable HTTP servers."),
+    }
+}
+
+fn oauth_logout_url(transport: &McpServerTransportConfig) -> Result<String> {
+    match transport {
+        McpServerTransportConfig::StreamableHttp { url, .. } => Ok(url.clone()),
+        _ => bail!("OAuth logout is only supported for streamable_http transports."),
+    }
+}
+
+async fn login_to_mcp_server(
+    name: &str,
+    server: &McpServerConfig,
+    store_mode: codex_rmcp_client::OAuthCredentialsStoreMode,
+    callback_port: Option<u16>,
+    callback_url: Option<&str>,
+    scopes: Vec<String>,
+) -> Result<()> {
+    let transport = oauth_login_transport(&server.transport)?;
+    let explicit_scopes = (!scopes.is_empty()).then_some(scopes);
+    let discovered_scopes = if explicit_scopes.is_none() && server.scopes.is_none() {
+        discover_supported_scopes(&server.transport).await
+    } else {
+        None
+    };
+    let resolved_scopes =
+        resolve_oauth_scopes(explicit_scopes, server.scopes.clone(), discovered_scopes);
+
+    perform_oauth_login_retry_without_scopes(
+        name,
+        &transport.url,
+        store_mode,
+        transport.http_headers,
+        transport.env_http_headers,
+        &resolved_scopes,
+        server.oauth_resource.as_deref(),
+        callback_port,
+        callback_url,
+    )
+    .await
+}
+
+fn logout_from_mcp_server(
+    name: &str,
+    server: &McpServerConfig,
+    store_mode: codex_rmcp_client::OAuthCredentialsStoreMode,
+) -> Result<&'static str> {
+    let url = oauth_logout_url(&server.transport)?;
+
+    match delete_oauth_tokens(name, &url, store_mode) {
+        Ok(true) => Ok("Removed OAuth credentials"),
+        Ok(false) => Ok("No OAuth credentials stored"),
+        Err(err) => Err(anyhow!("failed to delete OAuth credentials: {err}")),
+    }
+}
+
+fn transport_from_add_args(
+    transport_args: AddMcpTransportArgs,
+) -> Result<McpServerTransportConfig> {
     match transport_args {
         AddMcpTransportArgs {
             stdio: Some(stdio), ..
@@ -404,35 +484,13 @@ async fn run_login(config_overrides: &CliConfigOverrides, login_args: LoginArgs)
         bail!("No MCP server named '{name}' found.");
     };
 
-    let (url, http_headers, env_http_headers) = match &server.transport {
-        McpServerTransportConfig::StreamableHttp {
-            url,
-            http_headers,
-            env_http_headers,
-            ..
-        } => (url.clone(), http_headers.clone(), env_http_headers.clone()),
-        _ => bail!("OAuth login is only supported for streamable HTTP servers."),
-    };
-
-    let explicit_scopes = (!scopes.is_empty()).then_some(scopes);
-    let discovered_scopes = if explicit_scopes.is_none() && server.scopes.is_none() {
-        discover_supported_scopes(&server.transport).await
-    } else {
-        None
-    };
-    let resolved_scopes =
-        resolve_oauth_scopes(explicit_scopes, server.scopes.clone(), discovered_scopes);
-
-    perform_oauth_login_retry_without_scopes(
+    login_to_mcp_server(
         &name,
-        &url,
+        server,
         config.mcp_oauth_credentials_store_mode,
-        http_headers,
-        env_http_headers,
-        &resolved_scopes,
-        server.oauth_resource.as_deref(),
         config.mcp_oauth_callback_port,
         config.mcp_oauth_callback_url.as_deref(),
+        scopes,
     )
     .await?;
     println!("Successfully logged in to MCP server '{name}'.");
@@ -450,16 +508,8 @@ async fn run_logout(config_overrides: &CliConfigOverrides, logout_args: LogoutAr
         .get(&name)
         .ok_or_else(|| anyhow!("No MCP server named '{name}' found in configuration."))?;
 
-    let url = match &server.transport {
-        McpServerTransportConfig::StreamableHttp { url, .. } => url.clone(),
-        _ => bail!("OAuth logout is only supported for streamable_http transports."),
-    };
-
-    match delete_oauth_tokens(&name, &url, config.mcp_oauth_credentials_store_mode) {
-        Ok(true) => println!("Removed OAuth credentials for '{name}'."),
-        Ok(false) => println!("No OAuth credentials stored for '{name}'."),
-        Err(err) => return Err(anyhow!("failed to delete OAuth credentials: {err}")),
-    }
+    let message = logout_from_mcp_server(&name, server, config.mcp_oauth_credentials_store_mode)?;
+    println!("{message} for '{name}'.");
 
     Ok(())
 }
