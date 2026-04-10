@@ -375,9 +375,7 @@ struct ManagedClient {
 impl ManagedClient {
     fn listed_tools(&self) -> Vec<ToolInfo> {
         let total_start = Instant::now();
-        if let Some(tools) =
-            cached_codex_apps_tools(self.codex_apps_tools_cache_context.as_ref())
-        {
+        if let Some(tools) = cached_codex_apps_tools(self.codex_apps_tools_cache_context.as_ref()) {
             emit_duration(
                 MCP_TOOLS_LIST_DURATION_METRIC,
                 total_start.elapsed(),
@@ -647,14 +645,7 @@ impl McpConnectionManager {
                 server_origins.insert(server_name.clone(), origin);
             }
             let cancel_token = cancel_token.child_token();
-            let _ = emit_update(
-                &tx_event,
-                McpStartupUpdateEvent {
-                    server: server_name.clone(),
-                    status: McpStartupStatus::Starting,
-                },
-            )
-            .await;
+            emit_starting_update(&tx_event, &server_name).await;
             let codex_apps_tools_cache_context = codex_apps_tools_cache_context_for_server(
                 &server_name,
                 &codex_home,
@@ -674,45 +665,14 @@ impl McpConnectionManager {
             let tx_event = tx_event.clone();
             let auth_entry = auth_entries.get(&server_name).cloned();
             let sandbox_state = initial_sandbox_state.clone();
-            join_set.spawn(async move {
-                let outcome = async_managed_client.client().await;
-                if cancel_token.is_cancelled() {
-                    return (server_name, Err(StartupOutcomeError::Cancelled));
-                }
-                let status = match &outcome {
-                    Ok(_) => {
-                        // Send sandbox state notification immediately after Ready
-                        if let Err(e) = async_managed_client
-                            .notify_sandbox_state_change(&sandbox_state)
-                            .await
-                        {
-                            warn!(
-                                "Failed to notify sandbox state to MCP server {server_name}: {e:#}",
-                            );
-                        }
-                        McpStartupStatus::Ready
-                    }
-                    Err(error) => {
-                        let error_str = mcp_init_error_display(
-                            server_name.as_str(),
-                            auth_entry.as_ref(),
-                            error,
-                        );
-                        McpStartupStatus::Failed { error: error_str }
-                    }
-                };
-
-                let _ = emit_update(
-                    &tx_event,
-                    McpStartupUpdateEvent {
-                        server: server_name.clone(),
-                        status,
-                    },
-                )
-                .await;
-
-                (server_name, outcome)
-            });
+            join_set.spawn(run_async_managed_client_startup(
+                server_name,
+                async_managed_client,
+                tx_event,
+                auth_entry,
+                sandbox_state,
+                cancel_token,
+            ));
         }
         let manager = Self {
             clients,
@@ -720,20 +680,7 @@ impl McpConnectionManager {
             elicitation_requests: elicitation_requests.clone(),
         };
         tokio::spawn(async move {
-            let outcomes = join_set.join_all().await;
-            let mut summary = McpStartupCompleteEvent::default();
-            for (server_name, outcome) in outcomes {
-                match outcome {
-                    Ok(_) => summary.ready.push(server_name),
-                    Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
-                    Err(StartupOutcomeError::Failed { error }) => {
-                        summary.failed.push(McpStartupFailure {
-                            server: server_name,
-                            error,
-                        })
-                    }
-                }
-            }
+            let summary = summarize_startup_outcomes(join_set.join_all().await);
             let _ = tx_event
                 .send(Event {
                     id: INITIAL_SUBMIT_ID.to_owned(),
@@ -1121,6 +1068,93 @@ async fn emit_update(
         .await
 }
 
+async fn emit_starting_update(tx_event: &Sender<Event>, server_name: &str) {
+    let _ = emit_update(
+        tx_event,
+        McpStartupUpdateEvent {
+            server: server_name.to_string(),
+            status: McpStartupStatus::Starting,
+        },
+    )
+    .await;
+}
+
+async fn startup_status_for_outcome(
+    server_name: &str,
+    async_managed_client: &AsyncManagedClient,
+    auth_entry: Option<&McpAuthStatusEntry>,
+    sandbox_state: &SandboxState,
+    outcome: &Result<ManagedClient, StartupOutcomeError>,
+) -> McpStartupStatus {
+    match outcome {
+        Ok(_) => {
+            // Send sandbox state notification immediately after Ready.
+            if let Err(e) = async_managed_client
+                .notify_sandbox_state_change(sandbox_state)
+                .await
+            {
+                warn!("Failed to notify sandbox state to MCP server {server_name}: {e:#}",);
+            }
+            McpStartupStatus::Ready
+        }
+        Err(error) => McpStartupStatus::Failed {
+            error: mcp_init_error_display(server_name, auth_entry, error),
+        },
+    }
+}
+
+async fn run_async_managed_client_startup(
+    server_name: String,
+    async_managed_client: AsyncManagedClient,
+    tx_event: Sender<Event>,
+    auth_entry: Option<McpAuthStatusEntry>,
+    sandbox_state: SandboxState,
+    cancel_token: CancellationToken,
+) -> (String, Result<ManagedClient, StartupOutcomeError>) {
+    let outcome = async_managed_client.client().await;
+    let outcome = if cancel_token.is_cancelled() {
+        Err(StartupOutcomeError::Cancelled)
+    } else {
+        outcome
+    };
+    let status = startup_status_for_outcome(
+        server_name.as_str(),
+        &async_managed_client,
+        auth_entry.as_ref(),
+        &sandbox_state,
+        &outcome,
+    )
+    .await;
+
+    let _ = emit_update(
+        &tx_event,
+        McpStartupUpdateEvent {
+            server: server_name.clone(),
+            status,
+        },
+    )
+    .await;
+
+    (server_name, outcome)
+}
+
+fn summarize_startup_outcomes(
+    outcomes: Vec<(String, Result<ManagedClient, StartupOutcomeError>)>,
+) -> McpStartupCompleteEvent {
+    let mut summary = McpStartupCompleteEvent::default();
+    for (server_name, outcome) in outcomes {
+        match outcome {
+            Ok(_) => summary.ready.push(server_name),
+            Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
+            Err(StartupOutcomeError::Failed { error }) => summary.failed.push(McpStartupFailure {
+                server: server_name,
+                error,
+            }),
+        }
+    }
+    summary
+}
+
 /// A tool is allowed to be used if both are true:
 /// 1. enabled is None (no allowlist is set) or the tool is explicitly enabled.
 /// 2. The tool is not explicitly disabled.
@@ -1359,8 +1393,8 @@ async fn start_server_task(
         startup_timeout,
         codex_apps_tools_cache_context.as_ref(),
     )
-        .await
-        .map_err(StartupOutcomeError::from)?;
+    .await
+    .map_err(StartupOutcomeError::from)?;
     if server_name == CODEX_APPS_MCP_SERVER_NAME {
         emit_duration(
             MCP_TOOLS_LIST_DURATION_METRIC,
