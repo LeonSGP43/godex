@@ -351,6 +351,12 @@ Current MVP status (`2026-04-10`):
   template-driven branded login pages
 - `patch/bootstrap-runtime-ui` has been reduced to thin runtime UI helpers for
   startup notices and other presentation copy
+- `patch/config-home-namespace` has been reduced to dedicated CLI/root policy
+  adapters, so remaining `godex-home` and root override behavior is no longer
+  spread across `cli/src/main.rs`
+- `patch/backend-contract` now terminates at the external backend contract
+  seam, with obsolete non-external spawned-agent handle residue removed from
+  `core/src/agent/backend.rs`
 - remaining work in these lanes is sync-time maintenance, not prerequisite MVP
   architecture work
 
@@ -456,11 +462,11 @@ This plan **does** promise a better operating model:
 ## Immediate Next Actions
 
 1. treat the current memory work as frozen at the MVP cutline
-2. make `patch/backend-contract` the highest-priority structural lane
-3. extract `patch/config-home-namespace` into thinner adapters
-4. keep `fork/bootstrap-residue` frozen at the current MVP cut unless real sync
+2. treat `patch/backend-contract` and `patch/config-home-namespace` as MVP-closed
+   structural lanes unless upstream changes reopen them
+3. keep `fork/bootstrap-residue` frozen at the current MVP cut unless real sync
    conflicts or regressions require reopening a lane
-5. for every later fork feature, require:
+4. for every later fork feature, require:
    - manifest entry
    - patch group
    - verification
