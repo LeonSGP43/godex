@@ -20,7 +20,6 @@ use codex_app_server_protocol::ConfigLayerSource;
 use codex_config::config_toml::ConfigToml;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::path::Path;
 use std::sync::LazyLock;
 use toml::Value as TomlValue;
 
@@ -36,83 +35,92 @@ const AGENT_TYPE_UNAVAILABLE_ERROR: &str = "agent type is currently not availabl
 /// profile's `model_provider` in place. Rebuilding the config without those overrides would make a
 /// spawned agent silently fall back to the default provider, which is the bug this preservation
 /// logic avoids.
+#[cfg(test)]
 pub(crate) async fn apply_role_to_config(
     config: &mut Config,
     role_name: Option<&str>,
 ) -> Result<(), String> {
-    let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
-
-    let role = resolve_role_config(config, role_name)
-        .cloned()
-        .ok_or_else(|| format!("unknown agent_type '{role_name}'"))?;
-
-    apply_role_to_config_inner(config, role_name, &role)
-        .await
-        .map_err(|err| {
-            tracing::warn!("failed to apply role to config: {err}");
-            AGENT_TYPE_UNAVAILABLE_ERROR.to_string()
-        })
-}
-
-async fn apply_role_to_config_inner(
-    config: &mut Config,
-    role_name: &str,
-    role: &AgentRoleConfig,
-) -> anyhow::Result<()> {
-    let is_built_in = !config.agent_roles.contains_key(role_name);
-    let Some(config_file) = role.config_file.as_ref() else {
-        return Ok(());
-    };
-    let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
-    if role_layer_toml
-        .as_table()
-        .is_some_and(toml::map::Map::is_empty)
-    {
-        return Ok(());
-    }
-    let (preserve_current_profile, preserve_current_provider) =
-        preservation_policy(config, &role_layer_toml);
-
-    *config = reload::build_next_config(
-        config,
-        role_layer_toml,
-        preserve_current_profile,
-        preserve_current_provider,
-    )?;
+    let next_config =
+        apply_role_to_config_by_value_owned(config.clone(), role_name.map(str::to_owned)).await?;
+    *config = next_config;
     Ok(())
 }
 
-async fn load_role_layer_toml(
-    config: &Config,
-    config_file: &Path,
+pub(crate) async fn apply_role_to_config_by_value_owned(
+    mut config: Config,
+    role_name: Option<String>,
+) -> Result<Config, String> {
+    let role_name = role_name.unwrap_or_else(|| DEFAULT_ROLE_NAME.to_string());
+
+    let role = resolve_role_config(&config, &role_name)
+        .cloned()
+        .ok_or_else(|| format!("unknown agent_type '{role_name}'"))?;
+
+    let result = async {
+        let is_built_in = !config.agent_roles.contains_key(&role_name);
+        let Some(config_file) = role.config_file.clone() else {
+            return Ok(());
+        };
+        let role_layer_toml =
+            load_role_layer_toml_owned(config.clone(), config_file, is_built_in, role_name.clone())
+                .await?;
+        if role_layer_toml
+            .as_table()
+            .is_some_and(toml::map::Map::is_empty)
+        {
+            return Ok(());
+        }
+        let (preserve_current_profile, preserve_current_provider) =
+            preservation_policy(&config, &role_layer_toml);
+
+        config = reload::build_next_config(
+            &config,
+            role_layer_toml,
+            preserve_current_profile,
+            preserve_current_provider,
+        )?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    result.map(|_| config).map_err(|err| {
+        tracing::warn!("failed to apply role to config: {err}");
+        AGENT_TYPE_UNAVAILABLE_ERROR.to_string()
+    })
+}
+
+async fn load_role_layer_toml_owned(
+    config: Config,
+    config_file: std::path::PathBuf,
     is_built_in: bool,
-    role_name: &str,
+    role_name: String,
 ) -> anyhow::Result<TomlValue> {
     let (role_config_toml, role_config_base) = if is_built_in {
-        let role_config_contents = built_in::config_file_contents(config_file)
+        let role_config_contents = built_in::config_file_contents(config_file.as_path())
             .map(str::to_owned)
             .ok_or(anyhow!("No corresponding config content"))?;
         let role_config_toml: TomlValue = toml::from_str(&role_config_contents)?;
-        (role_config_toml, config.codex_home.as_path())
+        (role_config_toml, config.codex_home.clone())
     } else {
-        let role_config_contents = tokio::fs::read_to_string(config_file).await?;
+        let role_config_contents = tokio::fs::read_to_string(&config_file).await?;
         let role_config_base = config_file
             .parent()
-            .ok_or(anyhow!("No corresponding config content"))?;
+            .ok_or(anyhow!("No corresponding config content"))?
+            .to_path_buf();
         let role_config_toml = parse_agent_role_file_contents(
             &role_config_contents,
-            config_file,
-            role_config_base,
-            Some(role_name),
+            config_file.as_path(),
+            role_config_base.as_path(),
+            Some(role_name.as_str()),
         )?
         .config;
         (role_config_toml, role_config_base)
     };
 
-    deserialize_config_toml_with_base(role_config_toml.clone(), role_config_base)?;
+    deserialize_config_toml_with_base(role_config_toml.clone(), role_config_base.as_path())?;
     Ok(resolve_relative_paths_in_config_toml(
         role_config_toml,
-        role_config_base,
+        role_config_base.as_path(),
     )?)
 }
 
@@ -348,6 +356,7 @@ pub(crate) mod spawn_tool_spec {
 
 mod built_in {
     use super::*;
+    use std::path::Path;
 
     /// Returns the cached built-in role declarations defined in this module.
     pub(super) fn configs() -> &'static BTreeMap<String, AgentRoleConfig> {

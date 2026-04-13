@@ -7,7 +7,7 @@ build = "build.rs"
 
 [[bin]]
 name = "codex"
-path = "src/main.rs"
+path = "src/bin/codex.rs"
 
 [[bin]]
 name = "godex"

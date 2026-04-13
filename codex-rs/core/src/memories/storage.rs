@@ -1,16 +1,25 @@
 use codex_state::Stage1Output;
 use std::collections::HashSet;
 use std::fmt::Write as _;
+#[cfg(test)]
 use std::path::Path;
 use tracing::warn;
 use uuid::Uuid;
 
+#[cfg(test)]
 use crate::memories::ensure_layout;
+#[cfg(test)]
 use crate::memories::semantic_index::clear_auxiliary_indexes;
+use crate::memories::semantic_index::clear_auxiliary_indexes_owned;
+#[cfg(test)]
 use crate::memories::semantic_index::write_memory_index_qmd;
+use crate::memories::semantic_index::write_memory_index_qmd_owned;
+#[cfg(test)]
 use crate::memories::semantic_index::write_vector_index_json;
+use crate::memories::semantic_index::write_vector_index_json_owned;
 
 /// Rebuild `raw_memories.md` from DB-backed stage-1 outputs.
+#[cfg(test)]
 pub(super) async fn rebuild_raw_memories_file_from_memories(
     root: &Path,
     memories: &[Stage1Output],
@@ -20,7 +29,17 @@ pub(super) async fn rebuild_raw_memories_file_from_memories(
     rebuild_raw_memories_file(root, memories, max_raw_memories_for_consolidation).await
 }
 
+pub(super) async fn rebuild_raw_memories_file_from_memories_owned(
+    root: std::path::PathBuf,
+    memories: Vec<Stage1Output>,
+    max_raw_memories_for_consolidation: usize,
+) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(crate::fork_patch::memory::rollout_summaries_dir(&root)).await?;
+    rebuild_raw_memories_file_owned(root, memories, max_raw_memories_for_consolidation).await
+}
+
 /// Syncs canonical rollout summary files from DB-backed stage-1 output rows.
+#[cfg(test)]
 pub(super) async fn sync_rollout_summaries_from_memories(
     root: &Path,
     memories: &[Stage1Output],
@@ -67,6 +86,53 @@ pub(super) async fn sync_rollout_summaries_from_memories(
     Ok(())
 }
 
+pub(super) async fn sync_rollout_summaries_from_memories_owned(
+    root: std::path::PathBuf,
+    memories: Vec<Stage1Output>,
+    max_raw_memories_for_consolidation: usize,
+    semantic_index_enabled: bool,
+) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(crate::fork_patch::memory::rollout_summaries_dir(&root)).await?;
+
+    let retained = retained_memories_owned(memories, max_raw_memories_for_consolidation);
+    let keep = retained
+        .iter()
+        .map(rollout_summary_file_stem)
+        .collect::<HashSet<_>>();
+    prune_rollout_summaries_owned(root.clone(), keep).await?;
+
+    for memory in retained.iter().cloned() {
+        write_rollout_summary_for_thread_owned(root.clone(), memory).await?;
+    }
+
+    if retained.is_empty() {
+        clear_auxiliary_indexes_owned(root.clone()).await?;
+        for path in crate::fork_patch::memory::empty_consolidation_cleanup_files(&root) {
+            if let Err(err) = tokio::fs::remove_file(path).await
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(err);
+            }
+        }
+
+        for path in crate::fork_patch::memory::empty_consolidation_cleanup_dirs(&root) {
+            if let Err(err) = tokio::fs::remove_dir_all(path).await
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(err);
+            }
+        }
+    } else if semantic_index_enabled {
+        write_memory_index_qmd_owned(root.clone(), retained.clone()).await?;
+        write_vector_index_json_owned(root, retained).await?;
+    } else {
+        clear_auxiliary_indexes_owned(root).await?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
 async fn rebuild_raw_memories_file(
     root: &Path,
     memories: &[Stage1Output],
@@ -105,6 +171,45 @@ async fn rebuild_raw_memories_file(
     tokio::fs::write(crate::fork_patch::memory::raw_memories_file(root), body).await
 }
 
+async fn rebuild_raw_memories_file_owned(
+    root: std::path::PathBuf,
+    memories: Vec<Stage1Output>,
+    max_raw_memories_for_consolidation: usize,
+) -> std::io::Result<()> {
+    let retained = retained_memories_owned(memories, max_raw_memories_for_consolidation);
+    let mut body = String::from("# Raw Memories\n\n");
+
+    if retained.is_empty() {
+        body.push_str("No raw memories yet.\n");
+        return tokio::fs::write(crate::fork_patch::memory::raw_memories_file(&root), body).await;
+    }
+
+    body.push_str("Merged stage-1 raw memories (latest first):\n\n");
+    for memory in retained {
+        writeln!(body, "## Thread `{}`", memory.thread_id).map_err(raw_memories_format_error)?;
+        writeln!(
+            body,
+            "updated_at: {}",
+            memory.source_updated_at.to_rfc3339()
+        )
+        .map_err(raw_memories_format_error)?;
+        writeln!(body, "cwd: {}", memory.cwd.display()).map_err(raw_memories_format_error)?;
+        writeln!(body, "rollout_path: {}", memory.rollout_path.display())
+            .map_err(raw_memories_format_error)?;
+        let rollout_summary_file = crate::fork_patch::memory::rollout_summary_file_name(
+            &rollout_summary_file_stem(&memory),
+        );
+        writeln!(body, "rollout_summary_file: {rollout_summary_file}")
+            .map_err(raw_memories_format_error)?;
+        writeln!(body).map_err(raw_memories_format_error)?;
+        body.push_str(memory.raw_memory.trim());
+        body.push_str("\n\n");
+    }
+
+    tokio::fs::write(crate::fork_patch::memory::raw_memories_file(&root), body).await
+}
+
+#[cfg(test)]
 async fn prune_rollout_summaries(root: &Path, keep: &HashSet<String>) -> std::io::Result<()> {
     let dir_path = crate::fork_patch::memory::rollout_summaries_dir(root);
     let mut dir = match tokio::fs::read_dir(&dir_path).await {
@@ -135,6 +240,40 @@ async fn prune_rollout_summaries(root: &Path, keep: &HashSet<String>) -> std::io
     Ok(())
 }
 
+async fn prune_rollout_summaries_owned(
+    root: std::path::PathBuf,
+    keep: HashSet<String>,
+) -> std::io::Result<()> {
+    let dir_path = crate::fork_patch::memory::rollout_summaries_dir(&root);
+    let mut dir = match tokio::fs::read_dir(&dir_path).await {
+        Ok(dir) => dir,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+
+    while let Some(entry) = dir.next_entry().await? {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(stem) = crate::fork_patch::memory::rollout_summary_file_stem(file_name) else {
+            continue;
+        };
+        if !keep.contains(stem)
+            && let Err(err) = tokio::fs::remove_file(&path).await
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(
+                "failed pruning outdated rollout summary {}: {err}",
+                path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
 async fn write_rollout_summary_for_thread(
     root: &Path,
     memory: &Stage1Output,
@@ -163,11 +302,50 @@ async fn write_rollout_summary_for_thread(
     tokio::fs::write(path, body).await
 }
 
+async fn write_rollout_summary_for_thread_owned(
+    root: std::path::PathBuf,
+    memory: Stage1Output,
+) -> std::io::Result<()> {
+    let file_stem = rollout_summary_file_stem(&memory);
+    let path = crate::fork_patch::memory::rollout_summary_path(&root, &file_stem);
+
+    let mut body = String::new();
+    writeln!(body, "thread_id: {}", memory.thread_id).map_err(rollout_summary_format_error)?;
+    writeln!(
+        body,
+        "updated_at: {}",
+        memory.source_updated_at.to_rfc3339()
+    )
+    .map_err(rollout_summary_format_error)?;
+    writeln!(body, "rollout_path: {}", memory.rollout_path.display())
+        .map_err(rollout_summary_format_error)?;
+    writeln!(body, "cwd: {}", memory.cwd.display()).map_err(rollout_summary_format_error)?;
+    if let Some(git_branch) = memory.git_branch.as_deref() {
+        writeln!(body, "git_branch: {git_branch}").map_err(rollout_summary_format_error)?;
+    }
+    writeln!(body).map_err(rollout_summary_format_error)?;
+    body.push_str(&memory.rollout_summary);
+    body.push('\n');
+
+    tokio::fs::write(path, body).await
+}
+
+#[cfg(test)]
 fn retained_memories(
     memories: &[Stage1Output],
     max_raw_memories_for_consolidation: usize,
 ) -> &[Stage1Output] {
     &memories[..memories.len().min(max_raw_memories_for_consolidation)]
+}
+
+fn retained_memories_owned(
+    memories: Vec<Stage1Output>,
+    max_raw_memories_for_consolidation: usize,
+) -> Vec<Stage1Output> {
+    memories
+        .into_iter()
+        .take(max_raw_memories_for_consolidation)
+        .collect()
 }
 
 fn raw_memories_format_error(err: std::fmt::Error) -> std::io::Error {

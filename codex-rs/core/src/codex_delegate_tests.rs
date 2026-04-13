@@ -242,7 +242,7 @@ async fn handle_request_permissions_uses_tool_call_id_for_round_trip() {
 }
 
 #[tokio::test]
-async fn handle_exec_approval_uses_call_id_for_guardian_review_and_approval_id_for_reply() {
+async fn handle_exec_approval_emits_distinct_guardian_review_id_and_approval_reply_id() {
     let (parent_session, parent_ctx, rx_events) =
         crate::codex::make_session_and_context_with_rx().await;
     let mut parent_ctx = Arc::try_unwrap(parent_ctx).expect("single turn context ref");
@@ -311,10 +311,12 @@ async fn handle_exec_approval_uses_call_id_for_guardian_review_and_approval_id_f
     })
     .await
     .expect("timed out waiting for guardian assessment");
+    assert!(!assessment_event.id.is_empty());
+    assert_ne!(assessment_event.id, "callback-approval-1");
     assert_eq!(
         assessment_event,
         GuardianAssessmentEvent {
-            id: "command-item-1".to_string(),
+            id: assessment_event.id.clone(),
             turn_id: parent_ctx.sub_id.clone(),
             status: GuardianAssessmentStatus::InProgress,
             risk_level: None,

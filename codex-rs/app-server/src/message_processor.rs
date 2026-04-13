@@ -81,7 +81,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_state::log_db::LogDbLayer;
-use futures::FutureExt;
 use tokio::sync::broadcast;
 use tokio::sync::watch;
 use tokio::time::Duration;
@@ -841,9 +840,6 @@ impl MessageProcessor {
                 .await;
             }
             other => {
-                // Box the delegated future so this wrapper's async state machine does not
-                // inline the full `CodexMessageProcessor::process_request` future, which
-                // can otherwise push worker-thread stack usage over the edge.
                 self.codex_message_processor
                     .process_request(
                         connection_id,
@@ -852,7 +848,6 @@ impl MessageProcessor {
                         session.client_version.clone(),
                         request_context,
                     )
-                    .boxed()
                     .await;
             }
         }

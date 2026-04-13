@@ -1,6 +1,5 @@
 use super::storage::rebuild_raw_memories_file_from_memories;
 use super::storage::sync_rollout_summaries_from_memories;
-use crate::config::types::DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION;
 use crate::fork_patch::memory::memory_index_file;
 use crate::fork_patch::memory::memory_qmd_file;
 use crate::fork_patch::memory::raw_memories_file;
@@ -808,7 +807,7 @@ mod phase2 {
     async fn dispatch_skips_when_global_job_is_not_dirty() {
         let harness = DispatchHarness::new().await;
 
-        phase2::run(&harness.session, Arc::clone(&harness.config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::clone(&harness.config)).await;
 
         pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
@@ -833,7 +832,7 @@ mod phase2 {
             "precondition should claim the running lock"
         );
 
-        phase2::run(&harness.session, Arc::clone(&harness.config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::clone(&harness.config)).await;
 
         let running_claim = harness
             .state_db
@@ -861,7 +860,7 @@ mod phase2 {
             "stale lock precondition should be claimed"
         );
 
-        phase2::run(&harness.session, Arc::clone(&harness.config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::clone(&harness.config)).await;
 
         let post_dispatch_claim = harness
             .state_db
@@ -983,7 +982,7 @@ mod phase2 {
             .await
             .expect("enqueue global consolidation");
 
-        phase2::run(&harness.session, Arc::clone(&harness.config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::clone(&harness.config)).await;
 
         assert!(
             !tokio::fs::try_exists(&stale_summary_path)
@@ -1056,7 +1055,7 @@ mod phase2 {
         constrained_config.permissions.sandbox_policy =
             Constrained::allow_only(SandboxPolicy::DangerFullAccess);
 
-        phase2::run(&harness.session, Arc::new(constrained_config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::new(constrained_config)).await;
 
         let retry_claim = harness
             .state_db
@@ -1078,7 +1077,7 @@ mod phase2 {
             .await
             .expect("create file at memory root");
 
-        phase2::run(&harness.session, Arc::clone(&harness.config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::clone(&harness.config)).await;
 
         let retry_claim = harness
             .state_db
@@ -1100,7 +1099,7 @@ mod phase2 {
             .await
             .expect("create raw_memories.md as a directory");
 
-        phase2::run(&harness.session, Arc::clone(&harness.config)).await;
+        phase2::run(Arc::clone(&harness.session), Arc::clone(&harness.config)).await;
 
         let retry_claim = harness
             .state_db
@@ -1177,7 +1176,7 @@ mod phase2 {
             "stage-1 success should enqueue global consolidation"
         );
 
-        phase2::run(&session, Arc::clone(&config)).await;
+        phase2::run(Arc::clone(&session), Arc::clone(&config)).await;
 
         let retry_claim = state_db
             .try_claim_global_phase2_job(ThreadId::new(), /*lease_seconds*/ 3_600)

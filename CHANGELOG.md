@@ -4,6 +4,24 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-04-13
+
+### Changed
+
+- What changed: pushed the fork further into a patch-layer architecture for the main fork-owned surfaces. Real provider execution is now documented and routed around `[agent_backends.<name>]` plus external worker samples instead of provider-branded prompt-role shims, memory-specific scope/query/path glue is concentrated behind `core/src/fork_patch/memory.rs` and `state/src/fork_patch/memory_repo.rs`, and the remaining login/MCP/proxy/runtime-ui bootstrap residue is reduced to thinner adapters.
+- Why: the fork needs to keep its custom backend, memory, and bootstrap behavior without forcing every upstream sync to reopen the same hot-path conflicts.
+- Impact: future merges should concentrate conflict risk in a smaller set of fork-owned seams, external backend providers can be registered without recompiling the Codex binary, and the current memory/bootstrap features remain available with less direct coupling to upstream internals.
+- Verification: `bash scripts/godex-maintain.sh check`, `cargo test -p codex-core spawn_agent_with_command_backend_uses_backend_default_model_and_backend_id --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli login_status_reports_api_key_auth --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-cli logout_reports_removed_credentials --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-state --lib --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-app-server --tests --no-run --manifest-path codex-rs/Cargo.toml`, `cargo test -p codex-tui resume_picker_thread_names_snapshot --manifest-path codex-rs/Cargo.toml`
+- Files: `codex-rs/core/src/agent/backend.rs`, `codex-rs/core/src/fork_patch/memory.rs`, `codex-rs/state/src/fork_patch/memory_repo.rs`, `codex-rs/cli/src/root_cli_policy.rs`, `codex-rs/core/src/network_proxy_loader.rs`, `docs/external-agent-backends.md`, `docs/godex-fork-manifest.md`, `docs/godex-memory-mvp-closure.md`
+
+### Docs
+
+- What changed: refreshed the fork manifest, inventory ledger, patch master plan, memory patch-layer plan, memory MVP closure, and external-backend guidance so the current patch groups, owner files, validation commands, and upstream-replacement triggers are tracked explicitly.
+- Why: once the fork is maintained as a patch layer, these docs become the source of truth for sync decisions, patch deletion, and future upstream replacement checks.
+- Impact: maintainers can audit which differences are durable versus migrate/shrink lanes, freeze non-MVP residue instead of expanding it again, and decide more safely when an upstream feature should replace a fork patch.
+- Verification: `bash scripts/godex-maintain.sh status`, `bash scripts/godex-maintain.sh release-preflight`
+- Files: `docs/agent-roles.md`, `docs/external-agent-backends.md`, `docs/godex-fork-inventory-ledger.md`, `docs/godex-fork-manifest.md`, `docs/godex-fork-patch-master-plan.md`, `docs/godex-memory-mvp-closure.md`, `docs/godex-memory-patch-layer-plan.md`
+
 ## [0.2.17] - 2026-04-06
 
 ### Docs

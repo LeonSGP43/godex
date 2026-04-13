@@ -15,6 +15,32 @@ WHERE id = 1
         crate::BackfillState::try_from_row(&row)
     }
 
+    pub async fn get_backfill_state_owned(self: Arc<Self>) -> anyhow::Result<crate::BackfillState> {
+        let pool = self.pool.as_ref().clone();
+        sqlx::query(
+            r#"
+INSERT INTO backfill_state (id, status, last_watermark, last_success_at, updated_at)
+VALUES (?, ?, NULL, NULL, ?)
+ON CONFLICT(id) DO NOTHING
+            "#,
+        )
+        .bind(1_i64)
+        .bind(crate::BackfillStatus::Pending.as_str())
+        .bind(Utc::now().timestamp())
+        .execute(&pool)
+        .await?;
+        let row = sqlx::query(
+            r#"
+SELECT status, last_watermark, last_success_at
+FROM backfill_state
+WHERE id = 1
+            "#,
+        )
+        .fetch_one(&pool)
+        .await?;
+        crate::BackfillState::try_from_row(&row)
+    }
+
     /// Attempt to claim ownership of rollout metadata backfill.
     ///
     /// Returns `true` when this runtime claimed the backfill worker slot.

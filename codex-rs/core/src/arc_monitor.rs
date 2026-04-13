@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde::Serialize;
+use std::sync::Arc;
 use tracing::warn;
 
 use crate::codex::Session;
@@ -215,6 +216,130 @@ pub(crate) async fn monitor_action(
     }
 }
 
+pub(crate) async fn monitor_action_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    action: serde_json::Value,
+    protection_client_callsite: &'static str,
+) -> ArcMonitorOutcome {
+    let auth = match turn_context.auth_manager.as_ref() {
+        Some(auth_manager) => match auth_manager.auth().await {
+            Some(auth) if auth.is_chatgpt_auth() => Some(auth),
+            _ => None,
+        },
+        None => None,
+    };
+    let token = if let Some(token) = read_non_empty_env_var(CODEX_ARC_MONITOR_TOKEN) {
+        token
+    } else {
+        let Some(auth) = auth.as_ref() else {
+            return ArcMonitorOutcome::Ok;
+        };
+        match auth.get_token() {
+            Ok(token) => token,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "skipping safety monitor because auth token is unavailable"
+                );
+                return ArcMonitorOutcome::Ok;
+            }
+        }
+    };
+
+    let url = read_non_empty_env_var(CODEX_ARC_MONITOR_ENDPOINT_OVERRIDE).unwrap_or_else(|| {
+        format!(
+            "{}/codex/safety/arc",
+            turn_context.config.chatgpt_base_url.trim_end_matches('/')
+        )
+    });
+    let action = match action {
+        serde_json::Value::Object(action) => action,
+        _ => {
+            warn!("skipping safety monitor because action payload is not an object");
+            return ArcMonitorOutcome::Ok;
+        }
+    };
+    let body = build_arc_monitor_request_owned(
+        sess.clone(),
+        turn_context.clone(),
+        action,
+        protection_client_callsite,
+    )
+    .await;
+    let client = build_reqwest_client();
+    let mut request = client
+        .post(&url)
+        .timeout(ARC_MONITOR_TIMEOUT)
+        .json(&body)
+        .bearer_auth(token);
+    if let Some(account_id) = auth.as_ref().and_then(CodexAuth::get_account_id) {
+        request = request.header("chatgpt-account-id", account_id);
+    }
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(err) => {
+            warn!(error = %err, %url, "safety monitor request failed");
+            return ArcMonitorOutcome::Ok;
+        }
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let response_text = response.text().await.unwrap_or_default();
+        warn!(
+            %status,
+            %url,
+            response_text,
+            "safety monitor returned non-success status"
+        );
+        return ArcMonitorOutcome::Ok;
+    }
+
+    let response = match response.json::<ArcMonitorResult>().await {
+        Ok(response) => response,
+        Err(err) => {
+            warn!(error = %err, %url, "failed to parse safety monitor response");
+            return ArcMonitorOutcome::Ok;
+        }
+    };
+    tracing::debug!(
+        risk_score = response.risk_score,
+        risk_level = ?response.risk_level,
+        evidence_count = response.evidence.len(),
+        "safety monitor completed"
+    );
+
+    let short_reason = response.short_reason.trim();
+    let rationale = response.rationale.trim();
+    match response.outcome {
+        ArcMonitorResultOutcome::Ok => ArcMonitorOutcome::Ok,
+        ArcMonitorResultOutcome::AskUser => {
+            if !short_reason.is_empty() {
+                ArcMonitorOutcome::AskUser(short_reason.to_string())
+            } else if !rationale.is_empty() {
+                ArcMonitorOutcome::AskUser(rationale.to_string())
+            } else {
+                ArcMonitorOutcome::AskUser(
+                    "Additional confirmation is required before this tool call can continue."
+                        .to_string(),
+                )
+            }
+        }
+        ArcMonitorResultOutcome::SteerModel => {
+            if !rationale.is_empty() {
+                ArcMonitorOutcome::SteerModel(rationale.to_string())
+            } else if !short_reason.is_empty() {
+                ArcMonitorOutcome::SteerModel(short_reason.to_string())
+            } else {
+                ArcMonitorOutcome::SteerModel(
+                    "Tool call was cancelled because of safety risks.".to_string(),
+                )
+            }
+        }
+    }
+}
+
 fn read_non_empty_env_var(key: &str) -> Option<String> {
     match env::var(key) {
         Ok(value) => {
@@ -235,6 +360,41 @@ fn read_non_empty_env_var(key: &str) -> Option<String> {
 async fn build_arc_monitor_request(
     sess: &Session,
     turn_context: &TurnContext,
+    action: serde_json::Map<String, serde_json::Value>,
+    protection_client_callsite: &'static str,
+) -> ArcMonitorRequest {
+    let history = sess.clone_history().await;
+    let mut messages = build_arc_monitor_messages(history.raw_items());
+    if messages.is_empty() {
+        messages.push(build_arc_monitor_message(
+            "user",
+            serde_json::Value::String(
+                "No prior conversation history is available for this ARC evaluation.".to_string(),
+            ),
+        ));
+    }
+
+    let conversation_id = sess.conversation_id.to_string();
+    ArcMonitorRequest {
+        metadata: ArcMonitorMetadata {
+            codex_thread_id: conversation_id.clone(),
+            codex_turn_id: turn_context.sub_id.clone(),
+            conversation_id: Some(conversation_id),
+            protection_client_callsite: Some(protection_client_callsite.to_string()),
+        },
+        messages: Some(messages),
+        input: None,
+        policies: Some(ArcMonitorPolicies {
+            user: None,
+            developer: None,
+        }),
+        action,
+    }
+}
+
+async fn build_arc_monitor_request_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
     action: serde_json::Map<String, serde_json::Value>,
     protection_client_callsite: &'static str,
 ) -> ArcMonitorRequest {

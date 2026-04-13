@@ -308,28 +308,31 @@ impl GuardianReviewSessionManager {
         };
 
         if trunk.reuse_key != next_reuse_key {
-            return self
-                .run_ephemeral_review(
-                    params,
-                    next_reuse_key,
-                    deadline,
-                    /*initial_history*/ None,
-                )
-                .await;
+            return require_send_owned(self.run_ephemeral_review(
+                params,
+                next_reuse_key,
+                deadline,
+                /*initial_history*/ None,
+            ))
+            .await;
         }
 
         let trunk_guard = match trunk.review_lock.try_lock() {
             Ok(trunk_guard) => trunk_guard,
             Err(_) => {
                 let initial_history = trunk.fork_initial_history().await;
-                return self
-                    .run_ephemeral_review(params, next_reuse_key, deadline, initial_history)
-                    .await;
+                return require_send_owned(self.run_ephemeral_review(
+                    params,
+                    next_reuse_key,
+                    deadline,
+                    initial_history,
+                ))
+                .await;
             }
         };
 
         let (outcome, keep_review_session) =
-            run_review_on_session(trunk.as_ref(), &params, deadline).await;
+            require_send_owned(run_review_on_session(trunk.as_ref(), &params, deadline)).await;
         if keep_review_session && matches!(outcome, GuardianReviewSessionOutcome::Completed(_)) {
             trunk.refresh_last_committed_rollout_items().await;
         }
@@ -448,7 +451,12 @@ impl GuardianReviewSessionManager {
         let mut cleanup =
             EphemeralReviewCleanup::new(Arc::clone(&self.state), Arc::clone(&review_session));
 
-        let (outcome, _) = run_review_on_session(review_session.as_ref(), &params, deadline).await;
+        let (outcome, _) = require_send_owned(run_review_on_session(
+            review_session.as_ref(),
+            &params,
+            deadline,
+        ))
+        .await;
         if let Some(review_session) = self.take_active_ephemeral(&review_session).await {
             cleanup.disarm();
             review_session.shutdown_in_background();
@@ -465,7 +473,7 @@ async fn spawn_guardian_review_session(
     initial_history: Option<InitialHistory>,
 ) -> anyhow::Result<GuardianReviewSession> {
     let has_prior_review = initial_history.is_some();
-    let codex = run_codex_thread_interactive(
+    let codex = require_send_owned(run_codex_thread_interactive(
         spawn_config,
         params.parent_session.services.auth_manager.clone(),
         params.parent_session.services.models_manager.clone(),
@@ -474,7 +482,7 @@ async fn spawn_guardian_review_session(
         cancel_token.clone(),
         SubAgentSource::Other(GUARDIAN_REVIEWER_NAME.to_string()),
         initial_history,
-    )
+    ))
     .await?;
 
     Ok(GuardianReviewSession {
@@ -493,7 +501,7 @@ async fn run_review_on_session(
     deadline: tokio::time::Instant,
 ) -> (GuardianReviewSessionOutcome, bool) {
     if review_session.has_prior_review.load(Ordering::Relaxed) {
-        append_guardian_followup_reminder(review_session).await;
+        require_send_owned(append_guardian_followup_reminder(review_session)).await;
     }
 
     let submit_result = run_before_review_deadline(
@@ -540,8 +548,12 @@ async fn run_review_on_session(
         );
     }
 
-    let outcome =
-        wait_for_guardian_review(review_session, deadline, params.external_cancel.as_ref()).await;
+    let outcome = require_send_owned(wait_for_guardian_review(
+        review_session,
+        deadline,
+        params.external_cancel.as_ref(),
+    ))
+    .await;
     if matches!(outcome.0, GuardianReviewSessionOutcome::Completed(_)) {
         review_session
             .has_prior_review
@@ -739,6 +751,14 @@ async fn interrupt_and_drain_turn(codex: &Codex) -> anyhow::Result<()> {
     .map_err(|_| anyhow!("timed out draining guardian review session after interrupt"))??;
 
     Ok(())
+}
+
+async fn require_send_owned<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+    F::Output: Send,
+{
+    Box::pin(future).await
 }
 
 #[cfg(test)]

@@ -2,13 +2,14 @@ use crate::agent::AgentStatus;
 use crate::agent::status::is_final as is_final_agent_status;
 use crate::codex::Session;
 use crate::codex::emit_subagent_session_started;
+use crate::codex_thread::ThreadConfigSnapshot;
 use crate::config::Config;
 use crate::memories::metrics;
 use crate::memories::phase_two;
 use crate::memories::prompts::build_consolidation_prompt;
-use crate::memories::storage::rebuild_raw_memories_file_from_memories;
+use crate::memories::storage::rebuild_raw_memories_file_from_memories_owned;
 use crate::memories::storage::rollout_summary_file_stem;
-use crate::memories::storage::sync_rollout_summaries_from_memories;
+use crate::memories::storage::sync_rollout_summaries_from_memories_owned;
 use codex_config::Constrained;
 use codex_features::Feature;
 use codex_protocol::ThreadId;
@@ -22,6 +23,7 @@ use codex_state::Stage1Output;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashSet;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -40,34 +42,72 @@ struct Counters {
     input: i64,
 }
 
+async fn load_phase2_input_selection(
+    db: Arc<StateRuntime>,
+    max_raw_memories: usize,
+    max_unused_days: i64,
+    memory_scope_kind: String,
+    memory_scope_key: String,
+) -> anyhow::Result<codex_state::Phase2InputSelection> {
+    db.clone()
+        .get_phase2_input_selection_in_scope_owned(
+            max_raw_memories,
+            max_unused_days,
+            memory_scope_kind,
+            memory_scope_key,
+        )
+        .await
+        .map_err(anyhow::Error::from)
+}
+
+async fn sync_phase2_artifacts(
+    root: std::path::PathBuf,
+    artifact_memories: Vec<Stage1Output>,
+    semantic_index_enabled: bool,
+) -> anyhow::Result<()> {
+    let artifact_count = artifact_memories.len();
+    sync_rollout_summaries_from_memories_owned(
+        root.clone(),
+        artifact_memories.clone(),
+        artifact_count,
+        semantic_index_enabled,
+    )
+    .await?;
+    rebuild_raw_memories_file_from_memories_owned(root, artifact_memories, artifact_count).await?;
+    Ok(())
+}
+
 /// Runs memory phase 2 (aka consolidation) in strict order. The method represents the linear
 /// flow of the consolidation phase.
-pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
+pub(super) async fn run(session: Arc<Session>, config: Arc<Config>) {
     let phase_two_e2e_timer = session
         .services
         .session_telemetry
         .start_timer(metrics::MEMORY_PHASE_TWO_E2E_MS, &[])
         .ok();
 
-    let Some(db) = session.services.state_db.as_deref() else {
+    let Some(db) = session.services.state_db.clone() else {
         // This should not happen.
         return;
     };
+    let memory_scope_kind = config.memory_scope_kind.clone();
+    let memory_scope_key = config.memory_scope_key.clone();
     let root = crate::fork_patch::memory::scoped_artifact_root(
         &config.codex_home,
-        &config.memory_scope_kind,
-        &config.memory_scope_key,
+        &memory_scope_kind,
+        &memory_scope_key,
     );
     let max_raw_memories = config.memories.max_raw_memories_for_consolidation;
     let max_unused_days = config.memories.max_unused_days;
+    let semantic_index_enabled = config.memories.semantic_index_enabled;
 
     // 1. Claim the job.
-    let claim = match job::claim(
-        session,
-        db,
-        config.memory_scope_kind.as_str(),
-        config.memory_scope_key.as_str(),
-    )
+    let claim = match require_send(job::claim(
+        session.clone(),
+        db.clone(),
+        memory_scope_kind.clone(),
+        memory_scope_key.clone(),
+    ))
     .await
     {
         Ok(claim) => claim,
@@ -85,19 +125,25 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     let Some(agent_config) = agent::get_config(config.clone(), &root) else {
         // If we can't get the config, we can't consolidate.
         tracing::error!("failed to get agent config");
-        job::failed(session, db, &claim, "failed_sandbox_policy").await;
+        job::failed(
+            session.clone(),
+            db.clone(),
+            claim.clone(),
+            "failed_sandbox_policy",
+        )
+        .await;
         return;
     };
 
     // 3. Query the memories
-    let selection = match db
-        .get_phase2_input_selection_in_scope(
-            max_raw_memories,
-            max_unused_days,
-            claim.memory_scope_kind.as_str(),
-            claim.memory_scope_key.as_str(),
-        )
-        .await
+    let selection = match require_send(load_phase2_input_selection(
+        db.clone(),
+        max_raw_memories,
+        max_unused_days,
+        claim.memory_scope_kind.clone(),
+        claim.memory_scope_key.clone(),
+    ))
+    .await
     {
         Ok(selection) => selection,
         Err(err) => {
@@ -105,7 +151,13 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
                 "failed to list stage1 outputs for scoped consolidation: {}",
                 err
             );
-            job::failed(session, db, &claim, "failed_load_stage1_outputs").await;
+            job::failed(
+                session.clone(),
+                db.clone(),
+                claim.clone(),
+                "failed_load_stage1_outputs",
+            )
+            .await;
             return;
         }
     };
@@ -116,35 +168,31 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     // 4. Update the file system by syncing the raw memories with the one extracted from DB at
     //    step 3
     // [`rollout_summaries/`]
-    if let Err(err) = sync_rollout_summaries_from_memories(
-        &root,
-        &artifact_memories,
-        artifact_memories.len(),
-        config.memories.semantic_index_enabled,
-    )
+    if let Err(err) = require_send(sync_phase2_artifacts(
+        root.clone(),
+        artifact_memories.clone(),
+        semantic_index_enabled,
+    ))
     .await
     {
         tracing::error!("failed syncing local memory artifacts for scoped consolidation: {err}");
-        job::failed(session, db, &claim, "failed_sync_artifacts").await;
-        return;
-    }
-    // [`raw_memories.md`]
-    if let Err(err) =
-        rebuild_raw_memories_file_from_memories(&root, &artifact_memories, artifact_memories.len())
-            .await
-    {
-        tracing::error!("failed syncing local memory artifacts for scoped consolidation: {err}");
-        job::failed(session, db, &claim, "failed_rebuild_raw_memories").await;
+        job::failed(
+            session.clone(),
+            db.clone(),
+            claim.clone(),
+            "failed_rebuild_raw_memories",
+        )
+        .await;
         return;
     }
     if raw_memories.is_empty() {
         // We check only after sync of the file system.
         job::succeed(
-            session,
-            db,
-            &claim,
+            session.clone(),
+            db.clone(),
+            claim.clone(),
             new_watermark,
-            &[],
+            Vec::new(),
             "succeeded_no_input",
         )
         .await;
@@ -154,43 +202,55 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     // 5. Spawn the agent
     let prompt = agent::get_prompt(&root, &selection);
     let source = SessionSource::SubAgent(SubAgentSource::MemoryConsolidation);
-    let thread_id = match session
-        .services
-        .agent_control
-        .spawn_agent(agent_config, prompt.into(), Some(source))
-        .await
+    let analytics_thread_config = ThreadConfigSnapshot {
+        agent_backend_id: agent_config.agent_backend_id.clone(),
+        model: agent_config.model.clone().unwrap_or_default(),
+        model_provider_id: agent_config.model_provider_id.clone(),
+        service_tier: agent_config.service_tier,
+        approval_policy: agent_config.permissions.approval_policy.value(),
+        approvals_reviewer: agent_config.approvals_reviewer,
+        sandbox_policy: agent_config.permissions.sandbox_policy.get().clone(),
+        cwd: agent_config.cwd.to_path_buf(),
+        ephemeral: agent_config.ephemeral,
+        reasoning_effort: agent_config.model_reasoning_effort,
+        personality: agent_config.personality,
+        session_source: source.clone(),
+    };
+    let agent_control = session.services.agent_control.clone();
+    let thread_id = match require_send(agent_control.clone().spawn_agent_owned(
+        agent_config,
+        prompt.into(),
+        Some(source),
+    ))
+    .await
     {
         Ok(thread_id) => thread_id,
         Err(err) => {
             tracing::error!("failed to spawn scoped memory consolidation agent: {err}");
-            job::failed(session, db, &claim, "failed_spawn_agent").await;
+            job::failed(
+                session.clone(),
+                db.clone(),
+                claim.clone(),
+                "failed_spawn_agent",
+            )
+            .await;
             return;
         }
     };
 
-    if let Some(thread_config) = session
-        .services
-        .agent_control
-        .get_agent_config_snapshot(thread_id)
-        .await
-    {
-        if session.enabled(Feature::GeneralAnalytics) {
-            let client_metadata = session.app_server_client_metadata().await;
-            emit_subagent_session_started(
-                &session.services.analytics_events_client,
-                client_metadata,
-                thread_id,
-                thread_config,
-                SubAgentSource::MemoryConsolidation,
-            );
-        }
-    } else {
-        warn!("failed to load memory consolidation thread config for analytics: {thread_id}");
+    if session.enabled(Feature::GeneralAnalytics) {
+        emit_subagent_session_started(
+            &session.services.analytics_events_client,
+            crate::codex::AppServerClientMetadata::default(),
+            thread_id,
+            analytics_thread_config,
+            SubAgentSource::MemoryConsolidation,
+        );
     }
 
     // 6. Spawn the agent handler.
     agent::handle(
-        session,
+        session.clone(),
         claim,
         new_watermark,
         raw_memories.clone(),
@@ -202,7 +262,14 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     let counters = Counters {
         input: raw_memories.len() as i64,
     };
-    emit_metrics(session, counters);
+    emit_metrics(&session, counters);
+}
+
+async fn require_send<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+{
+    Box::pin(future).await
 }
 
 fn artifact_memories_for_phase2(
@@ -225,17 +292,18 @@ mod job {
     use super::*;
 
     pub(super) async fn claim(
-        session: &Arc<Session>,
-        db: &StateRuntime,
-        memory_scope_kind: &str,
-        memory_scope_key: &str,
+        session: Arc<Session>,
+        db: Arc<StateRuntime>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
     ) -> Result<Claim, &'static str> {
-        let session_telemetry = &session.services.session_telemetry;
+        let worker_id = session.conversation_id.clone();
         let claim = db
-            .try_claim_phase2_job(
-                memory_scope_kind,
-                memory_scope_key,
-                session.conversation_id,
+            .clone()
+            .try_claim_phase2_job_owned(
+                memory_scope_kind.clone(),
+                memory_scope_key.clone(),
+                worker_id,
                 phase_two::JOB_LEASE_SECONDS,
             )
             .await
@@ -248,7 +316,7 @@ mod job {
                 ownership_token,
                 input_watermark,
             } => {
-                session_telemetry.counter(
+                session.services.session_telemetry.counter(
                     metrics::MEMORY_PHASE_TWO_JOBS,
                     /*inc*/ 1,
                     &[("status", "claimed")],
@@ -262,15 +330,15 @@ mod job {
         Ok(Claim {
             token,
             watermark,
-            memory_scope_kind: memory_scope_kind.to_string(),
-            memory_scope_key: memory_scope_key.to_string(),
+            memory_scope_kind,
+            memory_scope_key,
         })
     }
 
     pub(super) async fn failed(
-        session: &Arc<Session>,
-        db: &StateRuntime,
-        claim: &Claim,
+        session: Arc<Session>,
+        db: Arc<StateRuntime>,
+        claim: Claim,
         reason: &'static str,
     ) {
         session.services.session_telemetry.counter(
@@ -279,22 +347,24 @@ mod job {
             &[("status", reason)],
         );
         if matches!(
-            db.mark_phase2_job_failed(
-                claim.memory_scope_kind.as_str(),
-                claim.memory_scope_key.as_str(),
-                &claim.token,
-                reason,
-                phase_two::JOB_RETRY_DELAY_SECONDS,
-            )
-            .await,
+            db.clone()
+                .mark_phase2_job_failed_owned(
+                    claim.memory_scope_kind.clone(),
+                    claim.memory_scope_key.clone(),
+                    claim.token.clone(),
+                    reason.to_string(),
+                    phase_two::JOB_RETRY_DELAY_SECONDS,
+                )
+                .await,
             Ok(false)
         ) {
             let _ = db
-                .mark_phase2_job_failed_if_unowned(
-                    claim.memory_scope_kind.as_str(),
-                    claim.memory_scope_key.as_str(),
-                    &claim.token,
-                    reason,
+                .clone()
+                .mark_phase2_job_failed_if_unowned_owned(
+                    claim.memory_scope_kind.clone(),
+                    claim.memory_scope_key.clone(),
+                    claim.token.clone(),
+                    reason.to_string(),
                     phase_two::JOB_RETRY_DELAY_SECONDS,
                 )
                 .await;
@@ -302,11 +372,11 @@ mod job {
     }
 
     pub(super) async fn succeed(
-        session: &Arc<Session>,
-        db: &StateRuntime,
-        claim: &Claim,
+        session: Arc<Session>,
+        db: Arc<StateRuntime>,
+        claim: Claim,
         completion_watermark: i64,
-        selected_outputs: &[codex_state::Stage1Output],
+        selected_outputs: Vec<codex_state::Stage1Output>,
         reason: &'static str,
     ) {
         session.services.session_telemetry.counter(
@@ -315,10 +385,11 @@ mod job {
             &[("status", reason)],
         );
         let _ = db
-            .mark_phase2_job_succeeded(
-                claim.memory_scope_kind.as_str(),
-                claim.memory_scope_key.as_str(),
-                &claim.token,
+            .clone()
+            .mark_phase2_job_succeeded_owned(
+                claim.memory_scope_kind.clone(),
+                claim.memory_scope_key.clone(),
+                claim.token.clone(),
                 completion_watermark,
                 selected_outputs,
             )
@@ -399,7 +470,7 @@ mod agent {
 
     /// Handle the agent while it is running.
     pub(super) fn handle(
-        session: &Arc<Session>,
+        session: Arc<Session>,
         claim: Claim,
         new_watermark: i64,
         selected_outputs: Vec<codex_state::Stage1Output>,
@@ -409,18 +480,27 @@ mod agent {
         let Some(db) = session.services.state_db.clone() else {
             return;
         };
-        let session = session.clone();
 
         tokio::spawn(async move {
             let _phase_two_e2e_timer = phase_two_e2e_timer;
             let agent_control = session.services.agent_control.clone();
 
             // TODO(jif) we might have a very small race here.
-            let rx = match agent_control.subscribe_status(thread_id).await {
+            let rx = match agent_control
+                .clone()
+                .subscribe_status_owned(thread_id)
+                .await
+            {
                 Ok(rx) => rx,
                 Err(err) => {
                     tracing::error!("agent_control.subscribe_status failed: {err:?}");
-                    job::failed(&session, &db, &claim, "failed_subscribe_status").await;
+                    job::failed(
+                        session.clone(),
+                        db.clone(),
+                        claim.clone(),
+                        "failed_subscribe_status",
+                    )
+                    .await;
                     return;
                 }
             };
@@ -438,26 +518,30 @@ mod agent {
             .await;
 
             if matches!(final_status, AgentStatus::Completed(_)) {
-                if let Some(token_usage) = agent_control.get_total_token_usage(thread_id).await {
+                if let Some(token_usage) = agent_control
+                    .clone()
+                    .get_total_token_usage_owned(thread_id)
+                    .await
+                {
                     emit_token_usage_metrics(&session, &token_usage);
                 }
                 job::succeed(
-                    &session,
-                    &db,
-                    &claim,
+                    session.clone(),
+                    db.clone(),
+                    claim.clone(),
                     new_watermark,
-                    &selected_outputs,
+                    selected_outputs,
                     "succeeded",
                 )
                 .await;
             } else {
-                job::failed(&session, &db, &claim, "failed_agent").await;
+                job::failed(session.clone(), db.clone(), claim.clone(), "failed_agent").await;
             }
 
             // Fire and forget close of the agent.
             if !matches!(final_status, AgentStatus::Shutdown | AgentStatus::NotFound) {
                 tokio::spawn(async move {
-                    if let Err(err) = agent_control.shutdown_live_agent(thread_id).await {
+                    if let Err(err) = agent_control.shutdown_live_agent_owned(thread_id).await {
                         warn!(
                             "failed to auto-close scoped memory consolidation agent {thread_id}: {err}"
                         );
@@ -499,10 +583,11 @@ mod agent {
                 }
                 _ = heartbeat_interval.tick() => {
                     match db
-                        .heartbeat_phase2_job(
-                            memory_scope_kind.as_str(),
-                            memory_scope_key.as_str(),
-                            &token,
+                        .clone()
+                        .heartbeat_phase2_job_owned(
+                            memory_scope_kind.clone(),
+                            memory_scope_key.clone(),
+                            token.clone(),
                             phase_two::JOB_LEASE_SECONDS,
                         )
                         .await

@@ -320,35 +320,44 @@ fn spawn_rollout_page_loader(
     Arc::new(move |request: PageLoadRequest| {
         let tx = loader_tx.clone();
         let config = config.clone();
-        tokio::spawn(async move {
-            let default_provider = match request.provider_filter {
-                ProviderFilter::Any => None,
-                ProviderFilter::MatchDefault(default_provider) => Some(default_provider),
-            };
-            let cursor = match request.cursor.as_ref() {
-                Some(PageCursor::Rollout(cursor)) => Some(cursor),
-                Some(PageCursor::AppServer(_)) => None,
-                None => None,
-            };
-            let page = RolloutRecorder::list_threads(
-                &config,
-                PAGE_SIZE,
-                cursor,
-                request.sort_key,
-                INTERACTIVE_SESSION_SOURCES.as_slice(),
-                default_provider.as_ref().map(std::slice::from_ref),
-                default_provider.as_deref().unwrap_or_default(),
-                /*search_term*/ None,
-            )
-            .await
-            .map(picker_page_from_rollout_page);
+        let runtime_handle = tokio::runtime::Handle::current();
+        let request_token = request.request_token;
+        let search_token = request.search_token;
+        std::thread::spawn(move || {
+            let page = runtime_handle.block_on(load_rollout_page(config, request));
             let _ = tx.send(BackgroundEvent::PageLoaded {
-                request_token: request.request_token,
-                search_token: request.search_token,
+                request_token,
+                search_token,
                 page,
             });
         });
     })
+}
+
+async fn load_rollout_page(config: Config, request: PageLoadRequest) -> std::io::Result<PickerPage> {
+    let default_provider = match request.provider_filter {
+        ProviderFilter::Any => None,
+        ProviderFilter::MatchDefault(default_provider) => Some(default_provider),
+    };
+    let cursor = match request.cursor {
+        Some(PageCursor::Rollout(cursor)) => Some(cursor),
+        Some(PageCursor::AppServer(_)) => None,
+        None => None,
+    };
+    let allowed_sources = INTERACTIVE_SESSION_SOURCES.to_vec();
+    let model_providers = default_provider.iter().cloned().collect::<Vec<_>>();
+    let page = RolloutRecorder::list_threads(
+        &config,
+        PAGE_SIZE,
+        cursor.as_ref(),
+        request.sort_key,
+        allowed_sources.as_slice(),
+        (!model_providers.is_empty()).then_some(model_providers.as_slice()),
+        default_provider.as_deref().unwrap_or_default(),
+        /*search_term*/ None,
+    )
+    .await?;
+    Ok(picker_page_from_rollout_page(page))
 }
 
 fn spawn_app_server_page_loader(

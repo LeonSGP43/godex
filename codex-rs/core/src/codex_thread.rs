@@ -129,11 +129,19 @@ impl CodexThread {
         self.codex.agent_status().await
     }
 
+    pub async fn agent_status_owned(self: std::sync::Arc<Self>) -> AgentStatus {
+        self.codex.agent_status().await
+    }
+
     pub(crate) fn subscribe_status(&self) -> watch::Receiver<AgentStatus> {
         self.codex.agent_status.clone()
     }
 
     pub(crate) async fn total_token_usage(&self) -> Option<TokenUsage> {
+        self.codex.session.total_token_usage().await
+    }
+
+    pub(crate) async fn total_token_usage_owned(self: std::sync::Arc<Self>) -> Option<TokenUsage> {
         self.codex.session.total_token_usage().await
     }
 
@@ -215,6 +223,10 @@ impl CodexThread {
     }
 
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
+        self.codex.thread_config_snapshot().await
+    }
+
+    pub async fn config_snapshot_owned(self: std::sync::Arc<Self>) -> ThreadConfigSnapshot {
         self.codex.thread_config_snapshot().await
     }
 

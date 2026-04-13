@@ -5,6 +5,7 @@ use anyhow::ensure;
 use codex_arg0::Arg0PathEntryGuard;
 use codex_utils_cargo_bin::CargoBinError;
 use ctor::ctor;
+use std::future::Future;
 use std::sync::OnceLock;
 use tempfile::TempDir;
 
@@ -122,6 +123,35 @@ pub fn test_tmp_path() -> AbsolutePathBuf {
 
 pub fn test_tmp_path_buf() -> PathBuf {
     test_tmp_path().into_path_buf()
+}
+
+pub const TEST_STACK_SIZE_BYTES: usize = 8 * 1024 * 1024;
+
+pub fn run_async_test_with_stack<F, Fut>(
+    test_name: &'static str,
+    worker_threads: usize,
+    test_fn: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    let handle = std::thread::Builder::new()
+        .name(test_name.to_string())
+        .stack_size(TEST_STACK_SIZE_BYTES)
+        .spawn(move || -> anyhow::Result<()> {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(worker_threads)
+                .thread_stack_size(TEST_STACK_SIZE_BYTES)
+                .enable_all()
+                .build()?;
+            runtime.block_on(test_fn())
+        })?;
+
+    match handle.join() {
+        Ok(result) => result,
+        Err(_) => anyhow::bail!("{test_name} thread panicked"),
+    }
 }
 
 /// Fetch a DotSlash resource and return the resolved executable/file path.

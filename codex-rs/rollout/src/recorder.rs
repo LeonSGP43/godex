@@ -538,8 +538,28 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed waiting for rollout persist: {e}")))?
     }
 
+    pub async fn persist_owned(self) -> std::io::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(RolloutCmd::Persist { ack: tx })
+            .await
+            .map_err(|e| IoError::other(format!("failed to queue rollout persist: {e}")))?;
+        rx.await
+            .map_err(|e| IoError::other(format!("failed waiting for rollout persist: {e}")))?
+    }
+
     /// Flush all queued writes and wait until they are committed by the writer task.
     pub async fn flush(&self) -> std::io::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(RolloutCmd::Flush { ack: tx })
+            .await
+            .map_err(|e| IoError::other(format!("failed to queue rollout flush: {e}")))?;
+        rx.await
+            .map_err(|e| IoError::other(format!("failed waiting for rollout flush: {e}")))
+    }
+
+    pub async fn flush_owned(self) -> std::io::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(RolloutCmd::Flush { ack: tx })

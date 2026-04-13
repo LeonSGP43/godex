@@ -32,6 +32,7 @@ use codex_protocol::protocol::RolloutItem;
 use log::LevelFilter;
 use serde_json::Value;
 use sqlx::ConnectOptions;
+use sqlx::Connection;
 use sqlx::QueryBuilder;
 use sqlx::Row;
 use sqlx::Sqlite;
@@ -90,30 +91,30 @@ impl StateRuntime {
         let logs_migrator = runtime_logs_migrator();
         let current_state_name = state_db_filename();
         let current_logs_name = logs_db_filename();
-        remove_legacy_db_files(
-            &codex_home,
-            current_state_name.as_str(),
-            STATE_DB_FILENAME,
-            "state",
+        remove_legacy_db_files_owned(
+            codex_home.clone(),
+            current_state_name,
+            STATE_DB_FILENAME.to_string(),
+            "state".to_string(),
         )
         .await;
-        remove_legacy_db_files(
-            &codex_home,
-            current_logs_name.as_str(),
-            LOGS_DB_FILENAME,
-            "logs",
+        remove_legacy_db_files_owned(
+            codex_home.clone(),
+            current_logs_name,
+            LOGS_DB_FILENAME.to_string(),
+            "logs".to_string(),
         )
         .await;
         let state_path = state_db_path(codex_home.as_path());
         let logs_path = logs_db_path(codex_home.as_path());
-        let pool = match open_state_sqlite(&state_path, &state_migrator).await {
+        let pool = match open_state_sqlite(state_path.clone(), &state_migrator).await {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open state db at {}: {err}", state_path.display());
                 return Err(err);
             }
         };
-        let logs_pool = match open_logs_sqlite(&logs_path, &logs_migrator).await {
+        let logs_pool = match open_logs_sqlite(logs_path.clone(), &logs_migrator).await {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open logs db at {}: {err}", logs_path.display());
@@ -126,7 +127,7 @@ impl StateRuntime {
             codex_home,
             default_provider,
         });
-        if let Err(err) = runtime.run_logs_startup_maintenance().await {
+        if let Err(err) = runtime.clone().run_logs_startup_maintenance_owned().await {
             warn!(
                 "failed to run startup maintenance for logs db at {}: {err}",
                 logs_path.display(),
@@ -151,13 +152,20 @@ fn base_sqlite_options(path: &Path) -> SqliteConnectOptions {
         .log_statements(LevelFilter::Off)
 }
 
-async fn open_state_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
-    let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
+async fn migrate_sqlite(options: &SqliteConnectOptions, migrator: &Migrator) -> anyhow::Result<()> {
+    let mut connection = SqliteConnection::connect_with(options).await?;
+    migrator.run(&mut connection).await?;
+    connection.close().await?;
+    Ok(())
+}
+
+async fn open_state_sqlite(path: PathBuf, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
+    let options = base_sqlite_options(path.as_path()).auto_vacuum(SqliteAutoVacuum::Incremental);
+    migrate_sqlite(&options, migrator).await?;
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(options)
         .await?;
-    migrator.run(&pool).await?;
     let auto_vacuum = sqlx::query_scalar::<_, i64>("PRAGMA auto_vacuum")
         .fetch_one(&pool)
         .await?;
@@ -177,13 +185,13 @@ async fn open_state_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<S
     Ok(pool)
 }
 
-async fn open_logs_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
-    let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
+async fn open_logs_sqlite(path: PathBuf, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
+    let options = base_sqlite_options(path.as_path()).auto_vacuum(SqliteAutoVacuum::Incremental);
+    migrate_sqlite(&options, migrator).await?;
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(options)
         .await?;
-    migrator.run(&pool).await?;
     Ok(pool)
 }
 
@@ -207,13 +215,13 @@ pub fn logs_db_path(codex_home: &Path) -> PathBuf {
     codex_home.join(logs_db_filename())
 }
 
-async fn remove_legacy_db_files(
-    codex_home: &Path,
-    current_name: &str,
-    base_name: &str,
-    db_label: &str,
+async fn remove_legacy_db_files_owned(
+    codex_home: PathBuf,
+    current_name: String,
+    base_name: String,
+    db_label: String,
 ) {
-    let mut entries = match tokio::fs::read_dir(codex_home).await {
+    let mut entries = match tokio::fs::read_dir(codex_home.clone()).await {
         Ok(entries) => entries,
         Err(err) => {
             warn!(
@@ -234,7 +242,11 @@ async fn remove_legacy_db_files(
         }
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
-        if !should_remove_db_file(file_name.as_ref(), current_name, base_name) {
+        if !should_remove_db_file(
+            file_name.as_ref(),
+            current_name.as_str(),
+            base_name.as_str(),
+        ) {
             continue;
         }
 
@@ -336,7 +348,7 @@ mod tests {
         strict_pool.close().await;
 
         let tolerant_migrator = runtime_state_migrator();
-        let tolerant_pool = open_state_sqlite(state_path.as_path(), &tolerant_migrator)
+        let tolerant_pool = open_state_sqlite(state_path.clone(), &tolerant_migrator)
             .await
             .expect("runtime migrator should tolerate newer applied migrations");
         tolerant_pool.close().await;

@@ -41,6 +41,49 @@ WHERE id = ?
             .transpose()
     }
 
+    pub async fn get_thread_owned(
+        self: Arc<Self>,
+        id: ThreadId,
+    ) -> anyhow::Result<Option<crate::ThreadMetadata>> {
+        let pool = self.pool.as_ref().clone();
+        let row = sqlx::query(
+            r#"
+SELECT
+    id,
+    rollout_path,
+    created_at,
+    updated_at,
+    source,
+    agent_nickname,
+    agent_role,
+    agent_path,
+    model_provider,
+    model,
+    reasoning_effort,
+    cwd,
+    memory_scope_kind,
+    memory_scope_key,
+    cli_version,
+    title,
+    sandbox_policy,
+    approval_mode,
+    tokens_used,
+    first_user_message,
+    archived_at,
+    git_sha,
+    git_branch,
+    git_origin_url
+FROM threads
+WHERE id = ?
+            "#,
+        )
+        .bind(id.to_string())
+        .fetch_optional(&pool)
+        .await?;
+        row.map(|row| ThreadRow::try_from_row(&row).and_then(ThreadMetadata::try_from))
+            .transpose()
+    }
+
     pub async fn get_thread_memory_mode(&self, id: ThreadId) -> anyhow::Result<Option<String>> {
         let row = sqlx::query("SELECT memory_mode FROM threads WHERE id = ?")
             .bind(id.to_string())
@@ -64,6 +107,39 @@ ORDER BY position ASC
         )
         .bind(thread_id.to_string())
         .fetch_all(self.pool.as_ref())
+        .await?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        let mut tools = Vec::with_capacity(rows.len());
+        for row in rows {
+            let input_schema: String = row.try_get("input_schema")?;
+            let input_schema = serde_json::from_str::<Value>(input_schema.as_str())?;
+            tools.push(DynamicToolSpec {
+                name: row.try_get("name")?,
+                description: row.try_get("description")?,
+                input_schema,
+                defer_loading: row.try_get("defer_loading")?,
+            });
+        }
+        Ok(Some(tools))
+    }
+
+    pub async fn get_dynamic_tools_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+    ) -> anyhow::Result<Option<Vec<DynamicToolSpec>>> {
+        let pool = self.pool.as_ref().clone();
+        let rows = sqlx::query(
+            r#"
+SELECT name, description, input_schema, defer_loading
+FROM thread_dynamic_tools
+WHERE thread_id = ?
+ORDER BY position ASC
+            "#,
+        )
+        .bind(thread_id.to_string())
+        .fetch_all(&pool)
         .await?;
         if rows.is_empty() {
             return Ok(None);
@@ -323,6 +399,30 @@ ON CONFLICT(child_thread_id) DO NOTHING
             None => {}
         }
         let row = builder.build().fetch_optional(self.pool.as_ref()).await?;
+        Ok(row
+            .and_then(|r| r.try_get::<String, _>("rollout_path").ok())
+            .map(PathBuf::from))
+    }
+
+    pub async fn find_rollout_path_by_id_owned(
+        self: Arc<Self>,
+        id: ThreadId,
+        archived_only: Option<bool>,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let pool = self.pool.as_ref().clone();
+        let mut builder =
+            QueryBuilder::<Sqlite>::new("SELECT rollout_path FROM threads WHERE id = ");
+        builder.push_bind(id.to_string());
+        match archived_only {
+            Some(true) => {
+                builder.push(" AND archived = 1");
+            }
+            Some(false) => {
+                builder.push(" AND archived = 0");
+            }
+            None => {}
+        }
+        let row = builder.build().fetch_optional(&pool).await?;
         Ok(row
             .and_then(|r| r.try_get::<String, _>("rollout_path").ok())
             .map(PathBuf::from))

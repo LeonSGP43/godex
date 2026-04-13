@@ -180,9 +180,9 @@ impl Session {
         .await;
     }
 
-    pub(crate) async fn consume_startup_prewarm_for_regular_turn(
-        &self,
-        cancellation_token: &CancellationToken,
+    pub(crate) async fn consume_startup_prewarm_for_regular_turn_owned(
+        self: Arc<Self>,
+        cancellation_token: CancellationToken,
     ) -> SessionStartupPrewarmResolution {
         let Some(startup_prewarm) = self.take_session_startup_prewarm().await else {
             return SessionStartupPrewarmResolution::Unavailable {
@@ -190,8 +190,9 @@ impl Session {
                 prewarm_duration: None,
             };
         };
+        let session_telemetry = self.services.session_telemetry.clone();
         startup_prewarm
-            .resolve(&self.services.session_telemetry, cancellation_token)
+            .resolve(&session_telemetry, &cancellation_token)
             .await
     }
 }
@@ -205,12 +206,12 @@ async fn schedule_startup_prewarm_inner(
         .await;
     let startup_cancellation_token = CancellationToken::new();
     let startup_router = built_tools(
-        session.as_ref(),
-        startup_turn_context.as_ref(),
+        session.clone(),
+        startup_turn_context.clone(),
         &[],
-        &HashSet::new(),
+        HashSet::new(),
         /*skills_outcome*/ None,
-        &startup_cancellation_token,
+        startup_cancellation_token.clone(),
     )
     .await?;
     let startup_prompt = build_prompt(

@@ -190,7 +190,7 @@ Detailed developer documentation:
 This release line is now synced through official upstream `rust-v0.118.0`.
 
 - Daily-use local runtime channel: the published npm package `@leonsgp43/godex`.
-- Current fork release line in this repository: `0.2.16`.
+- Current fork release line in this repository: `0.2.18`.
 - GitHub Release: used as the fork's public release signal and release history.
 - Source install: keep it for maintainer validation, development, and release preparation, not as the normal daily-use distribution path.
 
@@ -285,17 +285,10 @@ This fork manages its own SemVer release line for `godex`.
 
 Version policy for this fork:
 
-- `0.1.x`
-  - pure upstream syncs
-  - fork governance improvements
-  - docs, scripts, and release-gate tightening
-  - small fixes
-- `0.2.0`
-  - clearly new fork user-facing capabilities
-  - meaningful default-behavior changes
-  - staged upgrades to install, config, or update flows
-- `1.0.0`
-  - stable personal distribution with a long-term maintenance commitment
+- Keep active work in `CHANGELOG.md -> Unreleased` until the branch is actually ready for a cut. Internal patch-layer refactors, sync preparation, and verification-only work do not require a `VERSION` bump on their own.
+- Bump the patch version (`0.2.x -> 0.2.x+1`) when shipping a release that mainly contains fork maintenance, docs/runbook updates, upstream-sync integration, patch-layer cleanup, or small bug fixes.
+- Bump the minor version (`0.x -> 0.(x+1).0`) when shipping a new fork-visible capability, a new operator-facing backend/config/memory surface, or a meaningful default-behavior change.
+- Reserve a major version (`1.0.0+`) for an intentional compatibility reset or a stable long-term distribution contract.
 
 ## Thanks
 

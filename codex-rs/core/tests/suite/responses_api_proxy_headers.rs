@@ -12,6 +12,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
+use core_test_support::run_async_test_with_stack;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
@@ -92,8 +93,16 @@ impl Drop for ResponsesApiProxy {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_api_proxy_dumps_parent_and_subagent_identity_headers() -> Result<()> {
+#[test]
+fn responses_api_proxy_dumps_parent_and_subagent_identity_headers() -> Result<()> {
+    run_async_test_with_stack(
+        "responses_api_proxy_dumps_parent_and_subagent_identity_headers",
+        2,
+        responses_api_proxy_dumps_parent_and_subagent_identity_headers_impl,
+    )
+}
+
+async fn responses_api_proxy_dumps_parent_and_subagent_identity_headers_impl() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;

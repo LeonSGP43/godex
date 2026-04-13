@@ -115,6 +115,35 @@ pub(crate) async fn run_pending_session_start_hooks(
     .await
 }
 
+pub(crate) async fn run_pending_session_start_hooks_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+) -> bool {
+    let Some(session_start_source) = sess.clone().take_pending_session_start_source().await else {
+        return false;
+    };
+
+    let request = codex_hooks::SessionStartRequest {
+        session_id: sess.conversation_id,
+        cwd: turn_context.cwd.to_path_buf(),
+        transcript_path: sess.clone().hook_transcript_path().await,
+        model: turn_context.model_info.slug.clone(),
+        permission_mode: hook_permission_mode(turn_context.as_ref()),
+        source: session_start_source,
+    };
+    let preview_runs = sess.hooks().preview_session_start(&request);
+    run_context_injecting_hook_owned(
+        sess.clone(),
+        turn_context.clone(),
+        preview_runs,
+        sess.hooks()
+            .run_session_start(request, Some(turn_context.sub_id.clone())),
+    )
+    .await
+    .record_additional_contexts_owned(sess, turn_context)
+    .await
+}
+
 pub(crate) async fn run_pre_tool_use_hooks(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
@@ -196,6 +225,28 @@ pub(crate) async fn run_user_prompt_submit_hooks(
     .await
 }
 
+pub(crate) async fn run_user_prompt_submit_hooks_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    prompt: String,
+) -> HookRuntimeOutcome {
+    let request = UserPromptSubmitRequest {
+        session_id: sess.conversation_id,
+        turn_id: turn_context.sub_id.clone(),
+        cwd: turn_context.cwd.to_path_buf(),
+        transcript_path: sess.clone().hook_transcript_path().await,
+        model: turn_context.model_info.slug.clone(),
+        permission_mode: hook_permission_mode(turn_context.as_ref()),
+        prompt,
+    };
+    let preview_runs = sess.hooks().preview_user_prompt_submit(&request);
+    emit_hook_started_events_owned(sess.clone(), turn_context.clone(), preview_runs).await;
+    let outcome: ContextInjectingHookOutcome =
+        sess.hooks().run_user_prompt_submit(request).await.into();
+    emit_hook_completed_events_owned(sess, turn_context, outcome.hook_events.clone()).await;
+    outcome.outcome
+}
+
 pub(crate) async fn inspect_pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
@@ -205,6 +256,37 @@ pub(crate) async fn inspect_pending_input(
     if let Some(TurnItem::UserMessage(user_message)) = parse_turn_item(&response_item) {
         let user_prompt_submit_outcome =
             run_user_prompt_submit_hooks(sess, turn_context, user_message.message()).await;
+        if user_prompt_submit_outcome.should_stop {
+            PendingInputHookDisposition::Blocked {
+                additional_contexts: user_prompt_submit_outcome.additional_contexts,
+            }
+        } else {
+            PendingInputHookDisposition::Accepted(Box::new(PendingInputRecord::UserMessage {
+                content: user_message.content,
+                response_item,
+                additional_contexts: user_prompt_submit_outcome.additional_contexts,
+            }))
+        }
+    } else {
+        PendingInputHookDisposition::Accepted(Box::new(PendingInputRecord::ConversationItem {
+            response_item,
+        }))
+    }
+}
+
+pub(crate) async fn inspect_pending_input_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    pending_input_item: ResponseInputItem,
+) -> PendingInputHookDisposition {
+    let response_item = ResponseItem::from(pending_input_item);
+    if let Some(TurnItem::UserMessage(user_message)) = parse_turn_item(&response_item) {
+        let user_prompt_submit_outcome = run_user_prompt_submit_hooks_owned(
+            sess.clone(),
+            turn_context.clone(),
+            user_message.message(),
+        )
+        .await;
         if user_prompt_submit_outcome.should_stop {
             PendingInputHookDisposition::Blocked {
                 additional_contexts: user_prompt_submit_outcome.additional_contexts,
@@ -249,6 +331,33 @@ pub(crate) async fn record_pending_input(
     }
 }
 
+pub(crate) async fn record_pending_input_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    pending_input: PendingInputRecord,
+) {
+    match pending_input {
+        PendingInputRecord::UserMessage {
+            content,
+            response_item,
+            additional_contexts,
+        } => {
+            sess.clone()
+                .record_user_prompt_and_emit_turn_item_owned(
+                    turn_context.clone(),
+                    content,
+                    response_item,
+                )
+                .await;
+            record_additional_contexts_owned(sess, turn_context, additional_contexts).await;
+        }
+        PendingInputRecord::ConversationItem { response_item } => {
+            sess.record_conversation_items_owned(turn_context, vec![response_item])
+                .await;
+        }
+    }
+}
+
 async fn run_context_injecting_hook<Fut, Outcome>(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
@@ -266,6 +375,23 @@ where
     outcome.outcome
 }
 
+async fn run_context_injecting_hook_owned<Fut, Outcome>(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    preview_runs: Vec<HookRunSummary>,
+    outcome_future: Fut,
+) -> HookRuntimeOutcome
+where
+    Fut: Future<Output = Outcome>,
+    Outcome: Into<ContextInjectingHookOutcome>,
+{
+    emit_hook_started_events_owned(sess.clone(), turn_context.clone(), preview_runs).await;
+
+    let outcome = outcome_future.await.into();
+    emit_hook_completed_events_owned(sess, turn_context, outcome.hook_events).await;
+    outcome.outcome
+}
+
 impl HookRuntimeOutcome {
     async fn record_additional_contexts(
         self,
@@ -274,6 +400,15 @@ impl HookRuntimeOutcome {
     ) -> bool {
         record_additional_contexts(sess, turn_context, self.additional_contexts).await;
 
+        self.should_stop
+    }
+
+    async fn record_additional_contexts_owned(
+        self,
+        sess: Arc<Session>,
+        turn_context: Arc<TurnContext>,
+    ) -> bool {
+        record_additional_contexts_owned(sess, turn_context, self.additional_contexts).await;
         self.should_stop
     }
 }
@@ -289,6 +424,20 @@ pub(crate) async fn record_additional_contexts(
     }
 
     sess.record_conversation_items(turn_context, developer_messages.as_slice())
+        .await;
+}
+
+pub(crate) async fn record_additional_contexts_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    additional_contexts: Vec<String>,
+) {
+    let developer_messages = additional_context_messages(additional_contexts);
+    if developer_messages.is_empty() {
+        return;
+    }
+
+    sess.record_conversation_items_owned(turn_context, developer_messages)
         .await;
 }
 
@@ -316,6 +465,24 @@ async fn emit_hook_started_events(
     }
 }
 
+async fn emit_hook_started_events_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    preview_runs: Vec<HookRunSummary>,
+) {
+    for run in preview_runs {
+        sess.clone()
+            .send_event_owned(
+                turn_context.clone(),
+                EventMsg::HookStarted(HookStartedEvent {
+                    turn_id: Some(turn_context.sub_id.clone()),
+                    run,
+                }),
+            )
+            .await;
+    }
+}
+
 async fn emit_hook_completed_events(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
@@ -323,6 +490,18 @@ async fn emit_hook_completed_events(
 ) {
     for completed in completed_events {
         sess.send_event(turn_context, EventMsg::HookCompleted(completed))
+            .await;
+    }
+}
+
+async fn emit_hook_completed_events_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    completed_events: Vec<HookCompletedEvent>,
+) {
+    for completed in completed_events {
+        sess.clone()
+            .send_event_owned(turn_context.clone(), EventMsg::HookCompleted(completed))
             .await;
     }
 }

@@ -50,6 +50,7 @@ use codex_state::log_db;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio::task::LocalSet;
 use tokio_util::sync::CancellationToken;
 use toml::Value as TomlValue;
 use tracing::Level;
@@ -639,7 +640,8 @@ pub async fn run_main_with_transport(
         info!("outbound router task exited (channel closed)");
     });
 
-    let processor_handle = tokio::spawn({
+    let processor_local = LocalSet::new();
+    let processor_handle = processor_local.spawn_local({
         let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(outgoing_tx));
         let outbound_control_tx = outbound_control_tx;
         let auth_manager =
@@ -869,13 +871,17 @@ pub async fn run_main_with_transport(
 
     drop(transport_event_tx);
 
-    let _ = processor_handle.await;
-    let _ = outbound_handle.await;
+    processor_local
+        .run_until(async move {
+            let _ = processor_handle.await;
+            let _ = outbound_handle.await;
 
-    transport_shutdown_token.cancel();
-    for handle in transport_accept_handles {
-        let _ = handle.await;
-    }
+            transport_shutdown_token.cancel();
+            for handle in transport_accept_handles {
+                let _ = handle.await;
+            }
+        })
+        .await;
 
     if let Some(otel) = otel {
         otel.shutdown();

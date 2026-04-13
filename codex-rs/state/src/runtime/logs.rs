@@ -285,26 +285,33 @@ WHERE id IN (
         Ok(())
     }
 
-    pub(crate) async fn delete_logs_before(&self, cutoff_ts: i64) -> anyhow::Result<u64> {
+    pub(crate) async fn delete_logs_before_owned(
+        self: Arc<Self>,
+        cutoff_ts: i64,
+    ) -> anyhow::Result<u64> {
+        let logs_pool = self.logs_pool.as_ref().clone();
         let result = sqlx::query("DELETE FROM logs WHERE ts < ?")
             .bind(cutoff_ts)
-            .execute(self.logs_pool.as_ref())
+            .execute(&logs_pool)
             .await?;
         Ok(result.rows_affected())
     }
 
-    pub(crate) async fn run_logs_startup_maintenance(&self) -> anyhow::Result<()> {
+    pub(crate) async fn run_logs_startup_maintenance_owned(self: Arc<Self>) -> anyhow::Result<()> {
         let Some(cutoff) =
             Utc::now().checked_sub_signed(chrono::Duration::days(LOG_RETENTION_DAYS))
         else {
             return Ok(());
         };
-        self.delete_logs_before(cutoff.timestamp()).await?;
+        self.clone()
+            .delete_logs_before_owned(cutoff.timestamp())
+            .await?;
+        let logs_pool = self.logs_pool.as_ref().clone();
         sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(self.logs_pool.as_ref())
+            .execute(&logs_pool)
             .await?;
         sqlx::query("PRAGMA incremental_vacuum")
-            .execute(self.logs_pool.as_ref())
+            .execute(&logs_pool)
             .await?;
         Ok(())
     }

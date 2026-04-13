@@ -718,7 +718,11 @@ impl UnifiedExecProcessManager {
         mut pause_state: Option<watch::Receiver<bool>>,
         mut deadline: Instant,
     ) -> Vec<u8> {
-        const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(50);
+        // Local PTY output can arrive slightly after the process has already
+        // reported exit, especially under heavy test-suite load. Give the
+        // final drain path a bit more room so short-lived commands do not lose
+        // their trailing output or exit state.
+        const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(250);
 
         let mut collected: Vec<u8> = Vec::with_capacity(4096);
         let mut exit_signal_received = cancellation_token.is_cancelled();

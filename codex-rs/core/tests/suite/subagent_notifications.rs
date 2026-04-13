@@ -14,6 +14,7 @@ use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
+use core_test_support::run_async_test_with_stack;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
@@ -270,8 +271,16 @@ async fn spawn_child_and_capture_snapshot(
         .await)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn subagent_notification_is_included_without_wait() -> Result<()> {
+#[test]
+fn subagent_notification_is_included_without_wait() -> Result<()> {
+    run_async_test_with_stack(
+        "subagent_notification_is_included_without_wait",
+        2,
+        subagent_notification_is_included_without_wait_impl,
+    )
+}
+
+async fn subagent_notification_is_included_without_wait_impl() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -296,8 +305,16 @@ async fn subagent_notification_is_included_without_wait() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawned_child_receives_forked_parent_context() -> Result<()> {
+#[test]
+fn spawned_child_receives_forked_parent_context() -> Result<()> {
+    run_async_test_with_stack(
+        "spawned_child_receives_forked_parent_context",
+        2,
+        spawned_child_receives_forked_parent_context_impl,
+    )
+}
+
+async fn spawned_child_receives_forked_parent_context_impl() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -388,8 +405,17 @@ async fn spawned_child_receives_forked_parent_context() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_without_role()
+#[test]
+fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_without_role() -> Result<()>
+{
+    run_async_test_with_stack(
+        "spawn_agent_requested_model_and_reasoning_override_inherited_settings_without_role",
+        2,
+        spawn_agent_requested_model_and_reasoning_override_inherited_settings_without_role_impl,
+    )
+}
+
+async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_without_role_impl()
 -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -414,8 +440,16 @@ async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_w
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawned_multi_agent_v2_child_receives_xml_tagged_developer_context() -> Result<()> {
+#[test]
+fn spawned_multi_agent_v2_child_receives_xml_tagged_developer_context() -> Result<()> {
+    run_async_test_with_stack(
+        "spawned_multi_agent_v2_child_receives_xml_tagged_developer_context",
+        2,
+        spawned_multi_agent_v2_child_receives_xml_tagged_developer_context_impl,
+    )
+}
+
+async fn spawned_multi_agent_v2_child_receives_xml_tagged_developer_context_impl() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -507,8 +541,16 @@ async fn spawned_multi_agent_v2_child_receives_xml_tagged_developer_context() ->
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> Result<()> {
+#[test]
+fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> Result<()> {
+    run_async_test_with_stack(
+        "spawn_agent_role_overrides_requested_model_and_reasoning_settings",
+        2,
+        spawn_agent_role_overrides_requested_model_and_reasoning_settings_impl,
+    )
+}
+
+async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings_impl() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -549,8 +591,16 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<()> {
+#[test]
+fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<()> {
+    run_async_test_with_stack(
+        "spawn_agent_tool_description_mentions_role_locked_settings",
+        2,
+        spawn_agent_tool_description_mentions_role_locked_settings_impl,
+    )
+}
+
+async fn spawn_agent_tool_description_mentions_role_locked_settings_impl() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;

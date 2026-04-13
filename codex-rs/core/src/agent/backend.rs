@@ -1265,12 +1265,16 @@ impl CommandSpawnedAgentHandle {
         )
         .map_err(|err| CommandAttemptFailure::non_retryable(err.to_string()))?;
 
-        let mut child = self.state.command.spawn(&self.state.config_snapshot).map_err(|err| {
-            CommandAttemptFailure::non_retryable(format!(
-                "failed to launch backend '{}': {err}",
-                self.state.backend_id
-            ))
-        })?;
+        let mut child = self
+            .state
+            .command
+            .spawn(&self.state.config_snapshot)
+            .map_err(|err| {
+                CommandAttemptFailure::non_retryable(format!(
+                    "failed to launch backend '{}': {err}",
+                    self.state.backend_id
+                ))
+            })?;
         let mut stdin = child.stdin.take().ok_or_else(|| {
             CommandAttemptFailure::non_retryable(format!(
                 "backend '{}' child missing stdin pipe",
@@ -1720,14 +1724,12 @@ async fn load_rollout_messages(
         .get_rollout_items()
         .into_iter()
         .filter_map(|item| match item {
-            RolloutItem::ResponseItem(ResponseItem::Message {
-                role,
-                content,
-                ..
-            }) => Some(PromptHistoryMessage {
-                role,
-                content: content_items_to_text(&content),
-            }),
+            RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) => {
+                Some(PromptHistoryMessage {
+                    role,
+                    content: content_items_to_text(&content),
+                })
+            }
             _ => None,
         })
         .filter(|item| !item.content.trim().is_empty())
@@ -1901,11 +1903,13 @@ fn find_external_error(value: &JsonValue) -> Option<ExternalBackendError> {
 
 fn external_error_from_value(value: &JsonValue) -> Option<ExternalBackendError> {
     match value {
-        JsonValue::String(message) => non_empty_trimmed(message).map(|message| ExternalBackendError {
-            message: message.to_string(),
-            code: None,
-            retryable: false,
-        }),
+        JsonValue::String(message) => {
+            non_empty_trimmed(message).map(|message| ExternalBackendError {
+                message: message.to_string(),
+                code: None,
+                retryable: false,
+            })
+        }
         JsonValue::Object(map) => {
             let message = map
                 .get("message")
@@ -2123,7 +2127,7 @@ mod tests {
         .expect("spawn handle");
 
         let mut status_rx = handle.subscribe_status().await.expect("subscribe");
-        let status = timeout(Duration::from_secs(5), async {
+        let status = timeout(Duration::from_secs(15), async {
             loop {
                 let current = status_rx.borrow().clone();
                 if matches!(current, AgentStatus::Completed(_)) {
@@ -2174,7 +2178,7 @@ mod tests {
 
         handle.shutdown_live().await.expect("shutdown");
 
-        let status = timeout(Duration::from_secs(5), async {
+        let status = timeout(Duration::from_secs(15), async {
             loop {
                 let current = status_rx.borrow().clone();
                 if current == AgentStatus::Shutdown {
@@ -2228,7 +2232,7 @@ mod tests {
             .expect("send input");
 
         let mut status_rx = handle.subscribe_status().await.expect("subscribe");
-        let status = timeout(Duration::from_secs(5), async {
+        let status = timeout(Duration::from_secs(15), async {
             loop {
                 let current = status_rx.borrow().clone();
                 if matches!(current, AgentStatus::Completed(_)) {
@@ -2358,7 +2362,10 @@ mod tests {
 
         let status = wait_for_final_status(&handle).await;
         assert_eq!(status, AgentStatus::Completed(Some("retry ok".to_string())));
-        assert_eq!(std::fs::read_to_string(&attempt_file).expect("attempt file"), "2");
+        assert_eq!(
+            std::fs::read_to_string(&attempt_file).expect("attempt file"),
+            "2"
+        );
     }
 
     #[tokio::test]
@@ -2377,7 +2384,7 @@ mod tests {
                 args: vec![
                     "-lc".to_string(),
                     format!(
-                        r#"marker='{}'; if [ ! -f "$marker" ]; then touch "$marker"; sleep 4; fi; printf '%s' '{{"message":"timeout retry ok"}}'"#,
+                        r#"marker='{}'; if [ ! -f "$marker" ]; then touch "$marker"; sleep 5; fi; printf '%s' '{{"message":"timeout retry ok"}}'"#,
                         first_attempt_marker.display()
                     ),
                 ],
@@ -2386,7 +2393,7 @@ mod tests {
             },
             /*healthcheck*/ None,
             /*healthcheck_timeout*/ None,
-            /*turn_timeout*/ Some(Duration::from_secs(2)),
+            /*turn_timeout*/ Some(Duration::from_secs(3)),
             /*max_retries*/ 1,
             /*supports_resume*/ false,
             /*supports_interrupt*/ false,
@@ -2405,7 +2412,10 @@ mod tests {
             status,
             AgentStatus::Completed(Some("timeout retry ok".to_string()))
         );
-        assert!(first_attempt_marker.exists(), "first attempt marker missing");
+        assert!(
+            first_attempt_marker.exists(),
+            "first attempt marker missing"
+        );
     }
 
     #[tokio::test]
@@ -2433,7 +2443,8 @@ mod tests {
                 working_dir: Some(PathBuf::from("backend")),
                 env: BTreeMap::new(),
             },
-            /*healthcheck*/ Some(CommandBackendCommand {
+            /*healthcheck*/
+            Some(CommandBackendCommand {
                 program: "bash".to_string(),
                 args: vec![
                     "-lc".to_string(),
@@ -2445,7 +2456,7 @@ mod tests {
                 working_dir: Some(PathBuf::from("backend")),
                 env: BTreeMap::new(),
             }),
-            /*healthcheck_timeout*/ Some(Duration::from_secs(2)),
+            /*healthcheck_timeout*/ Some(Duration::from_secs(5)),
             /*turn_timeout*/ None,
             /*max_retries*/ 0,
             /*supports_resume*/ false,

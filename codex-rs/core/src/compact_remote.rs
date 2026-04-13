@@ -98,12 +98,12 @@ async fn run_remote_compact_task_inner_impl(
 
     let prompt_input = history.for_prompt(&turn_context.model_info.input_modalities);
     let tool_router = built_tools(
-        sess.as_ref(),
-        turn_context.as_ref(),
+        sess.clone(),
+        turn_context.clone(),
         &prompt_input,
-        &HashSet::new(),
+        HashSet::new(),
         /*skills_outcome*/ None,
-        &CancellationToken::new(),
+        CancellationToken::new(),
     )
     .await?;
     let prompt = Prompt {

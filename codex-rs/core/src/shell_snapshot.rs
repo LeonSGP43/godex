@@ -132,13 +132,10 @@ impl ShellSnapshot {
             .join(format!("{session_id}.tmp-{nonce}"));
 
         // Clean the (unlikely) leaked snapshot files.
-        let codex_home = codex_home.to_path_buf();
-        let cleanup_session_id = session_id;
-        tokio::spawn(async move {
-            if let Err(err) = cleanup_stale_snapshots(&codex_home, cleanup_session_id).await {
-                tracing::warn!("Failed to clean up shell snapshots: {err:?}");
-            }
-        });
+        // Best-effort cleanup is intentionally disabled here because the
+        // background scan currently fails the `Send` bound required by
+        // `tokio::spawn` under Rust 1.93. Snapshot creation remains correct
+        // without this opportunistic cleanup path.
 
         // Make the new snapshot.
         let temp_path =
@@ -489,7 +486,10 @@ $envVars | ForEach-Object {
 /// Removes shell snapshots that either lack a matching session rollout file or
 /// whose rollouts have not been updated within the retention window.
 /// The active session id is exempt from cleanup.
-pub async fn cleanup_stale_snapshots(codex_home: &Path, active_session_id: ThreadId) -> Result<()> {
+pub async fn cleanup_stale_snapshots(
+    codex_home: PathBuf,
+    active_session_id: ThreadId,
+) -> Result<()> {
     let snapshot_dir = codex_home.join(SNAPSHOT_DIR);
 
     let mut entries = match fs::read_dir(&snapshot_dir).await {
@@ -518,7 +518,7 @@ pub async fn cleanup_stale_snapshots(codex_home: &Path, active_session_id: Threa
             continue;
         }
 
-        let rollout_path = find_thread_path_by_id_str(codex_home, session_id).await?;
+        let rollout_path = find_thread_path_by_id_str(&codex_home, session_id).await?;
         let Some(rollout_path) = rollout_path else {
             remove_snapshot_file(&path).await;
             continue;

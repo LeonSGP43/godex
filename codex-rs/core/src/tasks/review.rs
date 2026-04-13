@@ -47,6 +47,61 @@ impl ReviewTask {
     }
 }
 
+async fn send_review_event(session: Arc<Session>, ctx: Arc<TurnContext>, event: EventMsg) {
+    session.send_event_owned(ctx, event).await;
+}
+
+async fn record_review_items(
+    session: Arc<Session>,
+    ctx: Arc<TurnContext>,
+    items: Vec<ResponseItem>,
+) {
+    session.record_conversation_items_owned(ctx, items).await;
+}
+
+async fn record_review_response_item(
+    session: Arc<Session>,
+    ctx: Arc<TurnContext>,
+    item: ResponseItem,
+) {
+    session
+        .record_response_item_and_emit_turn_item_owned(ctx, item)
+        .await;
+}
+
+async fn ensure_review_rollout_materialized(session: Arc<Session>) {
+    session.ensure_rollout_materialized().await;
+}
+
+async fn review_task_run(
+    session: Arc<SessionTaskContext>,
+    ctx: Arc<TurnContext>,
+    input: Vec<UserInput>,
+    cancellation_token: CancellationToken,
+) -> Option<String> {
+    session
+        .session
+        .services
+        .session_telemetry
+        .counter("codex.task.review", /*inc*/ 1, &[]);
+
+    let output = match start_review_conversation(
+        session.clone(),
+        ctx.clone(),
+        input,
+        cancellation_token.clone(),
+    )
+    .await
+    {
+        Some(receiver) => process_review_events(session.clone(), ctx.clone(), receiver).await,
+        None => None,
+    };
+    if !cancellation_token.is_cancelled() {
+        exit_review_mode(session.clone_session(), output.clone(), ctx.clone()).await;
+    }
+    None
+}
+
 impl SessionTask for ReviewTask {
     fn kind(&self) -> TaskKind {
         TaskKind::Review
@@ -56,35 +111,17 @@ impl SessionTask for ReviewTask {
         "session_task.review"
     }
 
-    async fn run(
+    fn run(
         self: Arc<Self>,
         session: Arc<SessionTaskContext>,
         ctx: Arc<TurnContext>,
         input: Vec<UserInput>,
         cancellation_token: CancellationToken,
-    ) -> Option<String> {
-        session.session.services.session_telemetry.counter(
-            "codex.task.review",
-            /*inc*/ 1,
-            &[],
-        );
-
-        // Start sub-codex conversation and get the receiver for events.
-        let output = match start_review_conversation(
-            session.clone(),
-            ctx.clone(),
-            input,
-            cancellation_token.clone(),
-        )
-        .await
-        {
-            Some(receiver) => process_review_events(session.clone(), ctx.clone(), receiver).await,
-            None => None,
-        };
-        if !cancellation_token.is_cancelled() {
-            exit_review_mode(session.clone_session(), output.clone(), ctx.clone()).await;
+    ) -> impl std::future::Future<Output = Option<String>> + Send {
+        async move {
+            let _ = self;
+            review_task_run(session, ctx, input, cancellation_token).await
         }
-        None
     }
 
     async fn abort(&self, session: Arc<SessionTaskContext>, ctx: Arc<TurnContext>) {
@@ -147,10 +184,8 @@ async fn process_review_events(
         match event.clone().msg {
             EventMsg::AgentMessage(_) => {
                 if let Some(prev) = prev_agent_message.take() {
-                    session
-                        .clone_session()
-                        .send_event(ctx.as_ref(), prev.msg)
-                        .await;
+                    let sess = session.clone_session();
+                    send_review_event(sess, Arc::clone(&ctx), prev.msg).await;
                 }
                 prev_agent_message = Some(event);
             }
@@ -176,10 +211,8 @@ async fn process_review_events(
                 return None;
             }
             other => {
-                session
-                    .clone_session()
-                    .send_event(ctx.as_ref(), other)
-                    .await;
+                let sess = session.clone_session();
+                send_review_event(sess, Arc::clone(&ctx), other).await;
             }
         }
     }
@@ -242,44 +275,44 @@ pub(crate) async fn exit_review_mode(
         (rendered, assistant_message)
     };
 
-    session
-        .record_conversation_items(
-            &ctx,
-            &[ResponseItem::Message {
-                id: Some(REVIEW_USER_MESSAGE_ID.to_string()),
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: user_message }],
-                end_turn: None,
-                phase: None,
-            }],
-        )
-        .await;
+    record_review_items(
+        Arc::clone(&session),
+        Arc::clone(&ctx),
+        vec![ResponseItem::Message {
+            id: Some(REVIEW_USER_MESSAGE_ID.to_string()),
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText { text: user_message }],
+            end_turn: None,
+            phase: None,
+        }],
+    )
+    .await;
 
-    session
-        .send_event(
-            ctx.as_ref(),
-            EventMsg::ExitedReviewMode(ExitedReviewModeEvent { review_output }),
-        )
-        .await;
-    session
-        .record_response_item_and_emit_turn_item(
-            ctx.as_ref(),
-            ResponseItem::Message {
-                id: Some(REVIEW_ASSISTANT_MESSAGE_ID.to_string()),
-                role: "assistant".to_string(),
-                content: vec![ContentItem::OutputText {
-                    text: assistant_message,
-                }],
-                end_turn: None,
-                phase: None,
-            },
-        )
-        .await;
+    send_review_event(
+        Arc::clone(&session),
+        Arc::clone(&ctx),
+        EventMsg::ExitedReviewMode(ExitedReviewModeEvent { review_output }),
+    )
+    .await;
+    record_review_response_item(
+        Arc::clone(&session),
+        Arc::clone(&ctx),
+        ResponseItem::Message {
+            id: Some(REVIEW_ASSISTANT_MESSAGE_ID.to_string()),
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: assistant_message,
+            }],
+            end_turn: None,
+            phase: None,
+        },
+    )
+    .await;
 
     // Review turns can run before any regular user turn, so explicitly
     // materialize rollout persistence. Do this after emitting review output so
     // file creation + git metadata collection cannot delay client-facing items.
-    session.ensure_rollout_materialized().await;
+    ensure_review_rollout_materialized(session).await;
 }
 
 fn render_review_exit_success(results: &str) -> String {

@@ -130,6 +130,7 @@ struct RankedCandidate {
     reranked: bool,
 }
 
+#[cfg(test)]
 pub(super) async fn write_memory_index_qmd(
     root: &Path,
     memories: &[Stage1Output],
@@ -203,6 +204,80 @@ pub(super) async fn write_memory_index_qmd(
     tokio::fs::write(path, out).await
 }
 
+pub(super) async fn write_memory_index_qmd_owned(
+    root: std::path::PathBuf,
+    memories: Vec<Stage1Output>,
+) -> io::Result<()> {
+    let path = crate::fork_patch::memory::memory_qmd_file(&root);
+    if memories.is_empty() {
+        return tokio::fs::write(path, memory_index_qmd_empty()).await;
+    }
+
+    let generated_at = Utc::now().to_rfc3339();
+    let mut out = String::new();
+    writeln!(out, "---").map_err(format_err)?;
+    writeln!(out, "title: Codex Memory QMD Index").map_err(format_err)?;
+    writeln!(out, "generated_at: {generated_at}").map_err(format_err)?;
+    writeln!(out, "entry_count: {}", memories.len()).map_err(format_err)?;
+    writeln!(out, "engine: {QMD_ENGINE}").map_err(format_err)?;
+    writeln!(out, "retrieval_pipeline: {QMD_PIPELINE}").map_err(format_err)?;
+    writeln!(out, "embedding_backend: {EMBEDDING_BACKEND}").map_err(format_err)?;
+    writeln!(
+        out,
+        "vector_index_file: {}",
+        crate::fork_patch::memory::vector_index_file_name()
+    )
+    .map_err(format_err)?;
+    writeln!(out, "---").map_err(format_err)?;
+    writeln!(out).map_err(format_err)?;
+    writeln!(out, "# Memory Index").map_err(format_err)?;
+    writeln!(out).map_err(format_err)?;
+    writeln!(
+        out,
+        "This file is generated from stage-1 outputs (latest-first ordering)."
+    )
+    .map_err(format_err)?;
+    writeln!(out).map_err(format_err)?;
+
+    for (position, memory) in memories.iter().enumerate() {
+        let rollout_summary_file = crate::fork_patch::memory::rollout_summary_relative_path(
+            &rollout_summary_file_stem(memory),
+        );
+        let combined_text = format!("{}\n{}", memory.rollout_summary, memory.raw_memory);
+        let keywords = top_keywords(&combined_text, KEYWORD_LIMIT).join(", ");
+        let summary_preview =
+            truncate_chars(memory.rollout_summary.trim(), SUMMARY_PREVIEW_CHAR_LIMIT);
+
+        writeln!(out, "## Entry {}", position + 1).map_err(format_err)?;
+        writeln!(out, "- thread_id: {}", memory.thread_id).map_err(format_err)?;
+        writeln!(
+            out,
+            "- updated_at: {}",
+            memory.source_updated_at.to_rfc3339()
+        )
+        .map_err(format_err)?;
+        writeln!(out, "- rollout_summary_file: {rollout_summary_file}").map_err(format_err)?;
+        writeln!(out, "- cwd: {}", memory.cwd.display()).map_err(format_err)?;
+        if let Some(branch) = memory.git_branch.as_deref() {
+            writeln!(out, "- git_branch: {branch}").map_err(format_err)?;
+        }
+        if !keywords.is_empty() {
+            writeln!(out, "- keywords: {keywords}").map_err(format_err)?;
+        }
+        writeln!(out).map_err(format_err)?;
+        writeln!(out, "### Summary").map_err(format_err)?;
+        if summary_preview.is_empty() {
+            writeln!(out, "- (empty rollout summary)").map_err(format_err)?;
+        } else {
+            writeln!(out, "{summary_preview}").map_err(format_err)?;
+        }
+        writeln!(out).map_err(format_err)?;
+    }
+
+    tokio::fs::write(path, out).await
+}
+
+#[cfg(test)]
 pub(super) async fn write_vector_index_json(
     root: &Path,
     memories: &[Stage1Output],
@@ -275,10 +350,97 @@ pub(super) async fn write_vector_index_json(
     tokio::fs::write(crate::fork_patch::memory::vector_index_file(root), body).await
 }
 
+pub(super) async fn write_vector_index_json_owned(
+    root: std::path::PathBuf,
+    memories: Vec<Stage1Output>,
+) -> io::Result<()> {
+    let mut doc_frequency = HashMap::<String, usize>::new();
+    let entries = memories
+        .iter()
+        .map(|memory| {
+            let combined_text = format!("{}\n{}", memory.rollout_summary, memory.raw_memory);
+            let rollout_summary_file = crate::fork_patch::memory::rollout_summary_relative_path(
+                &rollout_summary_file_stem(memory),
+            );
+            let lexical_counts = lexical_term_counts(&combined_text);
+            for term in lexical_counts.keys() {
+                *doc_frequency.entry(term.clone()).or_default() += 1;
+            }
+            let doc_len = lexical_counts.values().sum::<usize>();
+            VectorIndexEntry {
+                thread_id: memory.thread_id.to_string(),
+                source_updated_at: memory.source_updated_at.to_rfc3339(),
+                rollout_summary_file,
+                cwd: memory.cwd.display().to_string(),
+                git_branch: memory.git_branch.clone(),
+                keywords: top_keywords(&combined_text, KEYWORD_LIMIT),
+                summary_preview: truncate_chars(
+                    memory.rollout_summary.trim(),
+                    SUMMARY_PREVIEW_CHAR_LIMIT,
+                ),
+                top_terms: top_terms_from_counts(&lexical_counts, TERM_FREQUENCY_LIMIT),
+                doc_len,
+                embedding: embedding_for_text(&combined_text),
+            }
+        })
+        .collect::<Vec<_>>();
+    let avg_doc_len = if entries.is_empty() {
+        0.0
+    } else {
+        entries
+            .iter()
+            .map(|entry| entry.doc_len as f32)
+            .sum::<f32>()
+            / entries.len() as f32
+    };
+    let idf = doc_frequency
+        .into_iter()
+        .filter_map(|(term, df)| {
+            let idf = bm25_idf(entries.len(), df);
+            (idf > 0.0).then_some((term, idf))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let index = VectorIndex {
+        version: 2,
+        generated_at: Utc::now().to_rfc3339(),
+        dimension: VECTOR_DIMENSION,
+        metric: "cosine",
+        engine: QMD_ENGINE,
+        retrieval_pipeline: QMD_PIPELINE,
+        embedding_backend: EMBEDDING_BACKEND,
+        bm25: Bm25IndexMeta {
+            k1: BM25_DEFAULT_K1,
+            b: BM25_DEFAULT_B,
+            avg_doc_len,
+            idf,
+        },
+        entries,
+    };
+    let body = serde_json::to_string_pretty(&index)
+        .map_err(|err| io::Error::other(format!("serialize vector index: {err}")))?;
+    tokio::fs::write(crate::fork_patch::memory::vector_index_file(&root), body).await
+}
+
+#[cfg(test)]
 pub(super) async fn clear_auxiliary_indexes(root: &Path) -> io::Result<()> {
     for path in [
         crate::fork_patch::memory::memory_qmd_file(root),
         crate::fork_patch::memory::vector_index_file(root),
+    ] {
+        if let Err(err) = tokio::fs::remove_file(path).await
+            && err.kind() != io::ErrorKind::NotFound
+        {
+            return Err(err);
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn clear_auxiliary_indexes_owned(root: std::path::PathBuf) -> io::Result<()> {
+    for path in [
+        crate::fork_patch::memory::memory_qmd_file(&root),
+        crate::fork_patch::memory::vector_index_file(&root),
     ] {
         if let Err(err) = tokio::fs::remove_file(path).await
             && err.kind() != io::ErrorKind::NotFound

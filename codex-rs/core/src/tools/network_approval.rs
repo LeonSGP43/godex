@@ -1,6 +1,7 @@
 use crate::codex::Session;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::guardian_rejection_message;
+use crate::guardian::new_guardian_review_id;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
 use crate::network_policy_decision::denied_network_policy_message;
@@ -165,6 +166,24 @@ impl PendingHostApproval {
         }
         self.notify.notify_waiters();
     }
+
+    async fn wait_for_decision_owned(self: Arc<Self>) -> PendingApprovalDecision {
+        loop {
+            let notified = self.notify.notified();
+            if let Some(decision) = *self.decision.lock().await {
+                return decision;
+            }
+            notified.await;
+        }
+    }
+
+    async fn set_decision_owned(self: Arc<Self>, decision: PendingApprovalDecision) {
+        {
+            let mut current = self.decision.lock().await;
+            *current = Some(decision);
+        }
+        self.notify.notify_waiters();
+    }
 }
 
 struct ActiveNetworkApprovalCall {
@@ -252,6 +271,17 @@ impl NetworkApprovalService {
             .await;
     }
 
+    async fn record_outcome_for_single_active_call_owned(
+        self: Arc<Self>,
+        outcome: NetworkApprovalOutcome,
+    ) {
+        let Some(owner_call) = self.resolve_single_active_call().await else {
+            return;
+        };
+        self.record_call_outcome(&owner_call.registration_id, outcome)
+            .await;
+    }
+
     async fn take_call_outcome(&self, registration_id: &str) -> Option<NetworkApprovalOutcome> {
         let mut call_outcomes = self.call_outcomes.lock().await;
         call_outcomes.remove(registration_id)
@@ -277,6 +307,17 @@ impl NetworkApprovalService {
             .await;
     }
 
+    pub(crate) async fn record_blocked_request_owned(self: Arc<Self>, blocked: BlockedRequest) {
+        let Some(message) = denied_network_policy_message(&blocked) else {
+            return;
+        };
+
+        self.record_outcome_for_single_active_call_owned(NetworkApprovalOutcome::DeniedByPolicy(
+            message,
+        ))
+        .await;
+    }
+
     async fn active_turn_context(session: &Session) -> Option<Arc<crate::codex::TurnContext>> {
         let active_turn = session.active_turn.lock().await;
         active_turn
@@ -294,7 +335,7 @@ impl NetworkApprovalService {
     }
 
     pub(crate) async fn handle_inline_policy_request(
-        &self,
+        self: Arc<Self>,
         session: Arc<Session>,
         request: NetworkPolicyRequest,
     ) -> NetworkDecision {
@@ -324,7 +365,11 @@ impl NetworkApprovalService {
 
         let (pending, is_owner) = self.get_or_create_pending_approval(key.clone()).await;
         if !is_owner {
-            return pending.wait_for_decision().await.to_network_decision();
+            return pending
+                .clone()
+                .wait_for_decision_owned()
+                .await
+                .to_network_decision();
         }
 
         let target = Self::format_network_target(key.protocol, request.host.as_str(), key.port);
@@ -333,7 +378,10 @@ impl NetworkApprovalService {
         let prompt_reason = format!("{} is not in the allowed_domains", request.host);
 
         let Some(turn_context) = Self::active_turn_context(session.as_ref()).await else {
-            pending.set_decision(PendingApprovalDecision::Deny).await;
+            pending
+                .clone()
+                .set_decision_owned(PendingApprovalDecision::Deny)
+                .await;
             let mut pending_approvals = self.pending_host_approvals.lock().await;
             pending_approvals.remove(&key);
             self.record_outcome_for_single_active_call(NetworkApprovalOutcome::DeniedByPolicy(
@@ -343,7 +391,10 @@ impl NetworkApprovalService {
             return NetworkDecision::deny(REASON_NOT_ALLOWED);
         };
         if !sandbox_policy_allows_network_approval_flow(turn_context.sandbox_policy.get()) {
-            pending.set_decision(PendingApprovalDecision::Deny).await;
+            pending
+                .clone()
+                .set_decision_owned(PendingApprovalDecision::Deny)
+                .await;
             let mut pending_approvals = self.pending_host_approvals.lock().await;
             pending_approvals.remove(&key);
             self.record_outcome_for_single_active_call(NetworkApprovalOutcome::DeniedByPolicy(
@@ -353,7 +404,10 @@ impl NetworkApprovalService {
             return NetworkDecision::deny(REASON_NOT_ALLOWED);
         }
         if !allows_network_approval_flow(turn_context.approval_policy.value()) {
-            pending.set_decision(PendingApprovalDecision::Deny).await;
+            pending
+                .clone()
+                .set_decision_owned(PendingApprovalDecision::Deny)
+                .await;
             let mut pending_approvals = self.pending_host_approvals.lock().await;
             pending_approvals.remove(&key);
             self.record_outcome_for_single_active_call(NetworkApprovalOutcome::DeniedByPolicy(
@@ -369,12 +423,13 @@ impl NetworkApprovalService {
         };
         let owner_call = self.resolve_single_active_call().await;
         let guardian_approval_id = Self::approval_id_for_key(&key);
-        let approval_decision = if routes_approval_to_guardian(&turn_context) {
-            // TODO(ccunningham): Attach guardian network reviews to the reviewed tool item
-            // lifecycle instead of this temporary standalone network approval id.
+        let use_guardian = routes_approval_to_guardian(&turn_context);
+        let guardian_review_id = use_guardian.then(new_guardian_review_id);
+        let approval_decision = if let Some(review_id) = guardian_review_id.clone() {
             review_approval_request(
-                &session,
-                &turn_context,
+                session.clone(),
+                turn_context.clone(),
+                review_id,
                 GuardianApprovalRequest::NetworkAccess {
                     id: guardian_approval_id.clone(),
                     turn_id: owner_call
@@ -393,8 +448,9 @@ impl NetworkApprovalService {
             let prompt_command = vec!["network-access".to_string(), target.clone()];
             let available_decisions = None;
             session
-                .request_command_approval(
-                    turn_context.as_ref(),
+                .clone()
+                .request_command_approval_owned(
+                    turn_context.clone(),
                     approval_id,
                     /*approval_id*/ None,
                     prompt_command,
@@ -487,11 +543,9 @@ impl NetworkApprovalService {
                 }
             },
             ReviewDecision::Denied | ReviewDecision::Abort => {
-                if routes_approval_to_guardian(&turn_context) {
+                if let Some(review_id) = guardian_review_id.as_deref() {
                     if let Some(owner_call) = owner_call.as_ref() {
-                        let message =
-                            guardian_rejection_message(session.as_ref(), &guardian_approval_id)
-                                .await;
+                        let message = guardian_rejection_message(session.as_ref(), review_id).await;
                         self.record_call_outcome(
                             &owner_call.registration_id,
                             NetworkApprovalOutcome::DeniedByPolicy(message),
@@ -527,7 +581,7 @@ impl NetworkApprovalService {
             denied_hosts.insert(key.clone());
         }
 
-        pending.set_decision(resolved).await;
+        pending.clone().set_decision_owned(resolved).await;
         let mut pending_approvals = self.pending_host_approvals.lock().await;
         pending_approvals.remove(&key);
 
@@ -538,30 +592,62 @@ impl NetworkApprovalService {
 pub(crate) fn build_blocked_request_observer(
     network_approval: Arc<NetworkApprovalService>,
 ) -> Arc<dyn BlockedRequestObserver> {
-    Arc::new(move |blocked: BlockedRequest| {
-        let network_approval = Arc::clone(&network_approval);
-        async move {
-            network_approval.record_blocked_request(blocked).await;
-        }
-    })
+    Arc::new(NetworkApprovalBlockedRequestObserver { network_approval })
 }
 
 pub(crate) fn build_network_policy_decider(
     network_approval: Arc<NetworkApprovalService>,
     network_policy_decider_session: Arc<RwLock<std::sync::Weak<Session>>>,
 ) -> Arc<dyn NetworkPolicyDecider> {
-    Arc::new(move |request: NetworkPolicyRequest| {
-        let network_approval = Arc::clone(&network_approval);
-        let network_policy_decider_session = Arc::clone(&network_policy_decider_session);
-        async move {
-            let Some(session) = network_policy_decider_session.read().await.upgrade() else {
-                return NetworkDecision::ask("not_allowed");
-            };
-            network_approval
-                .handle_inline_policy_request(session, request)
-                .await
-        }
+    Arc::new(NetworkApprovalPolicyDecider {
+        network_approval,
+        network_policy_decider_session,
     })
+}
+
+struct NetworkApprovalBlockedRequestObserver {
+    network_approval: Arc<NetworkApprovalService>,
+}
+
+#[async_trait::async_trait]
+impl BlockedRequestObserver for NetworkApprovalBlockedRequestObserver {
+    async fn on_blocked_request(&self, request: BlockedRequest) {
+        self.network_approval
+            .clone()
+            .record_blocked_request_owned(request)
+            .await;
+    }
+}
+
+struct NetworkApprovalPolicyDecider {
+    network_approval: Arc<NetworkApprovalService>,
+    network_policy_decider_session: Arc<RwLock<std::sync::Weak<Session>>>,
+}
+
+#[async_trait::async_trait]
+impl NetworkPolicyDecider for NetworkApprovalPolicyDecider {
+    async fn decide(&self, request: NetworkPolicyRequest) -> NetworkDecision {
+        decide_network_policy_request(
+            Arc::clone(&self.network_approval),
+            Arc::clone(&self.network_policy_decider_session),
+            request,
+        )
+        .await
+    }
+}
+
+async fn decide_network_policy_request(
+    network_approval: Arc<NetworkApprovalService>,
+    network_policy_decider_session: Arc<RwLock<std::sync::Weak<Session>>>,
+    request: NetworkPolicyRequest,
+) -> NetworkDecision {
+    let weak_session = { network_policy_decider_session.read().await.clone() };
+    let Some(session) = weak_session.upgrade() else {
+        return NetworkDecision::ask("not_allowed");
+    };
+    network_approval
+        .handle_inline_policy_request(session, request)
+        .await
 }
 
 pub(crate) async fn begin_network_approval(

@@ -418,7 +418,7 @@ async fn cleanup_stale_snapshots_removes_orphans_and_keeps_live() -> Result<()> 
     fs::write(&orphan_snapshot, "orphan").await?;
     fs::write(&invalid_snapshot, "invalid").await?;
 
-    cleanup_stale_snapshots(codex_home, ThreadId::new()).await?;
+    cleanup_stale_snapshots(codex_home.to_path_buf(), ThreadId::new()).await?;
 
     assert_eq!(live_snapshot.exists(), true);
     assert_eq!(orphan_snapshot.exists(), false);
@@ -441,7 +441,7 @@ async fn cleanup_stale_snapshots_removes_stale_rollouts() -> Result<()> {
 
     set_file_mtime(&rollout_path, SNAPSHOT_RETENTION + Duration::from_secs(60))?;
 
-    cleanup_stale_snapshots(codex_home, ThreadId::new()).await?;
+    cleanup_stale_snapshots(codex_home.to_path_buf(), ThreadId::new()).await?;
 
     assert_eq!(stale_snapshot.exists(), false);
     Ok(())
@@ -462,7 +462,7 @@ async fn cleanup_stale_snapshots_skips_active_session() -> Result<()> {
 
     set_file_mtime(&rollout_path, SNAPSHOT_RETENTION + Duration::from_secs(60))?;
 
-    cleanup_stale_snapshots(codex_home, active_session).await?;
+    cleanup_stale_snapshots(codex_home.to_path_buf(), active_session).await?;
 
     assert_eq!(active_snapshot.exists(), true);
     Ok(())

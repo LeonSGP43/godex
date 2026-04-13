@@ -48,6 +48,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -715,9 +716,35 @@ impl ThreadManagerState {
             .ok_or_else(|| CodexErr::ThreadNotFound(thread_id))
     }
 
+    pub(crate) async fn get_thread_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+    ) -> CodexResult<Arc<CodexThread>> {
+        let threads = Arc::clone(&self.threads);
+        let threads = threads.read().await;
+        threads
+            .get(&thread_id)
+            .cloned()
+            .ok_or_else(|| CodexErr::ThreadNotFound(thread_id))
+    }
+
     /// Send an operation to a thread by ID.
     pub(crate) async fn send_op(&self, thread_id: ThreadId, op: Op) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
+        if let Some(ops_log) = &self.ops_log
+            && let Ok(mut log) = ops_log.lock()
+        {
+            log.push((thread_id, op.clone()));
+        }
+        thread.submit(op).await
+    }
+
+    pub(crate) async fn send_op_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+        op: Op,
+    ) -> CodexResult<String> {
+        let thread = self.clone().get_thread_owned(thread_id).await?;
         if let Some(ops_log) = &self.ops_log
             && let Ok(mut log) = ops_log.lock()
         {
@@ -742,6 +769,13 @@ impl ThreadManagerState {
         self.threads.write().await.remove(thread_id)
     }
 
+    pub(crate) async fn remove_thread_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+    ) -> Option<Arc<CodexThread>> {
+        self.threads.write().await.remove(&thread_id)
+    }
+
     /// Spawn a new thread with no history using a provided config.
     pub(crate) async fn spawn_new_thread(
         &self,
@@ -758,6 +792,24 @@ impl ThreadManagerState {
             /*inherited_exec_policy*/ None,
         ))
         .await
+    }
+
+    pub(crate) async fn spawn_new_thread_owned(
+        self: Arc<Self>,
+        config: Config,
+        agent_control: AgentControl,
+    ) -> CodexResult<NewThread> {
+        self.clone()
+            .spawn_new_thread_with_source_owned(
+                config,
+                agent_control,
+                self.session_source.clone(),
+                /*persist_extended_history*/ false,
+                /*metrics_service_name*/ None,
+                /*inherited_shell_snapshot*/ None,
+                /*inherited_exec_policy*/ None,
+            )
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -788,6 +840,35 @@ impl ThreadManagerState {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn spawn_new_thread_with_source_owned(
+        self: Arc<Self>,
+        config: Config,
+        agent_control: AgentControl,
+        session_source: SessionSource,
+        persist_extended_history: bool,
+        metrics_service_name: Option<String>,
+        inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+    ) -> CodexResult<NewThread> {
+        self.clone()
+            .spawn_thread_with_source_owned(
+                config,
+                InitialHistory::New,
+                Arc::clone(&self.auth_manager),
+                agent_control,
+                session_source,
+                Vec::new(),
+                persist_extended_history,
+                metrics_service_name,
+                inherited_shell_snapshot,
+                inherited_exec_policy,
+                /*parent_trace*/ None,
+                /*user_shell_override*/ None,
+            )
+            .await
+    }
+
     pub(crate) async fn resume_thread_from_rollout_with_source(
         &self,
         config: Config,
@@ -813,6 +894,34 @@ impl ThreadManagerState {
             /*user_shell_override*/ None,
         ))
         .await
+    }
+
+    pub(crate) async fn resume_thread_from_rollout_with_source_owned(
+        self: Arc<Self>,
+        config: Config,
+        rollout_path: PathBuf,
+        agent_control: AgentControl,
+        session_source: SessionSource,
+        inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+    ) -> CodexResult<NewThread> {
+        let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
+        self.clone()
+            .spawn_thread_with_source_owned(
+                config,
+                initial_history,
+                Arc::clone(&self.auth_manager),
+                agent_control,
+                session_source,
+                Vec::new(),
+                /*persist_extended_history*/ false,
+                /*metrics_service_name*/ None,
+                inherited_shell_snapshot,
+                inherited_exec_policy,
+                /*parent_trace*/ None,
+                /*user_shell_override*/ None,
+            )
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -841,6 +950,35 @@ impl ThreadManagerState {
             /*user_shell_override*/ None,
         ))
         .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn fork_thread_with_source_owned(
+        self: Arc<Self>,
+        config: Config,
+        initial_history: InitialHistory,
+        agent_control: AgentControl,
+        session_source: SessionSource,
+        persist_extended_history: bool,
+        inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+    ) -> CodexResult<NewThread> {
+        self.clone()
+            .spawn_thread_with_source_owned(
+                config,
+                initial_history,
+                Arc::clone(&self.auth_manager),
+                agent_control,
+                session_source,
+                Vec::new(),
+                persist_extended_history,
+                /*metrics_service_name*/ None,
+                inherited_shell_snapshot,
+                inherited_exec_policy,
+                /*parent_trace*/ None,
+                /*user_shell_override*/ None,
+            )
+            .await
     }
 
     /// Spawn a new thread with optional history and register it with the manager.
@@ -922,6 +1060,60 @@ impl ThreadManagerState {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn spawn_thread_with_source_owned(
+        self: Arc<Self>,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        agent_control: AgentControl,
+        session_source: SessionSource,
+        dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
+        persist_extended_history: bool,
+        metrics_service_name: Option<String>,
+        inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
+        inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+        parent_trace: Option<W3cTraceContext>,
+        user_shell_override: Option<crate::shell::Shell>,
+    ) -> CodexResult<NewThread> {
+        let skills_watcher = Arc::clone(&self.skills_watcher);
+        let skills_manager = Arc::clone(&self.skills_manager);
+        let plugins_manager = Arc::clone(&self.plugins_manager);
+        let models_manager = Arc::clone(&self.models_manager);
+        let environment_manager = Arc::clone(&self.environment_manager);
+        let mcp_manager = Arc::clone(&self.mcp_manager);
+        let watch_registration = skills_watcher.register_config(
+            &config,
+            skills_manager.as_ref(),
+            plugins_manager.as_ref(),
+        );
+        let CodexSpawnOk {
+            codex, thread_id, ..
+        } = require_send_owned(Codex::spawn(CodexSpawnArgs {
+            config,
+            auth_manager,
+            models_manager,
+            environment_manager,
+            skills_manager,
+            plugins_manager,
+            mcp_manager,
+            skills_watcher,
+            conversation_history: initial_history,
+            session_source,
+            agent_control,
+            dynamic_tools,
+            persist_extended_history,
+            metrics_service_name,
+            inherited_shell_snapshot,
+            inherited_exec_policy,
+            user_shell_override,
+            parent_trace,
+        }))
+        .await?;
+        require_send_owned(self.finalize_thread_spawn_owned(codex, thread_id, watch_registration))
+            .await
+    }
+
     async fn finalize_thread_spawn(
         &self,
         codex: Codex,
@@ -954,9 +1146,49 @@ impl ThreadManagerState {
         })
     }
 
+    async fn finalize_thread_spawn_owned(
+        self: Arc<Self>,
+        codex: Codex,
+        thread_id: ThreadId,
+        watch_registration: crate::file_watcher::WatchRegistration,
+    ) -> CodexResult<NewThread> {
+        let event = codex.next_event().await?;
+        let session_configured = match event {
+            Event {
+                id,
+                msg: EventMsg::SessionConfigured(session_configured),
+            } if id == INITIAL_SUBMIT_ID => session_configured,
+            _ => {
+                return Err(CodexErr::SessionConfiguredNotFirstEvent);
+            }
+        };
+
+        let thread = Arc::new(CodexThread::new(
+            codex,
+            session_configured.rollout_path.clone(),
+            watch_registration,
+        ));
+        let threads = Arc::clone(&self.threads);
+        let mut threads = threads.write().await;
+        threads.insert(thread_id, thread.clone());
+
+        Ok(NewThread {
+            thread_id,
+            thread,
+            session_configured,
+        })
+    }
+
     pub(crate) fn notify_thread_created(&self, thread_id: ThreadId) {
         let _ = self.thread_created_tx.send(thread_id);
     }
+}
+
+async fn require_send_owned<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+{
+    Box::pin(future).await
 }
 
 /// Return a fork snapshot cut strictly before the nth user message (0-based).

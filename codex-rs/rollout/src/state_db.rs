@@ -77,6 +77,20 @@ pub async fn get_state_db(config: &impl RolloutConfigView) -> Option<StateDbHand
     require_backfill_complete(runtime, config.sqlite_home()).await
 }
 
+pub async fn get_state_db_owned(
+    sqlite_home: PathBuf,
+    model_provider_id: String,
+) -> Option<StateDbHandle> {
+    let state_path = codex_state::state_db_path(&sqlite_home);
+    if !tokio::fs::try_exists(state_path.clone()).await.unwrap_or(false) {
+        return None;
+    }
+    let runtime = codex_state::StateRuntime::init(sqlite_home.clone(), model_provider_id)
+        .await
+        .ok()?;
+    require_backfill_complete_owned(runtime, sqlite_home).await
+}
+
 /// Open the state runtime when the SQLite file exists, without feature gating.
 ///
 /// This is used for parity checks during the SQLite migration phase.
@@ -92,11 +106,49 @@ pub async fn open_if_present(codex_home: &Path, default_provider: &str) -> Optio
     require_backfill_complete(runtime, codex_home).await
 }
 
+pub async fn open_if_present_owned(
+    codex_home: PathBuf,
+    default_provider: String,
+) -> Option<StateDbHandle> {
+    let db_path = codex_state::state_db_path(&codex_home);
+    if !tokio::fs::try_exists(db_path.clone()).await.unwrap_or(false) {
+        return None;
+    }
+    let runtime = codex_state::StateRuntime::init(codex_home.clone(), default_provider)
+        .await
+        .ok()?;
+    require_backfill_complete_owned(runtime, codex_home).await
+}
+
 async fn require_backfill_complete(
     runtime: StateDbHandle,
     codex_home: &Path,
 ) -> Option<StateDbHandle> {
     match runtime.get_backfill_state().await {
+        Ok(state) if state.status == codex_state::BackfillStatus::Complete => Some(runtime),
+        Ok(state) => {
+            warn!(
+                "state db backfill not complete at {} (status: {})",
+                codex_home.display(),
+                state.status.as_str()
+            );
+            None
+        }
+        Err(err) => {
+            warn!(
+                "failed to read backfill state at {}: {err}",
+                codex_home.display()
+            );
+            None
+        }
+    }
+}
+
+async fn require_backfill_complete_owned(
+    runtime: StateDbHandle,
+    codex_home: PathBuf,
+) -> Option<StateDbHandle> {
+    match runtime.clone().get_backfill_state_owned().await {
         Ok(state) if state.status == codex_state::BackfillStatus::Complete => Some(runtime),
         Ok(state) => {
             warn!(
@@ -285,6 +337,21 @@ pub async fn find_rollout_path_by_id(
         })
 }
 
+pub async fn find_rollout_path_by_id_owned(
+    context: Option<StateDbHandle>,
+    thread_id: ThreadId,
+    archived_only: Option<bool>,
+    stage: &'static str,
+) -> Option<PathBuf> {
+    let ctx = context?;
+    ctx.find_rollout_path_by_id_owned(thread_id, archived_only)
+        .await
+        .unwrap_or_else(|err| {
+            warn!("state db find_rollout_path_by_id failed during {stage}: {err}");
+            None
+        })
+}
+
 /// Get dynamic tools for a thread id using SQLite.
 pub async fn get_dynamic_tools(
     context: Option<&codex_state::StateRuntime>,
@@ -293,6 +360,21 @@ pub async fn get_dynamic_tools(
 ) -> Option<Vec<DynamicToolSpec>> {
     let ctx = context?;
     match ctx.get_dynamic_tools(thread_id).await {
+        Ok(tools) => tools,
+        Err(err) => {
+            warn!("state db get_dynamic_tools failed during {stage}: {err}");
+            None
+        }
+    }
+}
+
+pub async fn get_dynamic_tools_owned(
+    context: Option<StateDbHandle>,
+    thread_id: ThreadId,
+    stage: &'static str,
+) -> Option<Vec<DynamicToolSpec>> {
+    let ctx = context?;
+    match ctx.get_dynamic_tools_owned(thread_id).await {
         Ok(tools) => tools,
         Err(err) => {
             warn!("state db get_dynamic_tools failed during {stage}: {err}");

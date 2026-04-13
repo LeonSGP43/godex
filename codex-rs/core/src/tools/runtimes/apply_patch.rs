@@ -8,7 +8,6 @@
 use crate::exec::ExecCapturePolicy;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::review_approval_request;
-use crate::guardian::routes_approval_to_guardian;
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::execute_env;
 use crate::tools::sandboxing::Approvable;
@@ -19,7 +18,6 @@ use crate::tools::sandboxing::Sandboxable;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
 use crate::tools::sandboxing::ToolRuntime;
-use crate::tools::sandboxing::with_cached_approval;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
 use codex_protocol::exec_output::ExecToolCallOutput;
@@ -34,6 +32,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -118,6 +117,111 @@ impl ApplyPatchRuntime {
             tx_event: ctx.session.get_tx_event(),
         })
     }
+
+    async fn review_request_owned(
+        session: Arc<crate::codex::Session>,
+        turn: Arc<crate::codex::TurnContext>,
+        review_id: String,
+        request: GuardianApprovalRequest,
+        retry_reason: Option<String>,
+    ) -> ReviewDecision {
+        review_approval_request(session, turn, review_id, request, retry_reason).await
+    }
+
+    async fn request_patch_approval_owned(
+        session: Arc<crate::codex::Session>,
+        turn: Arc<crate::codex::TurnContext>,
+        call_id: String,
+        changes: HashMap<PathBuf, FileChange>,
+        reason: Option<String>,
+    ) -> ReviewDecision {
+        let rx_approve = session
+            .request_patch_approval_owned(turn, call_id, changes, reason, /*grant_root*/ None)
+            .await;
+        rx_approve.await.unwrap_or_default()
+    }
+
+    async fn already_approved_owned(
+        session: Arc<crate::codex::Session>,
+        approval_keys: Vec<AbsolutePathBuf>,
+    ) -> bool {
+        let store = session.services.tool_approvals.lock().await;
+        approval_keys
+            .iter()
+            .all(|key| matches!(store.get(key), Some(ReviewDecision::ApprovedForSession)))
+    }
+
+    async fn remember_approval_keys_owned(
+        session: Arc<crate::codex::Session>,
+        approval_keys: Vec<AbsolutePathBuf>,
+    ) {
+        let mut store = session.services.tool_approvals.lock().await;
+        for key in approval_keys {
+            store.put(key, ReviewDecision::ApprovedForSession);
+        }
+    }
+
+    async fn start_approval_owned(
+        session: Arc<crate::codex::Session>,
+        turn: Arc<crate::codex::TurnContext>,
+        call_id: String,
+        retry_reason: Option<String>,
+        approval_keys: Vec<AbsolutePathBuf>,
+        changes: HashMap<PathBuf, FileChange>,
+        guardian_review_id: Option<String>,
+        permissions_preapproved: bool,
+        guardian_request: GuardianApprovalRequest,
+    ) -> ReviewDecision {
+        if permissions_preapproved && retry_reason.is_none() {
+            return ReviewDecision::Approved;
+        }
+        if let Some(review_id) = guardian_review_id {
+            return ApplyPatchRuntime::review_request_owned(
+                session,
+                turn,
+                review_id,
+                guardian_request,
+                retry_reason,
+            )
+            .await;
+        }
+        if let Some(reason) = retry_reason {
+            return ApplyPatchRuntime::request_patch_approval_owned(
+                session,
+                turn,
+                call_id,
+                changes,
+                Some(reason),
+            )
+            .await;
+        }
+        let already_approved =
+            ApplyPatchRuntime::already_approved_owned(session.clone(), approval_keys.clone()).await;
+        if already_approved {
+            return ReviewDecision::ApprovedForSession;
+        }
+
+        let decision = ApplyPatchRuntime::request_patch_approval_owned(
+            session.clone(),
+            turn,
+            call_id,
+            changes,
+            /*reason*/ None,
+        )
+        .await;
+        session.services.session_telemetry.counter(
+            "codex.approval.requested",
+            /*inc*/ 1,
+            &[
+                ("tool", "apply_patch"),
+                ("approved", decision.to_opaque_string()),
+            ],
+        );
+        if matches!(decision, ReviewDecision::ApprovedForSession) {
+            ApplyPatchRuntime::remember_approval_keys_owned(session, approval_keys).await;
+        }
+        decision
+    }
 }
 
 impl Sandboxable for ApplyPatchRuntime {
@@ -141,45 +245,26 @@ impl Approvable<ApplyPatchRequest> for ApplyPatchRuntime {
         req: &'a ApplyPatchRequest,
         ctx: ApprovalCtx<'a>,
     ) -> BoxFuture<'a, ReviewDecision> {
-        let session = ctx.session;
-        let turn = ctx.turn;
+        let session = Arc::clone(ctx.session);
+        let turn = Arc::clone(ctx.turn);
         let call_id = ctx.call_id.to_string();
         let retry_reason = ctx.retry_reason.clone();
         let approval_keys = self.approval_keys(req);
         let changes = req.changes.clone();
+        let guardian_review_id = ctx.guardian_review_id.clone();
+        let permissions_preapproved = req.permissions_preapproved;
+        let guardian_request = ApplyPatchRuntime::build_guardian_review_request(req, &call_id);
         Box::pin(async move {
-            if req.permissions_preapproved && retry_reason.is_none() {
-                return ReviewDecision::Approved;
-            }
-            if routes_approval_to_guardian(turn) {
-                let action = ApplyPatchRuntime::build_guardian_review_request(req, ctx.call_id);
-                return review_approval_request(session, turn, action, retry_reason).await;
-            }
-            if let Some(reason) = retry_reason {
-                let rx_approve = session
-                    .request_patch_approval(
-                        turn,
-                        call_id,
-                        changes.clone(),
-                        Some(reason),
-                        /*grant_root*/ None,
-                    )
-                    .await;
-                return rx_approve.await.unwrap_or_default();
-            }
-
-            with_cached_approval(
-                &session.services,
-                "apply_patch",
+            ApplyPatchRuntime::start_approval_owned(
+                session,
+                turn,
+                call_id,
+                retry_reason,
                 approval_keys,
-                || async move {
-                    let rx_approve = session
-                        .request_patch_approval(
-                            turn, call_id, changes, /*reason*/ None, /*grant_root*/ None,
-                        )
-                        .await;
-                    rx_approve.await.unwrap_or_default()
-                },
+                changes,
+                guardian_review_id,
+                permissions_preapproved,
+                guardian_request,
             )
             .await
         })

@@ -95,9 +95,12 @@ fn config_layer_source_path(source: &ConfigLayerSource) -> Option<PathBuf> {
     match source {
         ConfigLayerSource::System { file } => Some(file.as_path().to_path_buf()),
         ConfigLayerSource::User { file } => Some(file.as_path().to_path_buf()),
-        ConfigLayerSource::Project { dot_codex_folder } => {
-            Some(dot_codex_folder.join(CONFIG_TOML_FILE).as_path().to_path_buf())
-        }
+        ConfigLayerSource::Project { dot_codex_folder } => Some(
+            dot_codex_folder
+                .join(CONFIG_TOML_FILE)
+                .as_path()
+                .to_path_buf(),
+        ),
         ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => {
             Some(file.as_path().to_path_buf())
         }

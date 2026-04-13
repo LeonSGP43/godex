@@ -42,7 +42,7 @@ pub async fn build_prompt_input(
     );
     let thread = thread_manager.start_thread(config).await?;
 
-    let output = build_prompt_input_from_session(thread.thread.codex.session.as_ref(), input).await;
+    let output = build_prompt_input_from_session(thread.thread.codex.session.clone(), input).await;
     let shutdown = thread.thread.shutdown_and_wait().await;
     let _removed = thread_manager.remove_thread(&thread.thread_id).await;
 
@@ -51,7 +51,7 @@ pub async fn build_prompt_input(
 }
 
 pub(crate) async fn build_prompt_input_from_session(
-    sess: &Session,
+    sess: Arc<Session>,
     input: Vec<UserInput>,
 ) -> CodexResult<Vec<ResponseItem>> {
     let turn_context = sess.new_default_turn().await;
@@ -70,12 +70,12 @@ pub(crate) async fn build_prompt_input_from_session(
         .await
         .for_prompt(&turn_context.model_info.input_modalities);
     let router = built_tools(
-        sess,
-        turn_context.as_ref(),
+        Arc::clone(&sess),
+        turn_context.clone(),
         &prompt_input,
-        &HashSet::new(),
-        Some(turn_context.turn_skills.outcome.as_ref()),
-        &CancellationToken::new(),
+        HashSet::new(),
+        Some(turn_context.turn_skills.outcome.clone()),
+        CancellationToken::new(),
     )
     .await?;
     let base_instructions = sess.get_base_instructions().await;

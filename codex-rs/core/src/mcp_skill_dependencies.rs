@@ -71,6 +71,58 @@ pub(crate) async fn maybe_prompt_and_install_mcp_dependencies(
     }
 }
 
+pub(crate) async fn maybe_prompt_and_install_mcp_dependencies_owned(
+    sess: std::sync::Arc<Session>,
+    turn_context: std::sync::Arc<TurnContext>,
+    cancellation_token: CancellationToken,
+    mentioned_skills: Vec<SkillMetadata>,
+) {
+    let originator_value = originator().value;
+    if !is_first_party_originator(originator_value.as_str()) {
+        return;
+    }
+
+    let config = turn_context.config.clone();
+    if mentioned_skills.is_empty()
+        || !config
+            .features
+            .enabled(codex_features::Feature::SkillMcpDependencyInstall)
+    {
+        return;
+    }
+
+    let installed = sess
+        .services
+        .mcp_manager
+        .configured_servers(config.as_ref());
+    let missing = collect_missing_mcp_dependencies(&mentioned_skills, &installed);
+    if missing.is_empty() {
+        return;
+    }
+
+    let unprompted_missing = filter_prompted_mcp_dependencies(sess.as_ref(), &missing).await;
+    if unprompted_missing.is_empty() {
+        return;
+    }
+
+    if should_install_mcp_dependencies(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        &unprompted_missing,
+        &cancellation_token,
+    )
+    .await
+    {
+        maybe_install_mcp_dependencies_owned(
+            sess,
+            turn_context,
+            config.as_ref().clone(),
+            mentioned_skills,
+        )
+        .await;
+    }
+}
+
 pub(crate) async fn maybe_install_mcp_dependencies(
     sess: &Session,
     turn_context: &TurnContext,
@@ -204,6 +256,146 @@ pub(crate) async fn maybe_install_mcp_dependencies(
             .or_insert_with(|| server_config.clone());
     }
     sess.refresh_mcp_servers_now(
+        turn_context,
+        refresh_servers,
+        config.mcp_oauth_credentials_store_mode,
+    )
+    .await;
+}
+
+pub(crate) async fn maybe_install_mcp_dependencies_owned(
+    sess: std::sync::Arc<Session>,
+    turn_context: std::sync::Arc<TurnContext>,
+    config: crate::config::Config,
+    mentioned_skills: Vec<SkillMetadata>,
+) {
+    if mentioned_skills.is_empty()
+        || !config
+            .features
+            .enabled(codex_features::Feature::SkillMcpDependencyInstall)
+    {
+        return;
+    }
+
+    let codex_home = config.codex_home.clone();
+    let installed = sess.services.mcp_manager.configured_servers(&config);
+    let missing = collect_missing_mcp_dependencies(&mentioned_skills, &installed);
+    if missing.is_empty() {
+        return;
+    }
+
+    let mut servers = match load_global_mcp_servers(&codex_home).await {
+        Ok(servers) => servers,
+        Err(err) => {
+            warn!("failed to load MCP servers while installing skill dependencies: {err}");
+            return;
+        }
+    };
+
+    let mut updated = false;
+    let mut added = Vec::new();
+    for (name, server_config) in missing {
+        if servers.contains_key(&name) {
+            continue;
+        }
+        servers.insert(name.clone(), server_config.clone());
+        added.push((name, server_config));
+        updated = true;
+    }
+
+    if !updated {
+        return;
+    }
+
+    if let Err(err) = ConfigEditsBuilder::new(&codex_home)
+        .replace_mcp_servers(&servers)
+        .apply()
+        .await
+    {
+        warn!("failed to persist MCP dependencies for mentioned skills: {err}");
+        return;
+    }
+
+    for (name, server_config) in added {
+        let oauth_config = match oauth_login_support(&server_config.transport).await {
+            McpOAuthLoginSupport::Supported(config) => config,
+            McpOAuthLoginSupport::Unsupported => continue,
+            McpOAuthLoginSupport::Unknown(err) => {
+                warn!("MCP server may or may not require login for dependency {name}: {err}");
+                continue;
+            }
+        };
+
+        sess.clone()
+            .notify_background_event_owned(
+                turn_context.clone(),
+                format!(
+                    "Authenticating MCP {name}... Follow instructions in your browser if prompted."
+                ),
+            )
+            .await;
+
+        let resolved_scopes = resolve_oauth_scopes(
+            /*explicit_scopes*/ None,
+            server_config.scopes.clone(),
+            oauth_config.discovered_scopes.clone(),
+        );
+        let first_attempt = perform_oauth_login(
+            &name,
+            &oauth_config.url,
+            config.mcp_oauth_credentials_store_mode,
+            oauth_config.http_headers.clone(),
+            oauth_config.env_http_headers.clone(),
+            &resolved_scopes.scopes,
+            server_config.oauth_resource.as_deref(),
+            config.mcp_oauth_callback_port,
+            config.mcp_oauth_callback_url.as_deref(),
+        )
+        .await;
+
+        if let Err(err) = first_attempt {
+            if should_retry_without_scopes(&resolved_scopes, &err) {
+                sess.clone()
+                    .notify_background_event_owned(
+                        turn_context.clone(),
+                        format!(
+                            "Retrying MCP {name} authentication without scopes after provider rejection."
+                        ),
+                    )
+                    .await;
+
+                if let Err(err) = perform_oauth_login(
+                    &name,
+                    &oauth_config.url,
+                    config.mcp_oauth_credentials_store_mode,
+                    oauth_config.http_headers,
+                    oauth_config.env_http_headers,
+                    &[],
+                    server_config.oauth_resource.as_deref(),
+                    config.mcp_oauth_callback_port,
+                    config.mcp_oauth_callback_url.as_deref(),
+                )
+                .await
+                {
+                    warn!("failed to login to MCP dependency {name}: {err}");
+                }
+            } else {
+                warn!("failed to login to MCP dependency {name}: {err}");
+            }
+        }
+    }
+
+    let auth = sess.services.auth_manager.auth().await;
+    let mut refresh_servers = sess
+        .services
+        .mcp_manager
+        .effective_servers(&config, auth.as_ref());
+    for (name, server_config) in &servers {
+        refresh_servers
+            .entry(name.clone())
+            .or_insert_with(|| server_config.clone());
+    }
+    sess.refresh_mcp_servers_now_owned(
         turn_context,
         refresh_servers,
         config.mcp_oauth_credentials_store_mode,

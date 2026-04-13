@@ -1,8 +1,8 @@
 use super::*;
-use crate::config::types::MemoriesConfig;
 use crate::fork_patch::memory::build_memory_context_fragment;
 use crate::fork_patch::memory::memory_summary_file;
 use crate::fork_patch::memory::vector_index_file;
+use codex_config::types::MemoriesConfig;
 use codex_models_manager::model_info::model_info_from_slug;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;

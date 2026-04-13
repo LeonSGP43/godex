@@ -47,11 +47,40 @@ use insta::Settings;
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
+
+const GUARDIAN_TEST_STACK_SIZE_BYTES: usize = 32 * 1024 * 1024;
+
+fn run_async_test_with_large_tokio_worker_stack<F, Fut>(test_name: &'static str, test_fn: F)
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>> + 'static,
+{
+    let handle = std::thread::Builder::new()
+        .name(test_name.to_string())
+        .stack_size(GUARDIAN_TEST_STACK_SIZE_BYTES)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .thread_stack_size(GUARDIAN_TEST_STACK_SIZE_BYTES)
+                .enable_all()
+                .build()
+                .expect("build multi-thread runtime");
+            let local = tokio::task::LocalSet::new();
+            runtime.block_on(local.run_until(test_fn()))
+        })
+        .expect("spawn large-stack guardian test thread");
+
+    match handle.join() {
+        Ok(result) => result.expect("guardian async test should pass"),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
 
 async fn guardian_test_session_and_turn(
     server: &wiremock::MockServer,
@@ -380,8 +409,9 @@ async fn cancelled_guardian_review_emits_terminal_abort_without_warning() {
     cancel_token.cancel();
 
     let decision = review_approval_request_with_cancel(
-        &session,
-        &turn,
+        session.clone(),
+        turn.clone(),
+        new_guardian_review_id(),
         GuardianApprovalRequest::ApplyPatch {
             id: "patch-1".to_string(),
             cwd: PathBuf::from("/tmp"),
@@ -764,257 +794,277 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_review_surfaces_responses_api_errors_in_rejection_reason() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
+#[test]
+fn guardian_review_surfaces_responses_api_errors_in_rejection_reason() {
+    run_async_test_with_large_tokio_worker_stack(
+        "guardian_review_surfaces_responses_api_errors_in_rejection_reason",
+        || async {
+            skip_if_no_network!(Ok(()));
 
-    let server = start_mock_server().await;
-    let error_message =
-        "Item 'rs_test' of type 'reasoning' was provided without its required following item.";
-    let _request_log = mount_response_once(
-        &server,
-        wiremock::ResponseTemplate::new(400).set_body_json(serde_json::json!({
-            "error": {
-                "message": error_message,
-                "type": "invalid_request_error",
-                "param": "input"
+            let server = start_mock_server().await;
+            let error_message =
+                "Item 'rs_test' of type 'reasoning' was provided without its required following item.";
+            let _request_log = mount_response_once(
+                &server,
+                wiremock::ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                    "error": {
+                        "message": error_message,
+                        "type": "invalid_request_error",
+                        "param": "input"
+                    }
+                })),
+            )
+            .await;
+
+            let (mut session, mut turn, rx) = crate::codex::make_session_and_context_with_rx().await;
+            let mut config = (*turn.config).clone();
+            config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+            config.user_instructions = None;
+            let config = Arc::new(config);
+            let models_manager = Arc::new(test_support::models_manager_with_provider(
+                config.codex_home.clone(),
+                Arc::clone(&session.services.auth_manager),
+                config.model_provider.clone(),
+            ));
+            Arc::get_mut(&mut session)
+                .expect("session should be uniquely owned")
+                .services
+                .models_manager = models_manager;
+            let turn_mut = Arc::get_mut(&mut turn).expect("turn should be uniquely owned");
+            turn_mut.config = Arc::clone(&config);
+            turn_mut.provider = config.model_provider.clone();
+            turn_mut.user_instructions = None;
+
+            seed_guardian_parent_history(&session, &turn).await;
+
+            let decision = review_approval_request(
+                session.clone(),
+                turn.clone(),
+                new_guardian_review_id(),
+                GuardianApprovalRequest::Shell {
+                    id: "shell-guardian-error".to_string(),
+                    command: vec!["git".to_string(), "push".to_string()],
+                    cwd: PathBuf::from("/repo/codex-rs/core"),
+                    sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
+                    additional_permissions: None,
+                    justification: Some("Need to push the reviewed docs fix.".to_string()),
+                },
+                /*retry_reason*/ None,
+            )
+            .await;
+
+            assert_eq!(decision, ReviewDecision::Denied);
+
+            let mut warnings = Vec::new();
+            let mut denial_rationales = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                match event.msg {
+                    EventMsg::Warning(event) => warnings.push(event.message),
+                    EventMsg::GuardianAssessment(event)
+                        if event.status == GuardianAssessmentStatus::Denied =>
+                    {
+                        denial_rationales.push(event.rationale)
+                    }
+                    _ => {}
+                }
             }
-        })),
-    )
-    .await;
 
-    let (mut session, mut turn, rx) = crate::codex::make_session_and_context_with_rx().await;
-    let mut config = (*turn.config).clone();
-    config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    config.user_instructions = None;
-    let config = Arc::new(config);
-    let models_manager = Arc::new(test_support::models_manager_with_provider(
-        config.codex_home.clone(),
-        Arc::clone(&session.services.auth_manager),
-        config.model_provider.clone(),
-    ));
-    Arc::get_mut(&mut session)
-        .expect("session should be uniquely owned")
-        .services
-        .models_manager = models_manager;
-    let turn_mut = Arc::get_mut(&mut turn).expect("turn should be uniquely owned");
-    turn_mut.config = Arc::clone(&config);
-    turn_mut.provider = config.model_provider.clone();
-    turn_mut.user_instructions = None;
+            assert!(
+                warnings
+                    .iter()
+                    .any(|message| message.contains(error_message)),
+                "warning should include the underlying responses api error"
+            );
+            assert!(
+                denial_rationales
+                    .iter()
+                    .flatten()
+                    .any(|message| message.contains(error_message)),
+                "denial rationale should include the underlying responses api error"
+            );
+            assert!(
+                denial_rationales.iter().flatten().all(|message| {
+                    !message.contains("guardian review completed without an assessment payload")
+                }),
+                "denial rationale should not fall back to the generic missing payload error"
+            );
+            let rejection_message =
+                guardian_rejection_message(session.as_ref(), "shell-guardian-error").await;
+            assert!(
+                rejection_message.contains("Reason: Automatic approval review failed:")
+                    && rejection_message.contains(error_message),
+                "rejection message should include guardian rationale: {rejection_message}"
+            );
 
-    seed_guardian_parent_history(&session, &turn).await;
-
-    let decision = review_approval_request(
-        &session,
-        &turn,
-        GuardianApprovalRequest::Shell {
-            id: "shell-guardian-error".to_string(),
-            command: vec!["git".to_string(), "push".to_string()],
-            cwd: PathBuf::from("/repo/codex-rs/core"),
-            sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
-            additional_permissions: None,
-            justification: Some("Need to push the reviewed docs fix.".to_string()),
+            Ok(())
         },
-        /*retry_reason*/ None,
-    )
-    .await;
-
-    assert_eq!(decision, ReviewDecision::Denied);
-
-    let mut warnings = Vec::new();
-    let mut denial_rationales = Vec::new();
-    while let Ok(event) = rx.try_recv() {
-        match event.msg {
-            EventMsg::Warning(event) => warnings.push(event.message),
-            EventMsg::GuardianAssessment(event)
-                if event.status == GuardianAssessmentStatus::Denied =>
-            {
-                denial_rationales.push(event.rationale)
-            }
-            _ => {}
-        }
-    }
-
-    assert!(
-        warnings
-            .iter()
-            .any(|message| message.contains(error_message)),
-        "warning should include the underlying responses api error"
     );
-    assert!(
-        denial_rationales
-            .iter()
-            .flatten()
-            .any(|message| message.contains(error_message)),
-        "denial rationale should include the underlying responses api error"
-    );
-    assert!(
-        denial_rationales.iter().flatten().all(|message| {
-            !message.contains("guardian review completed without an assessment payload")
-        }),
-        "denial rationale should not fall back to the generic missing payload error"
-    );
-    let rejection_message =
-        guardian_rejection_message(session.as_ref(), "shell-guardian-error").await;
-    assert!(
-        rejection_message.contains("Reason: Automatic approval review failed:")
-            && rejection_message.contains(error_message),
-        "rejection message should include guardian rationale: {rejection_message}"
-    );
-
-    Ok(())
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn guardian_parallel_reviews_fork_from_last_committed_trunk_history() -> anyhow::Result<()> {
-    let first_assessment = serde_json::json!({
-        "risk_level": "low",
-        "user_authorization": "high",
-        "outcome": "allow",
-        "rationale": "first guardian rationale",
-    })
-    .to_string();
-    let second_assessment = serde_json::json!({
-        "risk_level": "low",
-        "user_authorization": "high",
-        "outcome": "allow",
-        "rationale": "second guardian rationale",
-    })
-    .to_string();
-    let third_assessment = serde_json::json!({
-        "risk_level": "low",
-        "user_authorization": "high",
-        "outcome": "allow",
-        "rationale": "third guardian rationale",
-    })
-    .to_string();
-    let (gate_tx, gate_rx) = tokio::sync::oneshot::channel();
-    let (server, _) = start_streaming_sse_server(vec![
-        vec![StreamingSseChunk {
-            gate: None,
-            body: sse(vec![
-                ev_response_created("resp-guardian-1"),
-                ev_assistant_message("msg-guardian-1", &first_assessment),
-                ev_completed("resp-guardian-1"),
-            ]),
-        }],
-        vec![
-            StreamingSseChunk {
-                gate: None,
-                body: sse(vec![ev_response_created("resp-guardian-2")]),
-            },
-            StreamingSseChunk {
-                gate: Some(gate_rx),
-                body: sse(vec![
-                    ev_assistant_message("msg-guardian-2", &second_assessment),
-                    ev_completed("resp-guardian-2"),
-                ]),
-            },
-        ],
-        vec![StreamingSseChunk {
-            gate: None,
-            body: sse(vec![
-                ev_response_created("resp-guardian-3"),
-                ev_assistant_message("msg-guardian-3", &third_assessment),
-                ev_completed("resp-guardian-3"),
-            ]),
-        }],
-    ])
-    .await;
+#[test]
+fn guardian_parallel_reviews_fork_from_last_committed_trunk_history() {
+    run_async_test_with_large_tokio_worker_stack(
+        "guardian_parallel_reviews_fork_from_last_committed_trunk_history",
+        || async {
+            let first_assessment = serde_json::json!({
+                "risk_level": "low",
+                "user_authorization": "high",
+                "outcome": "allow",
+                "rationale": "first guardian rationale",
+            })
+            .to_string();
+            let second_assessment = serde_json::json!({
+                "risk_level": "low",
+                "user_authorization": "high",
+                "outcome": "allow",
+                "rationale": "second guardian rationale",
+            })
+            .to_string();
+            let third_assessment = serde_json::json!({
+                "risk_level": "low",
+                "user_authorization": "high",
+                "outcome": "allow",
+                "rationale": "third guardian rationale",
+            })
+            .to_string();
+            let (gate_tx, gate_rx) = tokio::sync::oneshot::channel();
+            let (server, _) = start_streaming_sse_server(vec![
+                vec![StreamingSseChunk {
+                    gate: None,
+                    body: sse(vec![
+                        ev_response_created("resp-guardian-1"),
+                        ev_assistant_message("msg-guardian-1", &first_assessment),
+                        ev_completed("resp-guardian-1"),
+                    ]),
+                }],
+                vec![
+                    StreamingSseChunk {
+                        gate: None,
+                        body: sse(vec![ev_response_created("resp-guardian-2")]),
+                    },
+                    StreamingSseChunk {
+                        gate: Some(gate_rx),
+                        body: sse(vec![
+                            ev_assistant_message("msg-guardian-2", &second_assessment),
+                            ev_completed("resp-guardian-2"),
+                        ]),
+                    },
+                ],
+                vec![StreamingSseChunk {
+                    gate: None,
+                    body: sse(vec![
+                        ev_response_created("resp-guardian-3"),
+                        ev_assistant_message("msg-guardian-3", &third_assessment),
+                        ev_completed("resp-guardian-3"),
+                    ]),
+                }],
+            ])
+            .await;
 
-    let (session, turn) = guardian_test_session_and_turn_with_base_url(server.uri()).await;
-    seed_guardian_parent_history(&session, &turn).await;
+            let (session, turn) = guardian_test_session_and_turn_with_base_url(server.uri()).await;
+            seed_guardian_parent_history(&session, &turn).await;
 
-    let initial_request = GuardianApprovalRequest::Shell {
-        id: "shell-guardian-1".to_string(),
-        command: vec!["git".to_string(), "status".to_string()],
-        cwd: PathBuf::from("/repo/codex-rs/core"),
-        sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
-        additional_permissions: None,
-        justification: Some("Inspect repo state before proceeding.".to_string()),
-    };
-    assert_eq!(
-        review_approval_request(&session, &turn, initial_request, /*retry_reason*/ None).await,
-        ReviewDecision::Approved
+            let initial_request = GuardianApprovalRequest::Shell {
+                id: "shell-guardian-1".to_string(),
+                command: vec!["git".to_string(), "status".to_string()],
+                cwd: PathBuf::from("/repo/codex-rs/core"),
+                sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
+                additional_permissions: None,
+                justification: Some("Inspect repo state before proceeding.".to_string()),
+            };
+            assert_eq!(
+                review_approval_request(
+                    session.clone(),
+                    turn.clone(),
+                    new_guardian_review_id(),
+                    initial_request,
+                    /*retry_reason*/ None,
+                )
+                .await,
+                ReviewDecision::Approved
+            );
+
+            let second_request = GuardianApprovalRequest::Shell {
+                id: "shell-guardian-2".to_string(),
+                command: vec!["git".to_string(), "diff".to_string()],
+                cwd: PathBuf::from("/repo/codex-rs/core"),
+                sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
+                additional_permissions: None,
+                justification: Some("Inspect pending changes before proceeding.".to_string()),
+            };
+            let third_request = GuardianApprovalRequest::Shell {
+                id: "shell-guardian-3".to_string(),
+                command: vec!["git".to_string(), "push".to_string()],
+                cwd: PathBuf::from("/repo/codex-rs/core"),
+                sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
+                additional_permissions: None,
+                justification: Some("Inspect whether pushing is safe before proceeding.".to_string()),
+            };
+
+            let session_for_second = Arc::clone(&session);
+            let turn_for_second = Arc::clone(&turn);
+            let mut second_review = tokio::spawn(async move {
+                review_approval_request(
+                    session_for_second,
+                    turn_for_second,
+                    new_guardian_review_id(),
+                    second_request,
+                    Some("trunk follow-up".to_string()),
+                )
+                .await
+            });
+
+            let second_request_observed = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if server.requests().await.len() >= 2 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await;
+            assert!(
+                second_request_observed.is_ok(),
+                "second guardian request was not observed"
+            );
+
+            let third_decision = review_approval_request(
+                session.clone(),
+                turn.clone(),
+                new_guardian_review_id(),
+                third_request,
+                Some("parallel follow-up".to_string()),
+            )
+            .await;
+            assert_eq!(third_decision, ReviewDecision::Approved);
+            let requests = server.requests().await;
+            assert_eq!(requests.len(), 3);
+            let third_request_body = serde_json::from_slice::<serde_json::Value>(&requests[2])?;
+            let third_request_body_text = third_request_body.to_string();
+            assert!(
+                third_request_body_text.contains("first guardian rationale"),
+                "forked guardian review should include the last committed trunk assessment"
+            );
+            assert!(
+                !third_request_body_text.contains("second guardian rationale"),
+                "forked guardian review should not include the still in-flight trunk assessment"
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), &mut second_review)
+                    .await
+                    .is_err(),
+                "the trunk guardian review should still be blocked on its gated response"
+            );
+
+            gate_tx
+                .send(())
+                .expect("second guardian review gate should still be open");
+            assert_eq!(second_review.await?, ReviewDecision::Approved);
+            server.shutdown().await;
+
+            Ok(())
+        },
     );
-
-    let second_request = GuardianApprovalRequest::Shell {
-        id: "shell-guardian-2".to_string(),
-        command: vec!["git".to_string(), "diff".to_string()],
-        cwd: PathBuf::from("/repo/codex-rs/core"),
-        sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
-        additional_permissions: None,
-        justification: Some("Inspect pending changes before proceeding.".to_string()),
-    };
-    let third_request = GuardianApprovalRequest::Shell {
-        id: "shell-guardian-3".to_string(),
-        command: vec!["git".to_string(), "push".to_string()],
-        cwd: PathBuf::from("/repo/codex-rs/core"),
-        sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
-        additional_permissions: None,
-        justification: Some("Inspect whether pushing is safe before proceeding.".to_string()),
-    };
-
-    let session_for_second = Arc::clone(&session);
-    let turn_for_second = Arc::clone(&turn);
-    let mut second_review = tokio::spawn(async move {
-        review_approval_request(
-            &session_for_second,
-            &turn_for_second,
-            second_request,
-            Some("trunk follow-up".to_string()),
-        )
-        .await
-    });
-
-    let second_request_observed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if server.requests().await.len() >= 2 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
-    assert!(
-        second_request_observed.is_ok(),
-        "second guardian request was not observed"
-    );
-
-    let third_decision = review_approval_request(
-        &session,
-        &turn,
-        third_request,
-        Some("parallel follow-up".to_string()),
-    )
-    .await;
-    assert_eq!(third_decision, ReviewDecision::Approved);
-    let requests = server.requests().await;
-    assert_eq!(requests.len(), 3);
-    let third_request_body = serde_json::from_slice::<serde_json::Value>(&requests[2])?;
-    let third_request_body_text = third_request_body.to_string();
-    assert!(
-        third_request_body_text.contains("first guardian rationale"),
-        "forked guardian review should include the last committed trunk assessment"
-    );
-    assert!(
-        !third_request_body_text.contains("second guardian rationale"),
-        "forked guardian review should not include the still in-flight trunk assessment"
-    );
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut second_review)
-            .await
-            .is_err(),
-        "the trunk guardian review should still be blocked on its gated response"
-    );
-
-    gate_tx
-        .send(())
-        .expect("second guardian review gate should still be open");
-    assert_eq!(second_review.await?, ReviewDecision::Approved);
-    server.shutdown().await;
-
-    Ok(())
 }
 #[test]
 fn guardian_review_session_config_preserves_parent_network_proxy() {

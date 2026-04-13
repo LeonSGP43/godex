@@ -30,9 +30,9 @@ fn render_instruction_template_expands_placeholders_and_escapes_braces() {
         "area": "test",
         "file path": "docs/readme.md",
     });
-    let rendered = render_instruction_template(
-        "Review {path} in {area}. Also see {file path}. Use {{literal}}.",
-        &row,
+    let rendered = render_instruction_template_owned(
+        "Review {path} in {area}. Also see {file path}. Use {{literal}}.".to_string(),
+        row,
     );
     assert_eq!(
         rendered,
@@ -45,7 +45,8 @@ fn render_instruction_template_leaves_unknown_placeholders() {
     let row = json!({
         "path": "src/lib.rs",
     });
-    let rendered = render_instruction_template("Check {path} then {missing}", &row);
+    let rendered =
+        render_instruction_template_owned("Check {path} then {missing}".to_string(), row);
     assert_eq!(rendered, "Check src/lib.rs then {missing}");
 }
 

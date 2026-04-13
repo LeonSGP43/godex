@@ -15,103 +15,124 @@ impl ToolHandler for Handler {
         matches!(payload, ToolPayload::Function { .. })
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
-        let ToolInvocation {
-            session,
-            turn,
-            payload,
-            call_id,
-            ..
-        } = invocation;
-        let arguments = function_arguments(payload)?;
-        let args: ResumeAgentArgs = parse_arguments(&arguments)?;
-        let receiver_thread_id = ThreadId::from_string(&args.id).map_err(|err| {
-            FunctionCallError::RespondToModel(format!("invalid agent id {}: {err:?}", args.id))
-        })?;
-        let receiver_agent = session
-            .services
-            .agent_control
-            .get_agent_metadata(receiver_thread_id)
-            .unwrap_or_default();
-        let child_depth = next_thread_spawn_depth(&turn.session_source);
-        let max_depth = turn.config.agent_max_depth;
-        if exceeds_thread_spawn_depth_limit(child_depth, max_depth) {
-            return Err(FunctionCallError::RespondToModel(
-                "Agent depth limit reached. Solve the task yourself.".to_string(),
-            ));
+    fn handle(
+        &self,
+        invocation: ToolInvocation,
+    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(handle_resume_agent(invocation))
+            })
+            .await
+            .map_err(|err| {
+                FunctionCallError::RespondToModel(format!("resume_agent worker join failed: {err}"))
+            })?
         }
-
-        session
-            .send_event(
-                &turn,
-                CollabResumeBeginEvent {
-                    call_id: call_id.clone(),
-                    sender_thread_id: session.conversation_id,
-                    receiver_thread_id,
-                    receiver_agent_nickname: receiver_agent.agent_nickname.clone(),
-                    receiver_agent_role: receiver_agent.agent_role.clone(),
-                }
-                .into(),
-            )
-            .await;
-
-        let mut status = session
-            .services
-            .agent_control
-            .get_status(receiver_thread_id)
-            .await;
-        let (receiver_agent, error) = if matches!(status, AgentStatus::NotFound) {
-            match try_resume_closed_agent(&session, &turn, receiver_thread_id, child_depth).await {
-                Ok(()) => {
-                    status = session
-                        .services
-                        .agent_control
-                        .get_status(receiver_thread_id)
-                        .await;
-                    (
-                        session
-                            .services
-                            .agent_control
-                            .get_agent_metadata(receiver_thread_id)
-                            .unwrap_or(receiver_agent),
-                        None,
-                    )
-                }
-                Err(err) => {
-                    status = session
-                        .services
-                        .agent_control
-                        .get_status(receiver_thread_id)
-                        .await;
-                    (receiver_agent, Some(err))
-                }
-            }
-        } else {
-            (receiver_agent, None)
-        };
-        session
-            .send_event(
-                &turn,
-                CollabResumeEndEvent {
-                    call_id,
-                    sender_thread_id: session.conversation_id,
-                    receiver_thread_id,
-                    receiver_agent_nickname: receiver_agent.agent_nickname,
-                    receiver_agent_role: receiver_agent.agent_role,
-                    status: status.clone(),
-                }
-                .into(),
-            )
-            .await;
-
-        if let Some(err) = error {
-            return Err(err);
-        }
-        turn.session_telemetry
-            .counter("codex.multi_agent.resume", /*inc*/ 1, &[]);
-
-        Ok(ResumeAgentResult { status })
     }
+}
+
+async fn handle_resume_agent(
+    invocation: ToolInvocation,
+) -> Result<ResumeAgentResult, FunctionCallError> {
+    let ToolInvocation {
+        session,
+        turn,
+        payload,
+        call_id,
+        ..
+    } = invocation;
+    let arguments = function_arguments(payload)?;
+    let args: ResumeAgentArgs = parse_arguments(&arguments)?;
+    let receiver_thread_id = ThreadId::from_string(&args.id).map_err(|err| {
+        FunctionCallError::RespondToModel(format!("invalid agent id {}: {err:?}", args.id))
+    })?;
+    let agent_control = session.services.agent_control.clone();
+    let receiver_agent = agent_control
+        .get_agent_metadata(receiver_thread_id)
+        .unwrap_or_default();
+    let child_depth = next_thread_spawn_depth(&turn.session_source);
+    let max_depth = turn.config.agent_max_depth;
+    if exceeds_thread_spawn_depth_limit(child_depth, max_depth) {
+        return Err(FunctionCallError::RespondToModel(
+            "Agent depth limit reached. Solve the task yourself.".to_string(),
+        ));
+    }
+
+    session
+        .clone()
+        .send_event_owned(
+            turn.clone(),
+            CollabResumeBeginEvent {
+                call_id: call_id.clone(),
+                sender_thread_id: session.conversation_id,
+                receiver_thread_id,
+                receiver_agent_nickname: receiver_agent.agent_nickname.clone(),
+                receiver_agent_role: receiver_agent.agent_role.clone(),
+            }
+            .into(),
+        )
+        .await;
+
+    let mut status = agent_control
+        .clone()
+        .get_status_owned(receiver_thread_id)
+        .await;
+    let (receiver_agent, error) = if matches!(status, AgentStatus::NotFound) {
+        match try_resume_closed_agent(
+            session.clone(),
+            turn.clone(),
+            receiver_thread_id,
+            child_depth,
+        )
+        .await
+        {
+            Ok(()) => {
+                status = agent_control
+                    .clone()
+                    .get_status_owned(receiver_thread_id)
+                    .await;
+                (
+                    agent_control
+                        .get_agent_metadata(receiver_thread_id)
+                        .unwrap_or(receiver_agent),
+                    None,
+                )
+            }
+            Err(err) => {
+                status = agent_control
+                    .clone()
+                    .get_status_owned(receiver_thread_id)
+                    .await;
+                (receiver_agent, Some(err))
+            }
+        }
+    } else {
+        (receiver_agent, None)
+    };
+    session
+        .clone()
+        .send_event_owned(
+            turn.clone(),
+            CollabResumeEndEvent {
+                call_id,
+                sender_thread_id: session.conversation_id,
+                receiver_thread_id,
+                receiver_agent_nickname: receiver_agent.agent_nickname,
+                receiver_agent_role: receiver_agent.agent_role,
+                status: status.clone(),
+            }
+            .into(),
+        )
+        .await;
+
+    if let Some(err) = error {
+        return Err(err);
+    }
+    turn.session_telemetry
+        .counter("codex.multi_agent.resume", /*inc*/ 1, &[]);
+
+    Ok(ResumeAgentResult { status })
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,21 +164,22 @@ impl ToolOutput for ResumeAgentResult {
 }
 
 async fn try_resume_closed_agent(
-    session: &Arc<Session>,
-    turn: &Arc<TurnContext>,
+    session: Arc<Session>,
+    turn: Arc<TurnContext>,
     receiver_thread_id: ThreadId,
     child_depth: i32,
 ) -> Result<(), FunctionCallError> {
-    let config = build_agent_resume_config(turn.as_ref(), child_depth)?;
+    let config = build_agent_resume_config_owned(turn.clone(), child_depth)?;
     session
         .services
         .agent_control
-        .resume_agent_from_rollout(
+        .clone()
+        .resume_agent_from_rollout_owned(
             config,
             receiver_thread_id,
-            thread_spawn_source(
+            thread_spawn_source_owned(
                 session.conversation_id,
-                &turn.session_source,
+                turn.session_source.clone(),
                 child_depth,
                 /*agent_role*/ None,
                 /*task_name*/ None,

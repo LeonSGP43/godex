@@ -3,7 +3,7 @@ use crate::agent::control::SpawnAgentForkMode;
 use crate::agent::control::SpawnAgentOptions;
 use crate::agent::control::render_input_preview;
 use crate::agent::role::DEFAULT_ROLE_NAME;
-use crate::agent::role::apply_role_to_config;
+use crate::agent::role::apply_role_to_config_by_value_owned;
 
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
@@ -21,149 +21,164 @@ impl ToolHandler for Handler {
         matches!(payload, ToolPayload::Function { .. })
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
-        let ToolInvocation {
-            session,
-            turn,
-            payload,
-            call_id,
-            ..
-        } = invocation;
-        let arguments = function_arguments(payload)?;
-        let args: SpawnAgentArgs = parse_arguments(&arguments)?;
-        let role_name = args
-            .agent_type
-            .as_deref()
-            .map(str::trim)
-            .filter(|role| !role.is_empty());
-        let input_items = parse_collab_input(args.message, args.items)?;
-        let prompt = render_input_preview(&input_items);
-        let (mut config, resolved_backend) = build_spawn_agent_config_for_backend(
-            &session,
-            turn.as_ref(),
-            args.backend.as_deref(),
-            args.model.as_deref(),
-            args.reasoning_effort,
-        )
-        .await?;
-        let session_source = turn.session_source.clone();
-        let child_depth = next_thread_spawn_depth(&session_source);
-        let max_depth = turn.config.agent_max_depth;
-        if exceeds_thread_spawn_depth_limit(child_depth, max_depth) {
-            return Err(FunctionCallError::RespondToModel(
-                "Agent depth limit reached. Solve the task yourself.".to_string(),
-            ));
-        }
-        session
-            .send_event(
-                &turn,
-                CollabAgentSpawnBeginEvent {
-                    call_id: call_id.clone(),
-                    sender_thread_id: session.conversation_id,
-                    prompt: prompt.clone(),
-                    model: spawn_request_model_label(&resolved_backend, args.model.as_deref()),
-                    reasoning_effort: args.reasoning_effort.unwrap_or_default(),
-                }
-                .into(),
-            )
-            .await;
-        apply_role_to_config(&mut config, role_name)
-            .await
-            .map_err(FunctionCallError::RespondToModel)?;
-        apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
-        apply_spawn_agent_overrides(&mut config, child_depth);
-
-        let result = session
-            .services
-            .agent_control
-            .spawn_agent_with_metadata(
-                config,
-                input_items,
-                Some(thread_spawn_source(
-                    session.conversation_id,
-                    &turn.session_source,
-                    child_depth,
-                    role_name,
-                    /*task_name*/ None,
-                )?),
-                SpawnAgentOptions {
-                    fork_parent_spawn_call_id: args.fork_context.then(|| call_id.clone()),
-                    fork_mode: args.fork_context.then_some(SpawnAgentForkMode::FullHistory),
-                },
-            )
-            .await
-            .map_err(collab_spawn_error);
-        let (new_thread_id, new_agent_metadata, status) = match &result {
-            Ok(spawned_agent) => (
-                Some(spawned_agent.thread_id),
-                Some(spawned_agent.metadata.clone()),
-                spawned_agent.status.clone(),
-            ),
-            Err(_) => (None, None, AgentStatus::NotFound),
-        };
-        let agent_snapshot = match new_thread_id {
-            Some(thread_id) => {
-                session
-                    .services
-                    .agent_control
-                    .get_agent_config_snapshot(thread_id)
-                    .await
-            }
-            None => None,
-        };
-        let (_new_agent_path, new_agent_nickname, new_agent_role) =
-            match (&agent_snapshot, new_agent_metadata) {
-                (Some(snapshot), _) => (
-                    snapshot.session_source.get_agent_path().map(String::from),
-                    snapshot.session_source.get_nickname(),
-                    snapshot.session_source.get_agent_role(),
-                ),
-                (None, Some(metadata)) => (
-                    metadata.agent_path.map(String::from),
-                    metadata.agent_nickname,
-                    metadata.agent_role,
-                ),
-                (None, None) => (None, None, None),
-            };
-        let effective_model = agent_snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.model.clone())
-            .unwrap_or_else(|| spawn_request_model_label(&resolved_backend, args.model.as_deref()));
-        let effective_reasoning_effort = agent_snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.reasoning_effort)
-            .unwrap_or(args.reasoning_effort.unwrap_or_default());
-        let nickname = new_agent_nickname.clone();
-        session
-            .send_event(
-                &turn,
-                CollabAgentSpawnEndEvent {
-                    call_id,
-                    sender_thread_id: session.conversation_id,
-                    new_thread_id,
-                    new_agent_nickname,
-                    new_agent_role,
-                    prompt,
-                    model: effective_model,
-                    reasoning_effort: effective_reasoning_effort,
-                    status,
-                }
-                .into(),
-            )
-            .await;
-        let new_thread_id = result?.thread_id;
-        let role_tag = role_name.unwrap_or(DEFAULT_ROLE_NAME);
-        turn.session_telemetry.counter(
-            "codex.multi_agent.spawn",
-            /*inc*/ 1,
-            &[("role", role_tag)],
-        );
-
-        Ok(SpawnAgentResult {
-            agent_id: new_thread_id.to_string(),
-            nickname,
-        })
+    fn handle(
+        &self,
+        invocation: ToolInvocation,
+    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
+        async move { handle_spawn_agent(invocation).await }
     }
+}
+
+async fn handle_spawn_agent(
+    invocation: ToolInvocation,
+) -> Result<SpawnAgentResult, FunctionCallError> {
+    let ToolInvocation {
+        session,
+        turn,
+        payload,
+        call_id,
+        ..
+    } = invocation;
+    let arguments = function_arguments(payload)?;
+    let args: SpawnAgentArgs = parse_arguments(&arguments)?;
+    let requested_backend = args.backend.clone();
+    let requested_model = args.model.clone();
+    let role_name = args
+        .agent_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|role| !role.is_empty())
+        .map(str::to_owned);
+    let input_items = parse_collab_input(args.message, args.items)?;
+    let prompt = render_input_preview(&input_items);
+    let (mut config, resolved_backend) = build_spawn_agent_config_for_backend(
+        session.clone(),
+        turn.clone(),
+        requested_backend,
+        requested_model.clone(),
+        args.reasoning_effort,
+    )
+    .await?;
+    let session_source = turn.session_source.clone();
+    let child_depth = next_thread_spawn_depth(&session_source);
+    let max_depth = turn.config.agent_max_depth;
+    if exceeds_thread_spawn_depth_limit(child_depth, max_depth) {
+        return Err(FunctionCallError::RespondToModel(
+            "Agent depth limit reached. Solve the task yourself.".to_string(),
+        ));
+    }
+    session
+        .clone()
+        .send_event_owned(
+            turn.clone(),
+            CollabAgentSpawnBeginEvent {
+                call_id: call_id.clone(),
+                sender_thread_id: session.conversation_id,
+                prompt: prompt.clone(),
+                model: spawn_request_model_label(&resolved_backend, requested_model.as_deref()),
+                reasoning_effort: args.reasoning_effort.unwrap_or_default(),
+            }
+            .into(),
+        )
+        .await;
+    config = apply_role_to_config_by_value_owned(config, role_name.clone())
+        .await
+        .map_err(FunctionCallError::RespondToModel)?;
+    apply_spawn_agent_runtime_overrides_owned(&mut config, turn.clone())?;
+    apply_spawn_agent_overrides(&mut config, child_depth);
+
+    let agent_control = session.services.agent_control.clone();
+    let result = agent_control
+        .clone()
+        .spawn_agent_with_metadata_owned(
+            config,
+            input_items,
+            Some(thread_spawn_source_owned(
+                session.conversation_id,
+                turn.session_source.clone(),
+                child_depth,
+                role_name.clone(),
+                /*task_name*/ None,
+            )?),
+            SpawnAgentOptions {
+                fork_parent_spawn_call_id: args.fork_context.then(|| call_id.clone()),
+                fork_mode: args.fork_context.then_some(SpawnAgentForkMode::FullHistory),
+            },
+        )
+        .await
+        .map_err(collab_spawn_error);
+    let (new_thread_id, new_agent_metadata, status) = match &result {
+        Ok(spawned_agent) => (
+            Some(spawned_agent.thread_id),
+            Some(spawned_agent.metadata.clone()),
+            spawned_agent.status.clone(),
+        ),
+        Err(_) => (None, None, AgentStatus::NotFound),
+    };
+    let agent_snapshot = match new_thread_id {
+        Some(thread_id) => {
+            agent_control
+                .clone()
+                .get_agent_config_snapshot_owned(thread_id)
+                .await
+        }
+        None => None,
+    };
+    let (_new_agent_path, new_agent_nickname, new_agent_role) =
+        match (&agent_snapshot, new_agent_metadata) {
+            (Some(snapshot), _) => (
+                snapshot.session_source.get_agent_path().map(String::from),
+                snapshot.session_source.get_nickname(),
+                snapshot.session_source.get_agent_role(),
+            ),
+            (None, Some(metadata)) => (
+                metadata.agent_path.map(String::from),
+                metadata.agent_nickname,
+                metadata.agent_role,
+            ),
+            (None, None) => (None, None, None),
+        };
+    let effective_model = agent_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.model.clone())
+        .unwrap_or_else(|| {
+            spawn_request_model_label(&resolved_backend, requested_model.as_deref())
+        });
+    let effective_reasoning_effort = agent_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.reasoning_effort)
+        .unwrap_or(args.reasoning_effort.unwrap_or_default());
+    let nickname = new_agent_nickname.clone();
+    session
+        .clone()
+        .send_event_owned(
+            turn.clone(),
+            CollabAgentSpawnEndEvent {
+                call_id,
+                sender_thread_id: session.conversation_id,
+                new_thread_id,
+                new_agent_nickname,
+                new_agent_role,
+                prompt,
+                model: effective_model,
+                reasoning_effort: effective_reasoning_effort,
+                status,
+            }
+            .into(),
+        )
+        .await;
+    let new_thread_id = result?.thread_id;
+    let role_tag = role_name.as_deref().unwrap_or(DEFAULT_ROLE_NAME);
+    turn.session_telemetry.counter(
+        "codex.multi_agent.spawn",
+        /*inc*/ 1,
+        &[("role", role_tag)],
+    );
+
+    Ok(SpawnAgentResult {
+        agent_id: new_thread_id.to_string(),
+        nickname,
+    })
 }
 
 #[derive(Debug, Deserialize)]

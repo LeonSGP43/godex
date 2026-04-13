@@ -4,6 +4,7 @@ use crate::memories::phase1;
 use crate::memories::phase2;
 use codex_features::Feature;
 use codex_protocol::protocol::SessionSource;
+use std::future::Future;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -33,12 +34,18 @@ pub(crate) fn start_memories_startup_task(
         let Some(session) = weak_session.upgrade() else {
             return;
         };
-
         // Clean memories to make preserve DB size
-        phase1::prune(&session, &config).await;
+        require_send(phase1::prune(Arc::clone(&session), Arc::clone(&config))).await;
         // Run phase 1.
-        phase1::run(&session, &config).await;
+        require_send(phase1::run(Arc::clone(&session), Arc::clone(&config))).await;
         // Run phase 2.
-        phase2::run(&session, config).await;
+        require_send(phase2::run(session, config)).await;
     });
+}
+
+async fn require_send<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+{
+    Box::pin(future).await
 }

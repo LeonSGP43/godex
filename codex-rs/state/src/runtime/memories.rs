@@ -274,6 +274,131 @@ LEFT JOIN jobs
         Ok(claimed)
     }
 
+    pub async fn claim_stage1_jobs_for_startup_in_scope_owned(
+        self: Arc<Self>,
+        current_thread_id: ThreadId,
+        scan_limit: usize,
+        max_claimed: usize,
+        max_age_days: i64,
+        min_rollout_idle_hours: i64,
+        allowed_sources: Vec<String>,
+        lease_seconds: i64,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+    ) -> anyhow::Result<Vec<Stage1JobClaim>> {
+        if scan_limit == 0 || max_claimed == 0 {
+            return Ok(Vec::new());
+        }
+
+        let pool = Arc::clone(&self.pool);
+        let worker_id = current_thread_id;
+        let current_thread_id = worker_id.to_string();
+        let max_age_cutoff = (Utc::now() - Duration::days(max_age_days.max(0))).timestamp();
+        let idle_cutoff = (Utc::now() - Duration::hours(min_rollout_idle_hours.max(0))).timestamp();
+
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            r#"
+SELECT
+    id,
+    rollout_path,
+    created_at,
+    updated_at,
+    source,
+    agent_path,
+    agent_nickname,
+    agent_role,
+    model_provider,
+    model,
+    reasoning_effort,
+    cwd,
+    memory_scope_kind,
+    memory_scope_key,
+    cli_version,
+    title,
+    sandbox_policy,
+    approval_mode,
+    tokens_used,
+    first_user_message,
+    archived_at,
+    git_sha,
+    git_branch,
+    git_origin_url
+FROM threads
+LEFT JOIN stage1_outputs
+    ON stage1_outputs.thread_id = threads.id
+LEFT JOIN jobs
+    ON jobs.kind =
+            "#,
+        );
+        builder.push_bind(JOB_KIND_MEMORY_STAGE1);
+        builder.push(
+            r#"
+   AND jobs.job_key = threads.id
+            "#,
+        );
+        push_thread_filters(
+            &mut builder,
+            /*archived_only*/ false,
+            allowed_sources.as_slice(),
+            /*model_providers*/ None,
+            /*anchor*/ None,
+            SortKey::UpdatedAt,
+            /*search_term*/ None,
+        );
+        builder.push(" AND threads.memory_mode = 'enabled'");
+        builder
+            .push(" AND threads.memory_scope_kind = ")
+            .push_bind(memory_scope_kind.as_str());
+        builder
+            .push(" AND threads.memory_scope_key = ")
+            .push_bind(memory_scope_key.as_str());
+        builder
+            .push(" AND id != ")
+            .push_bind(current_thread_id.as_str());
+        builder
+            .push(" AND updated_at >= ")
+            .push_bind(max_age_cutoff);
+        builder.push(" AND updated_at <= ").push_bind(idle_cutoff);
+        builder.push(" AND COALESCE(stage1_outputs.source_updated_at, -1) < updated_at");
+        builder.push(" AND COALESCE(jobs.last_success_watermark, -1) < updated_at");
+        push_thread_order_and_limit(&mut builder, SortKey::UpdatedAt, scan_limit);
+
+        let items = builder
+            .build()
+            .fetch_all(pool.as_ref())
+            .await?
+            .into_iter()
+            .map(|row| ThreadRow::try_from_row(&row).and_then(ThreadMetadata::try_from))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut claimed = Vec::new();
+
+        for item in items {
+            if claimed.len() >= max_claimed {
+                break;
+            }
+
+            if let Stage1JobClaimOutcome::Claimed { ownership_token } = self
+                .clone()
+                .try_claim_stage1_job_owned(
+                    item.id,
+                    worker_id,
+                    item.updated_at.timestamp(),
+                    lease_seconds,
+                    max_claimed,
+                )
+                .await?
+            {
+                claimed.push(Stage1JobClaim {
+                    thread: item,
+                    ownership_token,
+                });
+            }
+        }
+
+        Ok(claimed)
+    }
+
     /// Lists the most recent non-empty stage-1 outputs for global consolidation.
     ///
     /// Query behavior:
@@ -406,6 +531,52 @@ WHERE thread_id IN (
         Ok(rows_affected as usize)
     }
 
+    pub async fn prune_stage1_outputs_for_retention_in_scope_owned(
+        self: Arc<Self>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+        max_unused_days: i64,
+        limit: usize,
+    ) -> anyhow::Result<usize> {
+        if limit == 0 {
+            return Ok(0);
+        }
+
+        let pool = Arc::clone(&self.pool);
+        let cutoff = (Utc::now() - Duration::days(max_unused_days.max(0))).timestamp();
+        let rows_affected = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
+DELETE FROM stage1_outputs
+WHERE thread_id IN (
+    SELECT so.thread_id
+    FROM stage1_outputs AS so
+    JOIN threads AS t
+        ON t.id = so.thread_id
+    WHERE selected_for_phase2 = 0
+      AND t.memory_scope_kind = ?
+      AND t.memory_scope_key = ?
+      AND COALESCE(last_usage, source_updated_at) < ?
+    ORDER BY
+      COALESCE(last_usage, source_updated_at) ASC,
+      source_updated_at ASC,
+      thread_id ASC
+    LIMIT ?
+)
+            "#,
+            ),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(cutoff)
+        .bind(limit as i64)
+        .execute(pool.as_ref())
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected as usize)
+    }
+
     /// Returns the current phase-2 input set along with its diff against the
     /// last successful phase-2 selection.
     ///
@@ -450,6 +621,9 @@ WHERE thread_id IN (
         if n == 0 {
             return Ok(Phase2InputSelection::default());
         }
+        let pool = Arc::clone(&self.pool);
+        let memory_scope_kind = memory_scope_kind.to_string();
+        let memory_scope_key = memory_scope_key.to_string();
         let cutoff = (Utc::now() - Duration::days(max_unused_days.max(0))).timestamp();
 
         let current_rows = memory_repo::bind_memory_scope(
@@ -486,13 +660,13 @@ ORDER BY
 LIMIT ?
             "#,
             ),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
         .bind(cutoff)
         .bind(cutoff)
         .bind(n as i64)
-        .fetch_all(self.pool.as_ref())
+        .fetch_all(pool.as_ref())
         .await?;
 
         let mut current_thread_ids = HashSet::with_capacity(current_rows.len());
@@ -535,10 +709,138 @@ WHERE so.selected_for_phase2 = 1
 ORDER BY so.source_updated_at DESC, so.thread_id DESC
             "#,
             ),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
-        .fetch_all(self.pool.as_ref())
+        .fetch_all(pool.as_ref())
+        .await?;
+
+        let previous_selected = previous_rows
+            .iter()
+            .map(Stage1OutputRow::try_from_row)
+            .map(|row| row.and_then(Stage1Output::try_from))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut removed = Vec::new();
+        for row in previous_rows {
+            let thread_id = row.try_get::<String, _>("thread_id")?;
+            if current_thread_ids.contains(thread_id.as_str()) {
+                continue;
+            }
+            removed.push(stage1_output_ref_from_parts(
+                thread_id,
+                row.try_get("source_updated_at")?,
+                row.try_get("rollout_slug")?,
+            )?);
+        }
+
+        Ok(Phase2InputSelection {
+            selected,
+            previous_selected,
+            retained_thread_ids,
+            removed,
+        })
+    }
+
+    pub async fn get_phase2_input_selection_in_scope_owned(
+        self: Arc<Self>,
+        n: usize,
+        max_unused_days: i64,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+    ) -> anyhow::Result<Phase2InputSelection> {
+        if n == 0 {
+            return Ok(Phase2InputSelection::default());
+        }
+        let pool = Arc::clone(&self.pool);
+        let cutoff = (Utc::now() - Duration::days(max_unused_days.max(0))).timestamp();
+
+        let current_rows = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
+SELECT
+    so.thread_id,
+    COALESCE(t.rollout_path, '') AS rollout_path,
+    so.source_updated_at,
+    so.raw_memory,
+    so.rollout_summary,
+    so.rollout_slug,
+    so.generated_at,
+    COALESCE(t.cwd, '') AS cwd,
+    t.git_branch AS git_branch,
+    so.selected_for_phase2,
+    so.selected_for_phase2_source_updated_at
+FROM stage1_outputs AS so
+LEFT JOIN threads AS t
+    ON t.id = so.thread_id
+WHERE t.memory_mode = 'enabled'
+  AND t.memory_scope_kind = ?
+  AND t.memory_scope_key = ?
+  AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
+  AND (
+        (so.last_usage IS NOT NULL AND so.last_usage >= ?)
+        OR (so.last_usage IS NULL AND so.source_updated_at >= ?)
+  )
+ORDER BY
+    COALESCE(so.usage_count, 0) DESC,
+    COALESCE(so.last_usage, so.source_updated_at) DESC,
+    so.source_updated_at DESC,
+    so.thread_id DESC
+LIMIT ?
+            "#,
+            ),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(cutoff)
+        .bind(cutoff)
+        .bind(n as i64)
+        .fetch_all(pool.as_ref())
+        .await?;
+
+        let mut current_thread_ids = HashSet::with_capacity(current_rows.len());
+        let mut selected = Vec::with_capacity(current_rows.len());
+        let mut retained_thread_ids = Vec::new();
+        for row in current_rows {
+            let thread_id = row.try_get::<String, _>("thread_id")?;
+            current_thread_ids.insert(thread_id.clone());
+            let source_updated_at = row.try_get::<i64, _>("source_updated_at")?;
+            if row.try_get::<i64, _>("selected_for_phase2")? != 0
+                && row.try_get::<Option<i64>, _>("selected_for_phase2_source_updated_at")?
+                    == Some(source_updated_at)
+            {
+                retained_thread_ids.push(ThreadId::try_from(thread_id.clone())?);
+            }
+            selected.push(Stage1Output::try_from(Stage1OutputRow::try_from_row(
+                &row,
+            )?)?);
+        }
+
+        let previous_rows = memory_repo::bind_memory_scope(
+            sqlx::query(
+                r#"
+SELECT
+    so.thread_id,
+    COALESCE(t.rollout_path, '') AS rollout_path,
+    so.source_updated_at,
+    so.raw_memory,
+    so.rollout_summary,
+    so.rollout_slug,
+    so.generated_at,
+    COALESCE(t.cwd, '') AS cwd,
+    t.git_branch AS git_branch
+FROM stage1_outputs AS so
+LEFT JOIN threads AS t
+    ON t.id = so.thread_id
+WHERE so.selected_for_phase2 = 1
+  AND t.memory_scope_kind = ?
+  AND t.memory_scope_key = ?
+ORDER BY so.source_updated_at DESC, so.thread_id DESC
+            "#,
+            ),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .fetch_all(pool.as_ref())
         .await?;
 
         let previous_selected = previous_rows
@@ -798,6 +1100,181 @@ WHERE kind = ? AND job_key = ?
         Ok(Stage1JobClaimOutcome::SkippedRunning)
     }
 
+    pub async fn try_claim_stage1_job_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+        worker_id: ThreadId,
+        source_updated_at: i64,
+        lease_seconds: i64,
+        max_running_jobs: usize,
+    ) -> anyhow::Result<Stage1JobClaimOutcome> {
+        let now = Utc::now().timestamp();
+        let lease_until = now.saturating_add(lease_seconds.max(0));
+        let max_running_jobs = max_running_jobs as i64;
+        let ownership_token = Uuid::new_v4().to_string();
+        let thread_id = thread_id.to_string();
+        let worker_id = worker_id.to_string();
+
+        let pool = Arc::clone(&self.pool);
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let existing_output = sqlx::query(
+            r#"
+SELECT source_updated_at
+FROM stage1_outputs
+WHERE thread_id = ?
+            "#,
+        )
+        .bind(thread_id.as_str())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(existing_output) = existing_output {
+            let existing_source_updated_at: i64 = existing_output.try_get("source_updated_at")?;
+            if existing_source_updated_at >= source_updated_at {
+                tx.commit().await?;
+                return Ok(Stage1JobClaimOutcome::SkippedUpToDate);
+            }
+        }
+        let existing_job = sqlx::query(
+            r#"
+SELECT last_success_watermark
+FROM jobs
+WHERE kind = ? AND job_key = ?
+            "#,
+        )
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(existing_job) = existing_job {
+            let last_success_watermark =
+                existing_job.try_get::<Option<i64>, _>("last_success_watermark")?;
+            if last_success_watermark.is_some_and(|watermark| watermark >= source_updated_at) {
+                tx.commit().await?;
+                return Ok(Stage1JobClaimOutcome::SkippedUpToDate);
+            }
+        }
+
+        let rows_affected = sqlx::query(
+            r#"
+INSERT INTO jobs (
+    kind,
+    job_key,
+    status,
+    worker_id,
+    ownership_token,
+    started_at,
+    finished_at,
+    lease_until,
+    retry_at,
+    retry_remaining,
+    last_error,
+    input_watermark,
+    last_success_watermark
+)
+SELECT ?, ?, 'running', ?, ?, ?, NULL, ?, NULL, ?, NULL, ?, NULL
+WHERE (
+    SELECT COUNT(*)
+    FROM jobs
+    WHERE kind = ?
+      AND status = 'running'
+      AND lease_until IS NOT NULL
+      AND lease_until > ?
+) < ?
+ON CONFLICT(kind, job_key) DO UPDATE SET
+    status = 'running',
+    worker_id = excluded.worker_id,
+    ownership_token = excluded.ownership_token,
+    started_at = excluded.started_at,
+    finished_at = NULL,
+    lease_until = excluded.lease_until,
+    retry_at = NULL,
+    retry_remaining = CASE
+        WHEN excluded.input_watermark > COALESCE(jobs.input_watermark, -1) THEN ?
+        ELSE jobs.retry_remaining
+    END,
+    last_error = NULL,
+    input_watermark = excluded.input_watermark
+WHERE
+    (jobs.status != 'running' OR jobs.lease_until IS NULL OR jobs.lease_until <= excluded.started_at)
+    AND (
+        jobs.retry_at IS NULL
+        OR jobs.retry_at <= excluded.started_at
+        OR excluded.input_watermark > COALESCE(jobs.input_watermark, -1)
+    )
+    AND (
+        jobs.retry_remaining > 0
+        OR excluded.input_watermark > COALESCE(jobs.input_watermark, -1)
+    )
+    AND (
+        SELECT COUNT(*)
+        FROM jobs AS running_jobs
+        WHERE running_jobs.kind = excluded.kind
+          AND running_jobs.status = 'running'
+          AND running_jobs.lease_until IS NOT NULL
+          AND running_jobs.lease_until > excluded.started_at
+          AND running_jobs.job_key != excluded.job_key
+    ) < ?
+            "#,
+        )
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .bind(worker_id.as_str())
+        .bind(ownership_token.as_str())
+        .bind(now)
+        .bind(lease_until)
+        .bind(DEFAULT_RETRY_REMAINING)
+        .bind(source_updated_at)
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(now)
+        .bind(max_running_jobs)
+        .bind(DEFAULT_RETRY_REMAINING)
+        .bind(max_running_jobs)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            tx.commit().await?;
+            return Ok(Stage1JobClaimOutcome::Claimed { ownership_token });
+        }
+
+        let existing_job = sqlx::query(
+            r#"
+SELECT status, lease_until, retry_at, retry_remaining
+FROM jobs
+WHERE kind = ? AND job_key = ?
+            "#,
+        )
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        if let Some(existing_job) = existing_job {
+            let status: String = existing_job.try_get("status")?;
+            let existing_lease_until: Option<i64> = existing_job.try_get("lease_until")?;
+            let retry_at: Option<i64> = existing_job.try_get("retry_at")?;
+            let retry_remaining: i64 = existing_job.try_get("retry_remaining")?;
+
+            if retry_remaining <= 0 {
+                return Ok(Stage1JobClaimOutcome::SkippedRetryExhausted);
+            }
+            if retry_at.is_some_and(|retry_at| retry_at > now) {
+                return Ok(Stage1JobClaimOutcome::SkippedRetryBackoff);
+            }
+            if status == "running"
+                && existing_lease_until.is_some_and(|lease_until| lease_until > now)
+            {
+                return Ok(Stage1JobClaimOutcome::SkippedRunning);
+            }
+        }
+
+        Ok(Stage1JobClaimOutcome::SkippedRunning)
+    }
+
     /// Marks a claimed stage-1 job successful and upserts generated output.
     ///
     /// Transaction behavior:
@@ -891,6 +1368,87 @@ WHERE excluded.source_updated_at >= stage1_outputs.source_updated_at
         Ok(true)
     }
 
+    pub async fn mark_stage1_job_succeeded_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+        ownership_token: String,
+        source_updated_at: i64,
+        raw_memory: String,
+        rollout_summary: String,
+        rollout_slug: Option<String>,
+    ) -> anyhow::Result<bool> {
+        let now = Utc::now().timestamp();
+        let thread_id = thread_id.to_string();
+
+        let pool = Arc::clone(&self.pool);
+        let mut tx = pool.begin().await?;
+        let rows_affected = sqlx::query(
+            r#"
+UPDATE jobs
+SET
+    status = 'done',
+    finished_at = ?,
+    lease_until = NULL,
+    last_error = NULL,
+    last_success_watermark = input_watermark
+WHERE kind = ? AND job_key = ?
+  AND status = 'running' AND ownership_token = ?
+            "#,
+        )
+        .bind(now)
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .bind(ownership_token.as_str())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            tx.commit().await?;
+            return Ok(false);
+        }
+
+        sqlx::query(
+            r#"
+INSERT INTO stage1_outputs (
+    thread_id,
+    source_updated_at,
+    raw_memory,
+    rollout_summary,
+    rollout_slug,
+    generated_at
+) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(thread_id) DO UPDATE SET
+    source_updated_at = excluded.source_updated_at,
+    raw_memory = excluded.raw_memory,
+    rollout_summary = excluded.rollout_summary,
+    rollout_slug = excluded.rollout_slug,
+    generated_at = excluded.generated_at
+WHERE excluded.source_updated_at >= stage1_outputs.source_updated_at
+            "#,
+        )
+        .bind(thread_id.as_str())
+        .bind(source_updated_at)
+        .bind(raw_memory)
+        .bind(rollout_summary)
+        .bind(rollout_slug)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
+        memory_repo::enqueue_thread_phase2_consolidation(
+            &mut tx,
+            JOB_KIND_MEMORY_CONSOLIDATE,
+            DEFAULT_RETRY_REMAINING,
+            thread_id.as_str(),
+            source_updated_at,
+        )
+        .await?;
+
+        tx.commit().await?;
+        Ok(true)
+    }
+
     /// Marks a claimed stage-1 job successful when extraction produced no output.
     ///
     /// Transaction behavior:
@@ -925,7 +1483,7 @@ WHERE kind = ? AND job_key = ?
         .bind(JOB_KIND_MEMORY_STAGE1)
         .bind(thread_id.as_str())
         .bind(ownership_token)
-        .execute(&mut *tx)
+        .execute(tx.as_mut())
         .await?
         .rows_affected();
 
@@ -944,6 +1502,82 @@ WHERE kind = ? AND job_key = ? AND ownership_token = ?
         .bind(JOB_KIND_MEMORY_STAGE1)
         .bind(thread_id.as_str())
         .bind(ownership_token)
+        .fetch_one(&mut *tx)
+        .await?
+        .try_get::<i64, _>("input_watermark")?;
+
+        let deleted_rows = sqlx::query(
+            r#"
+DELETE FROM stage1_outputs
+WHERE thread_id = ?
+            "#,
+        )
+        .bind(thread_id.as_str())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if deleted_rows > 0 {
+            memory_repo::enqueue_thread_phase2_consolidation(
+                &mut tx,
+                JOB_KIND_MEMORY_CONSOLIDATE,
+                DEFAULT_RETRY_REMAINING,
+                thread_id.as_str(),
+                source_updated_at,
+            )
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub async fn mark_stage1_job_succeeded_no_output_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+        ownership_token: String,
+    ) -> anyhow::Result<bool> {
+        let now = Utc::now().timestamp();
+        let thread_id = thread_id.to_string();
+
+        let pool = Arc::clone(&self.pool);
+        let mut tx = pool.begin().await?;
+        let rows_affected = sqlx::query(
+            r#"
+UPDATE jobs
+SET
+    status = 'done',
+    finished_at = ?,
+    lease_until = NULL,
+    last_error = NULL,
+    last_success_watermark = input_watermark
+WHERE kind = ? AND job_key = ?
+  AND status = 'running' AND ownership_token = ?
+            "#,
+        )
+        .bind(now)
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .bind(ownership_token.as_str())
+        .execute(tx.as_mut())
+        .await?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            tx.commit().await?;
+            return Ok(false);
+        }
+
+        let source_updated_at = sqlx::query(
+            r#"
+SELECT input_watermark
+FROM jobs
+WHERE kind = ? AND job_key = ? AND ownership_token = ?
+            "#,
+        )
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .bind(ownership_token.as_str())
         .fetch_one(&mut *tx)
         .await?
         .try_get::<i64, _>("input_watermark")?;
@@ -1019,6 +1653,45 @@ WHERE kind = ? AND job_key = ?
         Ok(rows_affected > 0)
     }
 
+    pub async fn mark_stage1_job_failed_owned(
+        self: Arc<Self>,
+        thread_id: ThreadId,
+        ownership_token: String,
+        failure_reason: String,
+        retry_delay_seconds: i64,
+    ) -> anyhow::Result<bool> {
+        let now = Utc::now().timestamp();
+        let retry_at = now.saturating_add(retry_delay_seconds.max(0));
+        let thread_id = thread_id.to_string();
+        let pool = Arc::clone(&self.pool);
+
+        let rows_affected = sqlx::query(
+            r#"
+UPDATE jobs
+SET
+    status = 'error',
+    finished_at = ?,
+    lease_until = NULL,
+    retry_at = ?,
+    retry_remaining = retry_remaining - 1,
+    last_error = ?
+WHERE kind = ? AND job_key = ?
+  AND status = 'running' AND ownership_token = ?
+            "#,
+        )
+        .bind(now)
+        .bind(retry_at)
+        .bind(failure_reason)
+        .bind(JOB_KIND_MEMORY_STAGE1)
+        .bind(thread_id.as_str())
+        .bind(ownership_token.as_str())
+        .execute(pool.as_ref())
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected > 0)
+    }
+
     /// Enqueues or advances the global phase-2 consolidation job watermark.
     ///
     /// The underlying upsert keeps the job `running` when already running, resets
@@ -1081,12 +1754,15 @@ WHERE kind = ? AND job_key = ?
         worker_id: ThreadId,
         lease_seconds: i64,
     ) -> anyhow::Result<Phase2JobClaimOutcome> {
+        let pool = Arc::clone(&self.pool);
+        let memory_scope_kind = memory_scope_kind.to_string();
+        let memory_scope_key = memory_scope_key.to_string();
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
         let ownership_token = Uuid::new_v4().to_string();
         let worker_id = worker_id.to_string();
 
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
         let existing_job = memory_repo::bind_phase2_job_key(
             sqlx::query(
@@ -1097,8 +1773,8 @@ WHERE kind = ? AND job_key = ?
             "#,
             )
             .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
         .fetch_optional(&mut *tx)
         .await?;
@@ -1160,8 +1836,115 @@ WHERE kind = ? AND job_key = ?
             .bind(now)
             .bind(lease_until)
             .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        tx.commit().await?;
+        if rows_affected == 0 {
+            Ok(Phase2JobClaimOutcome::SkippedRunning)
+        } else {
+            Ok(Phase2JobClaimOutcome::Claimed {
+                ownership_token,
+                input_watermark: input_watermark_value,
+            })
+        }
+    }
+
+    pub async fn try_claim_phase2_job_owned(
+        self: Arc<Self>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+        worker_id: ThreadId,
+        lease_seconds: i64,
+    ) -> anyhow::Result<Phase2JobClaimOutcome> {
+        let pool = Arc::clone(&self.pool);
+        let now = Utc::now().timestamp();
+        let lease_until = now.saturating_add(lease_seconds.max(0));
+        let ownership_token = Uuid::new_v4().to_string();
+        let worker_id = worker_id.to_string();
+
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let existing_job = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
+SELECT status, lease_until, retry_at, retry_remaining, input_watermark, last_success_watermark
+FROM jobs
+WHERE kind = ? AND job_key = ?
+            "#,
+            )
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(existing_job) = existing_job else {
+            tx.commit().await?;
+            return Ok(Phase2JobClaimOutcome::SkippedNotDirty);
+        };
+
+        let input_watermark: Option<i64> = existing_job.try_get("input_watermark")?;
+        let input_watermark_value = input_watermark.unwrap_or(0);
+        let last_success_watermark: Option<i64> = existing_job.try_get("last_success_watermark")?;
+        if input_watermark_value <= last_success_watermark.unwrap_or(0) {
+            tx.commit().await?;
+            return Ok(Phase2JobClaimOutcome::SkippedNotDirty);
+        }
+
+        let status: String = existing_job.try_get("status")?;
+        let existing_lease_until: Option<i64> = existing_job.try_get("lease_until")?;
+        let retry_at: Option<i64> = existing_job.try_get("retry_at")?;
+        let retry_remaining: i64 = existing_job.try_get("retry_remaining")?;
+
+        if retry_remaining <= 0 {
+            tx.commit().await?;
+            return Ok(Phase2JobClaimOutcome::SkippedNotDirty);
+        }
+        if retry_at.is_some_and(|retry_at| retry_at > now) {
+            tx.commit().await?;
+            return Ok(Phase2JobClaimOutcome::SkippedNotDirty);
+        }
+        if status == "running" && existing_lease_until.is_some_and(|lease_until| lease_until > now)
+        {
+            tx.commit().await?;
+            return Ok(Phase2JobClaimOutcome::SkippedRunning);
+        }
+
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
+UPDATE jobs
+SET
+    status = 'running',
+    worker_id = ?,
+    ownership_token = ?,
+    started_at = ?,
+    finished_at = NULL,
+    lease_until = ?,
+    retry_at = NULL,
+    last_error = NULL
+WHERE kind = ? AND job_key = ?
+  AND input_watermark > COALESCE(last_success_watermark, 0)
+  AND (status != 'running' OR lease_until IS NULL OR lease_until <= ?)
+  AND (retry_at IS NULL OR retry_at <= ?)
+  AND retry_remaining > 0
+            "#,
+            )
+            .bind(worker_id.as_str())
+            .bind(ownership_token.as_str())
+            .bind(now)
+            .bind(lease_until)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
         .bind(now)
         .bind(now)
@@ -1206,6 +1989,10 @@ WHERE kind = ? AND job_key = ?
         ownership_token: &str,
         lease_seconds: i64,
     ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let memory_scope_kind = memory_scope_kind.to_string();
+        let memory_scope_key = memory_scope_key.to_string();
+        let ownership_token = ownership_token.to_string();
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
         let rows_affected = memory_repo::bind_phase2_job_key(
@@ -1219,11 +2006,43 @@ WHERE kind = ? AND job_key = ?
             )
             .bind(lease_until)
             .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
         .bind(ownership_token)
-        .execute(self.pool.as_ref())
+        .execute(pool.as_ref())
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected > 0)
+    }
+
+    pub async fn heartbeat_phase2_job_owned(
+        self: Arc<Self>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+        ownership_token: String,
+        lease_seconds: i64,
+    ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let now = Utc::now().timestamp();
+        let lease_until = now.saturating_add(lease_seconds.max(0));
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
+UPDATE jobs
+SET lease_until = ?
+WHERE kind = ? AND job_key = ?
+  AND status = 'running' AND ownership_token = ?
+            "#,
+            )
+            .bind(lease_until)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(ownership_token)
+        .execute(pool.as_ref())
         .await?
         .rows_affected();
 
@@ -1265,8 +2084,12 @@ WHERE kind = ? AND job_key = ?
         completed_watermark: i64,
         selected_outputs: &[Stage1Output],
     ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let memory_scope_kind = memory_scope_kind.to_string();
+        let memory_scope_key = memory_scope_key.to_string();
+        let ownership_token = ownership_token.to_string();
         let now = Utc::now().timestamp();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = pool.begin().await?;
         let rows_affected = memory_repo::bind_phase2_job_key(
             sqlx::query(
                 r#"
@@ -1284,10 +2107,10 @@ WHERE kind = ? AND job_key = ?
             .bind(now)
             .bind(completed_watermark)
             .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
-        .bind(ownership_token)
+        .bind(ownership_token.as_str())
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -1297,8 +2120,81 @@ WHERE kind = ? AND job_key = ?
             return Ok(false);
         }
 
-        memory_repo::clear_phase2_selection_in_scope(&mut *tx, memory_scope_kind, memory_scope_key)
+        memory_repo::clear_phase2_selection_in_scope(
+            &mut *tx,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .await?;
+
+        for output in selected_outputs {
+            sqlx::query(
+                r#"
+UPDATE stage1_outputs
+SET
+    selected_for_phase2 = 1,
+    selected_for_phase2_source_updated_at = ?
+WHERE thread_id = ? AND source_updated_at = ?
+                "#,
+            )
+            .bind(output.source_updated_at.timestamp())
+            .bind(output.thread_id.to_string())
+            .bind(output.source_updated_at.timestamp())
+            .execute(&mut *tx)
             .await?;
+        }
+
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub async fn mark_phase2_job_succeeded_owned(
+        self: Arc<Self>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+        ownership_token: String,
+        completed_watermark: i64,
+        selected_outputs: Vec<Stage1Output>,
+    ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let now = Utc::now().timestamp();
+        let mut tx = pool.begin().await?;
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
+UPDATE jobs
+SET
+    status = 'done',
+    finished_at = ?,
+    lease_until = NULL,
+    last_error = NULL,
+    last_success_watermark = max(COALESCE(last_success_watermark, 0), ?)
+WHERE kind = ? AND job_key = ?
+  AND status = 'running' AND ownership_token = ?
+            "#,
+            )
+            .bind(now)
+            .bind(completed_watermark)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(ownership_token.as_str())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            tx.commit().await?;
+            return Ok(false);
+        }
+
+        memory_repo::clear_phase2_selection_in_scope(
+            &mut *tx,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .await?;
 
         for output in selected_outputs {
             sqlx::query(
@@ -1352,6 +2248,11 @@ WHERE thread_id = ? AND source_updated_at = ?
         failure_reason: &str,
         retry_delay_seconds: i64,
     ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let memory_scope_kind = memory_scope_kind.to_string();
+        let memory_scope_key = memory_scope_key.to_string();
+        let ownership_token = ownership_token.to_string();
+        let failure_reason = failure_reason.to_string();
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
         let rows_affected = memory_repo::bind_phase2_job_key(
@@ -1373,11 +2274,52 @@ WHERE kind = ? AND job_key = ?
             .bind(retry_at)
             .bind(failure_reason)
             .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
         .bind(ownership_token)
-        .execute(self.pool.as_ref())
+        .execute(pool.as_ref())
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected > 0)
+    }
+
+    pub async fn mark_phase2_job_failed_owned(
+        self: Arc<Self>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+        ownership_token: String,
+        failure_reason: String,
+        retry_delay_seconds: i64,
+    ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let now = Utc::now().timestamp();
+        let retry_at = now.saturating_add(retry_delay_seconds.max(0));
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
+UPDATE jobs
+SET
+    status = 'error',
+    finished_at = ?,
+    lease_until = NULL,
+    retry_at = ?,
+    retry_remaining = retry_remaining - 1,
+    last_error = ?
+WHERE kind = ? AND job_key = ?
+  AND status = 'running' AND ownership_token = ?
+            "#,
+            )
+            .bind(now)
+            .bind(retry_at)
+            .bind(failure_reason)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(ownership_token)
+        .execute(pool.as_ref())
         .await?
         .rows_affected();
 
@@ -1414,6 +2356,11 @@ WHERE kind = ? AND job_key = ?
         failure_reason: &str,
         retry_delay_seconds: i64,
     ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let memory_scope_kind = memory_scope_kind.to_string();
+        let memory_scope_key = memory_scope_key.to_string();
+        let ownership_token = ownership_token.to_string();
+        let failure_reason = failure_reason.to_string();
         let now = Utc::now().timestamp();
         let retry_at = now.saturating_add(retry_delay_seconds.max(0));
         let rows_affected = memory_repo::bind_phase2_job_key(
@@ -1436,11 +2383,53 @@ WHERE kind = ? AND job_key = ?
             .bind(retry_at)
             .bind(failure_reason)
             .bind(JOB_KIND_MEMORY_CONSOLIDATE),
-            memory_scope_kind,
-            memory_scope_key,
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
         )
         .bind(ownership_token)
-        .execute(self.pool.as_ref())
+        .execute(pool.as_ref())
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected > 0)
+    }
+
+    pub async fn mark_phase2_job_failed_if_unowned_owned(
+        self: Arc<Self>,
+        memory_scope_kind: String,
+        memory_scope_key: String,
+        ownership_token: String,
+        failure_reason: String,
+        retry_delay_seconds: i64,
+    ) -> anyhow::Result<bool> {
+        let pool = Arc::clone(&self.pool);
+        let now = Utc::now().timestamp();
+        let retry_at = now.saturating_add(retry_delay_seconds.max(0));
+        let rows_affected = memory_repo::bind_phase2_job_key(
+            sqlx::query(
+                r#"
+UPDATE jobs
+SET
+    status = 'error',
+    finished_at = ?,
+    lease_until = NULL,
+    retry_at = ?,
+    retry_remaining = retry_remaining - 1,
+    last_error = ?
+WHERE kind = ? AND job_key = ?
+  AND status = 'running'
+  AND (ownership_token = ? OR ownership_token IS NULL)
+            "#,
+            )
+            .bind(now)
+            .bind(retry_at)
+            .bind(failure_reason)
+            .bind(JOB_KIND_MEMORY_CONSOLIDATE),
+            memory_scope_kind.as_str(),
+            memory_scope_key.as_str(),
+        )
+        .bind(ownership_token)
+        .execute(pool.as_ref())
         .await?
         .rows_affected();
 

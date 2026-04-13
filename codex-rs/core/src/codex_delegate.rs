@@ -74,7 +74,7 @@ pub(crate) async fn run_codex_thread_interactive(
     let (tx_sub, rx_sub) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (tx_ops, rx_ops) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
 
-    let CodexSpawnOk { codex, .. } = Codex::spawn(CodexSpawnArgs {
+    let CodexSpawnOk { codex, .. } = require_send_owned(Codex::spawn(CodexSpawnArgs {
         config,
         auth_manager,
         models_manager,
@@ -95,7 +95,7 @@ pub(crate) async fn run_codex_thread_interactive(
         user_shell_override: None,
         inherited_exec_policy: Some(Arc::clone(&parent_session.services.exec_policy)),
         parent_trace: None,
-    })
+    }))
     .await?;
     if parent_session.enabled(codex_features::Feature::GeneralAnalytics) {
         let thread_config = codex.thread_config_snapshot().await;
@@ -674,10 +674,10 @@ async fn maybe_auto_review_mcp_request_user_input(
         .get(&event.call_id)
         .cloned()?;
     let metadata = lookup_mcp_tool_metadata(
-        parent_session.as_ref(),
-        parent_ctx.as_ref(),
-        &invocation.server,
-        &invocation.tool,
+        Arc::clone(parent_session),
+        Arc::clone(parent_ctx),
+        invocation.server.clone(),
+        invocation.tool.clone(),
     )
     .await;
     let review_cancel = cancel_token.child_token();
@@ -741,8 +741,9 @@ fn spawn_guardian_review(
             return;
         };
         let decision = runtime.block_on(review_approval_request_with_cancel(
-            &session,
-            &turn,
+            session,
+            turn,
+            crate::guardian::new_guardian_review_id(),
             request,
             retry_reason,
             cancel_token,
@@ -856,6 +857,14 @@ where
             decision
         }
     }
+}
+
+async fn require_send_owned<F>(future: F) -> F::Output
+where
+    F: core::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    Box::pin(future).await
 }
 
 #[cfg(test)]

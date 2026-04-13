@@ -11,7 +11,6 @@ use crate::memories::prompts::build_stage_one_input_message;
 use crate::rollout::INTERACTIVE_SESSION_SOURCES;
 use crate::rollout::policy::should_persist_response_item_for_memories;
 use codex_api::ResponseEvent;
-use codex_config::types::MemoriesConfig;
 use codex_otel::SessionTelemetry;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::ServiceTier;
@@ -28,7 +27,6 @@ use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
-use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 use tracing::warn;
@@ -83,7 +81,7 @@ struct StageOneOutput {
 /// 2) build one stage-1 request context
 /// 3) run stage-1 extraction jobs in parallel
 /// 4) emit metrics and logs
-pub(in crate::memories) async fn run(session: &Arc<Session>, config: &Config) {
+pub(in crate::memories) async fn run(session: Arc<Session>, config: Arc<Config>) {
     let _phase_one_e2e_timer = session
         .services
         .session_telemetry
@@ -91,7 +89,9 @@ pub(in crate::memories) async fn run(session: &Arc<Session>, config: &Config) {
         .ok();
 
     // 1. Claim startup job.
-    let Some(claimed_candidates) = claim_startup_jobs(session, config).await else {
+    let Some(claimed_candidates) =
+        claim_startup_jobs(Arc::clone(&session), Arc::clone(&config)).await
+    else {
         return;
     };
     if claimed_candidates.is_empty() {
@@ -104,14 +104,14 @@ pub(in crate::memories) async fn run(session: &Arc<Session>, config: &Config) {
     }
 
     // 2. Build request.
-    let stage_one_context = build_request_context(session, config).await;
+    let stage_one_context = build_request_context(Arc::clone(&session), Arc::clone(&config)).await;
 
     // 3. Run the parallel sampling.
-    let outcomes = run_jobs(session, claimed_candidates, stage_one_context).await;
+    let outcomes = run_jobs(Arc::clone(&session), claimed_candidates, stage_one_context).await;
 
     // 4. Metrics and logs.
     let counts = aggregate_stats(outcomes);
-    emit_metrics(session, &counts);
+    emit_metrics(session.as_ref(), &counts);
     info!(
         "memory stage-1 extraction complete: {} job(s) claimed, {} succeeded ({} with output, {} no output), {} failed",
         counts.claimed,
@@ -123,30 +123,34 @@ pub(in crate::memories) async fn run(session: &Arc<Session>, config: &Config) {
 }
 
 /// Prune old un-used "dead" raw memories.
-pub(in crate::memories) async fn prune(session: &Arc<Session>, config: &Config) {
-    if let Some(db) = session.services.state_db.as_deref() {
-        let max_unused_days = config.memories.max_unused_days;
-        match db
-            .prune_stage1_outputs_for_retention_in_scope(
-                &config.memory_scope_kind,
-                &config.memory_scope_key,
-                max_unused_days,
-                PRUNE_BATCH_SIZE,
-            )
-            .await
-        {
-            Ok(pruned) => {
-                if pruned > 0 {
-                    info!(
-                        "memory startup pruned {pruned} stale stage-1 output row(s) older than {max_unused_days} days"
-                    );
-                }
-            }
-            Err(err) => {
-                warn!(
-                    "state db prune_stage1_outputs_for_retention failed during memories startup: {err}"
+pub(in crate::memories) async fn prune(session: Arc<Session>, config: Arc<Config>) {
+    let Some(db) = session.services.state_db.clone() else {
+        return;
+    };
+    let max_unused_days = config.memories.max_unused_days;
+    let memory_scope_kind = config.memory_scope_kind.clone();
+    let memory_scope_key = config.memory_scope_key.clone();
+    match db
+        .clone()
+        .prune_stage1_outputs_for_retention_in_scope_owned(
+            memory_scope_kind,
+            memory_scope_key,
+            max_unused_days,
+            PRUNE_BATCH_SIZE,
+        )
+        .await
+    {
+        Ok(pruned) => {
+            if pruned > 0 {
+                info!(
+                    "memory startup pruned {pruned} stale stage-1 output row(s) older than {max_unused_days} days"
                 );
             }
+        }
+        Err(err) => {
+            warn!(
+                "state db prune_stage1_outputs_for_retention failed during memories startup: {err}"
+            );
         }
     }
 }
@@ -182,11 +186,24 @@ impl RequestContext {
     }
 }
 
+async fn get_model_info_owned(
+    session: Arc<Session>,
+    model_name: String,
+    models_manager_config: codex_models_manager::ModelsManagerConfig,
+) -> ModelInfo {
+    session
+        .services
+        .models_manager
+        .clone()
+        .get_model_info_owned(model_name, models_manager_config)
+        .await
+}
+
 async fn claim_startup_jobs(
-    session: &Arc<Session>,
-    config: &Config,
+    session: Arc<Session>,
+    config: Arc<Config>,
 ) -> Option<Vec<codex_state::Stage1JobClaim>> {
-    let Some(state_db) = session.services.state_db.as_deref() else {
+    let Some(state_db) = session.services.state_db.clone() else {
         // This should not happen.
         warn!("state db unavailable while claiming phase-1 startup jobs; skipping");
         return None;
@@ -198,18 +215,17 @@ async fn claim_startup_jobs(
         .collect::<Vec<_>>();
 
     match state_db
-        .claim_stage1_jobs_for_startup_in_scope(
+        .clone()
+        .claim_stage1_jobs_for_startup_in_scope_owned(
             session.conversation_id,
-            codex_state::Stage1StartupClaimParams {
-                scan_limit: phase_one::THREAD_SCAN_LIMIT,
-                max_claimed: config.memories.max_rollouts_per_startup,
-                max_age_days: config.memories.max_rollout_age_days,
-                min_rollout_idle_hours: config.memories.min_rollout_idle_hours,
-                allowed_sources: allowed_sources.as_slice(),
-                lease_seconds: phase_one::JOB_LEASE_SECONDS,
-            },
-            &config.memory_scope_kind,
-            &config.memory_scope_key,
+            phase_one::THREAD_SCAN_LIMIT,
+            config.memories.max_rollouts_per_startup,
+            config.memories.max_rollout_age_days,
+            config.memories.min_rollout_idle_hours,
+            allowed_sources,
+            phase_one::JOB_LEASE_SECONDS,
+            config.memory_scope_kind.clone(),
+            config.memory_scope_key.clone(),
         )
         .await
     {
@@ -226,17 +242,14 @@ async fn claim_startup_jobs(
     }
 }
 
-async fn build_request_context(session: &Arc<Session>, config: &Config) -> RequestContext {
+async fn build_request_context(session: Arc<Session>, config: Arc<Config>) -> RequestContext {
     let model_name = config
         .memories
         .extract_model
         .clone()
         .unwrap_or(phase_one::MODEL.to_string());
-    let model = session
-        .services
-        .models_manager
-        .get_model_info(&model_name, &config.to_models_manager_config())
-        .await;
+    let models_manager_config = config.to_models_manager_config();
+    let model = get_model_info_owned(Arc::clone(&session), model_name, models_manager_config).await;
     let turn_context = session.new_default_turn().await;
     RequestContext::from_turn_context(
         turn_context.as_ref(),
@@ -246,15 +259,15 @@ async fn build_request_context(session: &Arc<Session>, config: &Config) -> Reque
 }
 
 async fn run_jobs(
-    session: &Arc<Session>,
+    session: Arc<Session>,
     claimed_candidates: Vec<codex_state::Stage1JobClaim>,
     stage_one_context: RequestContext,
 ) -> Vec<JobResult> {
     futures::stream::iter(claimed_candidates.into_iter())
-        .map(|claim| {
-            let session = Arc::clone(session);
+        .map(move |claim| {
+            let session = Arc::clone(&session);
             let stage_one_context = stage_one_context.clone();
-            async move { job::run(session.as_ref(), claim, &stage_one_context).await }
+            async move { job::run(session, claim, stage_one_context).await }
         })
         .buffer_unordered(phase_one::CONCURRENCY_LIMIT)
         .collect::<Vec<_>>()
@@ -265,26 +278,39 @@ mod job {
     use super::*;
 
     pub(in crate::memories) async fn run(
-        session: &Session,
+        session: Arc<Session>,
         claim: codex_state::Stage1JobClaim,
-        stage_one_context: &RequestContext,
+        stage_one_context: RequestContext,
     ) -> JobResult {
         let thread = claim.thread;
+        let RequestContext {
+            model_info,
+            session_telemetry,
+            reasoning_effort,
+            reasoning_summary,
+            service_tier,
+            turn_metadata_header,
+        } = stage_one_context;
         let (stage_one_output, token_usage) = match sample(
-            session,
-            &thread.rollout_path,
-            &thread.cwd,
-            stage_one_context,
+            Arc::clone(&session),
+            thread.rollout_path.clone(),
+            thread.cwd.clone(),
+            model_info,
+            session_telemetry,
+            reasoning_effort,
+            reasoning_summary,
+            service_tier,
+            turn_metadata_header,
         )
         .await
         {
             Ok(output) => output,
             Err(reason) => {
                 result::failed(
-                    session,
+                    Arc::clone(&session),
                     thread.id,
-                    &claim.ownership_token,
-                    &reason.to_string(),
+                    claim.ownership_token.clone(),
+                    reason.to_string(),
                 )
                 .await;
                 return JobResult {
@@ -296,7 +322,12 @@ mod job {
 
         if stage_one_output.raw_memory.is_empty() || stage_one_output.rollout_summary.is_empty() {
             return JobResult {
-                outcome: result::no_output(session, thread.id, &claim.ownership_token).await,
+                outcome: result::no_output(
+                    Arc::clone(&session),
+                    thread.id,
+                    claim.ownership_token.clone(),
+                )
+                .await,
                 token_usage,
             };
         }
@@ -305,11 +336,11 @@ mod job {
             outcome: result::success(
                 session,
                 thread.id,
-                &claim.ownership_token,
+                claim.ownership_token,
                 thread.updated_at.timestamp(),
-                &stage_one_output.raw_memory,
-                &stage_one_output.rollout_summary,
-                stage_one_output.rollout_slug.as_deref(),
+                stage_one_output.raw_memory,
+                stage_one_output.rollout_summary,
+                stage_one_output.rollout_slug,
             )
             .await,
             token_usage,
@@ -318,12 +349,17 @@ mod job {
 
     /// Extract the rollout and perform the actual sampling.
     async fn sample(
-        session: &Session,
-        rollout_path: &Path,
-        rollout_cwd: &Path,
-        stage_one_context: &RequestContext,
+        session: Arc<Session>,
+        rollout_path: std::path::PathBuf,
+        rollout_cwd: std::path::PathBuf,
+        model_info: ModelInfo,
+        session_telemetry: SessionTelemetry,
+        reasoning_effort: Option<ReasoningEffortConfig>,
+        reasoning_summary: ReasoningSummaryConfig,
+        service_tier: Option<ServiceTier>,
+        _turn_metadata_header: Option<String>,
     ) -> anyhow::Result<(StageOneOutput, Option<TokenUsage>)> {
-        let (rollout_items, _, _) = RolloutRecorder::load_rollout_items(rollout_path).await?;
+        let (rollout_items, _, _) = RolloutRecorder::load_rollout_items(&rollout_path).await?;
         let rollout_contents = serialize_filtered_rollout_response_items(&rollout_items)?;
 
         let prompt = Prompt {
@@ -332,9 +368,9 @@ mod job {
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: build_stage_one_input_message(
-                        &stage_one_context.model_info,
-                        rollout_path,
-                        rollout_cwd,
+                        &model_info,
+                        &rollout_path,
+                        &rollout_cwd,
                         &rollout_contents,
                     )?,
                 }],
@@ -354,12 +390,12 @@ mod job {
         let mut stream = client_session
             .stream(
                 &prompt,
-                &stage_one_context.model_info,
-                &stage_one_context.session_telemetry,
-                stage_one_context.reasoning_effort,
-                stage_one_context.reasoning_summary,
-                stage_one_context.service_tier,
-                stage_one_context.turn_metadata_header.as_deref(),
+                &model_info,
+                &session_telemetry,
+                reasoning_effort,
+                reasoning_summary,
+                service_tier,
+                None,
             )
             .await?;
 
@@ -400,35 +436,38 @@ mod job {
         use super::*;
 
         pub(in crate::memories) async fn failed(
-            session: &Session,
+            session: Arc<Session>,
             thread_id: codex_protocol::ThreadId,
-            ownership_token: &str,
-            reason: &str,
+            ownership_token: String,
+            reason: String,
         ) {
             tracing::warn!("Phase 1 job failed for thread {thread_id}: {reason}");
-            if let Some(state_db) = session.services.state_db.as_deref() {
-                let _ = state_db
-                    .mark_stage1_job_failed(
-                        thread_id,
-                        ownership_token,
-                        reason,
-                        phase_one::JOB_RETRY_DELAY_SECONDS,
-                    )
-                    .await;
-            }
+            let Some(state_db) = session.services.state_db.clone() else {
+                return;
+            };
+            let _ = state_db
+                .clone()
+                .mark_stage1_job_failed_owned(
+                    thread_id,
+                    ownership_token,
+                    reason,
+                    phase_one::JOB_RETRY_DELAY_SECONDS,
+                )
+                .await;
         }
 
         pub(in crate::memories) async fn no_output(
-            session: &Session,
+            session: Arc<Session>,
             thread_id: codex_protocol::ThreadId,
-            ownership_token: &str,
+            ownership_token: String,
         ) -> JobOutcome {
-            let Some(state_db) = session.services.state_db.as_deref() else {
+            let Some(state_db) = session.services.state_db.clone() else {
                 return JobOutcome::Failed;
             };
 
             if state_db
-                .mark_stage1_job_succeeded_no_output(thread_id, ownership_token)
+                .clone()
+                .mark_stage1_job_succeeded_no_output_owned(thread_id, ownership_token)
                 .await
                 .unwrap_or(false)
             {
@@ -439,20 +478,21 @@ mod job {
         }
 
         pub(in crate::memories) async fn success(
-            session: &Session,
+            session: Arc<Session>,
             thread_id: codex_protocol::ThreadId,
-            ownership_token: &str,
+            ownership_token: String,
             source_updated_at: i64,
-            raw_memory: &str,
-            rollout_summary: &str,
-            rollout_slug: Option<&str>,
+            raw_memory: String,
+            rollout_summary: String,
+            rollout_slug: Option<String>,
         ) -> JobOutcome {
-            let Some(state_db) = session.services.state_db.as_deref() else {
+            let Some(state_db) = session.services.state_db.clone() else {
                 return JobOutcome::Failed;
             };
 
             if state_db
-                .mark_stage1_job_succeeded(
+                .clone()
+                .mark_stage1_job_succeeded_owned(
                     thread_id,
                     ownership_token,
                     source_updated_at,

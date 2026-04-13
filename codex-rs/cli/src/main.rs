@@ -48,8 +48,8 @@ mod root_cli_policy;
 #[cfg(not(windows))]
 mod wsl_paths;
 
-use crate::mcp_cmd::McpCli;
-use crate::root_cli_policy::RootCliPolicy;
+use self::mcp_cmd::McpCli;
+use self::root_cli_policy::RootCliPolicy;
 
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
@@ -584,10 +584,10 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
             #[cfg(not(windows))]
             _ => {
                 let (cmd, args) = action.command_args();
-                let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
+                let command_path = self::wsl_paths::normalize_for_wsl(cmd);
                 let normalized_args: Vec<String> = args
                     .iter()
-                    .map(crate::wsl_paths::normalize_for_wsl)
+                    .map(self::wsl_paths::normalize_for_wsl)
                     .collect();
                 std::process::Command::new(&command_path)
                     .args(&normalized_args)
@@ -796,7 +796,7 @@ fn stage_str(stage: Stage) -> &'static str {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+pub fn main() -> anyhow::Result<()> {
     maybe_configure_isolated_godex_home_from_args()?;
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         cli_main(arg0_paths).await?;

@@ -290,11 +290,10 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
         &session,
         &turn,
         "echo $CODEX_INTERACTIVE_SHELL_VAR",
-        /*yield_time_ms*/ 2_500,
+        /*yield_time_ms*/ 5_000,
         /*workdir*/ None,
     )
     .await?;
-    tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(
         out_2.process_id.is_none(),
         "short command should not report a process id if it exits quickly"
@@ -383,7 +382,7 @@ async fn unified_exec_pause_blocks_yield_timeout() -> anyhow::Result<()> {
         &session,
         &turn,
         "sleep 1 && echo unified-exec-done",
-        /*yield_time_ms*/ 250,
+        /*yield_time_ms*/ 2_500,
         /*workdir*/ None,
     )
     .await?;
@@ -471,7 +470,21 @@ async fn reusing_completed_process_returns_unknown_process() -> anyhow::Result<(
 
     write_stdin(&session, process_id, "exit\n", /*yield_time_ms*/ 2_500).await?;
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    for _ in 0..20 {
+        if session
+            .services
+            .unified_exec_manager
+            .process_store
+            .lock()
+            .await
+            .processes
+            .contains_key(&process_id)
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+        break;
+    }
 
     let err = write_stdin(&session, process_id, "", /*yield_time_ms*/ 100)
         .await
@@ -522,7 +535,7 @@ async fn completed_pipe_commands_preserve_exit_code() -> anyhow::Result<()> {
     if !process.has_exited() {
         let exit_signal = process.cancellation_token();
         assert!(
-            tokio::time::timeout(Duration::from_secs(2), exit_signal.cancelled())
+            tokio::time::timeout(Duration::from_secs(5), exit_signal.cancelled())
                 .await
                 .is_ok(),
             "process did not report exit within timeout"

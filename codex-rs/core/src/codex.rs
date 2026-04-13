@@ -262,17 +262,17 @@ use crate::exec_policy::ExecPolicyUpdateError;
 use crate::feedback_tags;
 use crate::guardian::GuardianReviewSessionManager;
 use crate::hook_runtime::PendingInputHookDisposition;
-use crate::hook_runtime::inspect_pending_input;
-use crate::hook_runtime::record_additional_contexts;
-use crate::hook_runtime::record_pending_input;
-use crate::hook_runtime::run_pending_session_start_hooks;
-use crate::hook_runtime::run_user_prompt_submit_hooks;
+use crate::hook_runtime::inspect_pending_input_owned;
+use crate::hook_runtime::record_additional_contexts_owned;
+use crate::hook_runtime::record_pending_input_owned;
+use crate::hook_runtime::run_pending_session_start_hooks_owned;
+use crate::hook_runtime::run_user_prompt_submit_hooks_owned;
 use crate::injection::ToolMentionKind;
 use crate::injection::app_id_from_path;
 use crate::injection::tool_kind_for_path;
 use crate::instructions::UserInstructions;
 use crate::mcp::McpManager;
-use crate::mcp_skill_dependencies::maybe_prompt_and_install_mcp_dependencies;
+use crate::mcp_skill_dependencies::maybe_prompt_and_install_mcp_dependencies_owned;
 use crate::memories;
 use crate::mentions::build_connector_slug_counts;
 use crate::mentions::build_skill_name_counts;
@@ -284,7 +284,6 @@ use crate::plugins::PluginsManager;
 use crate::plugins::build_plugin_injections;
 use crate::plugins::render_plugins_section;
 use crate::project_doc::get_user_instructions;
-use crate::resolve_skill_dependencies_for_turn;
 use crate::rollout::RolloutRecorder;
 use crate::rollout::RolloutRecorderParams;
 use crate::rollout::map_session_init_error;
@@ -293,6 +292,7 @@ use crate::rollout::policy::EventPersistenceMode;
 use crate::session_startup_prewarm::SessionStartupPrewarmHandle;
 use crate::shell;
 use crate::shell_snapshot::ShellSnapshot;
+use crate::skills::resolve_skill_dependencies_for_turn_owned;
 use crate::skills_watcher::SkillsWatcher;
 use crate::skills_watcher::SkillsWatcherEvent;
 use crate::state::ActiveTurn;
@@ -511,7 +511,10 @@ impl Codex {
         }
 
         if config.features.enabled(Feature::JsRepl)
-            && let Err(err) = resolve_compatible_node(config.js_repl_node_path.as_deref()).await
+            && let Err(err) = require_send_owned(resolve_compatible_node_owned(
+                config.js_repl_node_path.clone(),
+            ))
+            .await
         {
             let _ = config.features.disable(Feature::JsRepl);
             let _ = config.features.disable(Feature::JsReplToolsOnly);
@@ -528,7 +531,10 @@ impl Codex {
             config.startup_warnings.push(message);
         }
         if config.features.enabled(Feature::CodeMode)
-            && let Err(err) = resolve_compatible_node(config.js_repl_node_path.as_deref()).await
+            && let Err(err) = require_send_owned(resolve_compatible_node_owned(
+                config.js_repl_node_path.clone(),
+            ))
+            .await
         {
             let message = format!(
                 "Disabled `exec` for this session because the configured Node runtime is unavailable or incompatible. {err}"
@@ -538,11 +544,14 @@ impl Codex {
             config.startup_warnings.push(message);
         }
 
-        let environment = environment_manager
-            .current()
+        let environment = require_send_owned(environment_manager.clone().current_owned())
             .await
             .map_err(|err| CodexErr::Fatal(format!("failed to create environment: {err}")))?;
-        let user_instructions = get_user_instructions(&config, environment.as_deref()).await;
+        let user_instructions = require_send_owned(get_user_instructions_owned(
+            config.clone(),
+            environment.clone(),
+        ))
+        .await;
 
         let exec_policy = if crate::guardian::is_guardian_reviewer_source(&session_source) {
             // Guardian review should rely on the built-in shell safety checks,
@@ -553,7 +562,7 @@ impl Codex {
             Arc::clone(exec_policy)
         } else {
             Arc::new(
-                ExecPolicyManager::load(&config.config_layer_stack)
+                require_send_owned(load_exec_policy_owned(config.config_layer_stack.clone()))
                     .await
                     .map_err(|err| CodexErr::Fatal(format!("failed to load rules: {err}")))?,
             )
@@ -570,19 +579,26 @@ impl Codex {
                 codex_models_manager::manager::RefreshStrategy::Offline
             )
         {
-            let _ = models_manager.list_models(refresh_strategy).await;
+            let _ = require_send_owned(models_manager.clone().list_models_owned(refresh_strategy))
+                .await;
         }
-        let model = models_manager
-            .get_default_model(&config.model, refresh_strategy)
-            .await;
+        let model = require_send_owned(get_default_model_owned(
+            models_manager.clone(),
+            config.model.clone(),
+            refresh_strategy,
+        ))
+        .await;
 
         // Resolve base instructions for the session. Priority order:
         // 1. config.base_instructions override
         // 2. conversation history => session_meta.base_instructions
         // 3. base_instructions for current model
-        let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
-            .await;
+        let model_info = require_send_owned(get_model_info_owned(
+            models_manager.clone(),
+            model.clone(),
+            config.to_models_manager_config(),
+        ))
+        .await;
         let base_instructions = config
             .base_instructions
             .clone()
@@ -599,9 +615,14 @@ impl Codex {
             };
             match thread_id {
                 Some(thread_id) => {
-                    let state_db_ctx = state_db::get_state_db(&config).await;
-                    state_db::get_dynamic_tools(state_db_ctx.as_deref(), thread_id, "codex_spawn")
-                        .await
+                    let state_db_ctx =
+                        require_send_owned(get_state_db_owned((*config).clone())).await;
+                    require_send_owned(state_db::get_dynamic_tools_owned(
+                        state_db_ctx,
+                        thread_id,
+                        "codex_spawn",
+                    ))
+                    .await
                 }
                 None => None,
             }
@@ -660,24 +681,36 @@ impl Codex {
         let session_source_clone = session_configuration.session_source.clone();
         let (agent_status_tx, agent_status_rx) = watch::channel(AgentStatus::PendingInit);
 
-        let session = Session::new(
-            session_configuration,
-            config.clone(),
-            auth_manager.clone(),
-            models_manager.clone(),
-            exec_policy,
-            tx_event.clone(),
-            agent_status_tx.clone(),
-            conversation_history,
-            session_source_clone,
-            skills_manager,
-            plugins_manager,
-            mcp_manager.clone(),
-            skills_watcher,
-            agent_control,
-            environment,
-        )
+        let session = tokio::task::spawn_blocking({
+            let config = config.clone();
+            let auth_manager = auth_manager.clone();
+            let models_manager = models_manager.clone();
+            let tx_event = tx_event.clone();
+            let agent_status_tx = agent_status_tx.clone();
+            let mcp_manager = mcp_manager.clone();
+            move || {
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(Session::new(
+                    session_configuration,
+                    config,
+                    auth_manager,
+                    models_manager,
+                    exec_policy,
+                    tx_event,
+                    agent_status_tx,
+                    conversation_history,
+                    session_source_clone,
+                    skills_manager,
+                    plugins_manager,
+                    mcp_manager,
+                    skills_watcher,
+                    agent_control,
+                    environment,
+                ))
+            }
+        })
         .await
+        .map_err(|err| CodexErr::Fatal(format!("failed to join session init task: {err}")))?
         .map_err(|e| {
             error!("Failed to create session: {e:#}");
             map_session_init_error(&e, &config.codex_home)
@@ -785,7 +818,8 @@ impl Codex {
     }
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
-        let state = self.session.state.lock().await;
+        let session = self.session.clone();
+        let state = session.state.lock().await;
         state.session_configuration.thread_config_snapshot()
     }
 
@@ -811,6 +845,60 @@ pub(crate) fn session_loop_termination_from_handle(
     }
     .boxed()
     .shared()
+}
+
+async fn get_user_instructions_owned(
+    config: Config,
+    environment: Option<Arc<Environment>>,
+) -> Option<String> {
+    get_user_instructions(&config, environment.as_deref()).await
+}
+
+async fn load_exec_policy_owned(
+    config_stack: crate::config_loader::ConfigLayerStack,
+) -> Result<ExecPolicyManager, crate::exec_policy::ExecPolicyError> {
+    ExecPolicyManager::load(&config_stack).await
+}
+
+async fn get_default_model_owned(
+    models_manager: Arc<ModelsManager>,
+    model: Option<String>,
+    refresh_strategy: codex_models_manager::manager::RefreshStrategy,
+) -> String {
+    models_manager
+        .get_default_model_owned(model, refresh_strategy)
+        .await
+}
+
+async fn get_model_info_owned(
+    models_manager: Arc<ModelsManager>,
+    model: String,
+    config: codex_models_manager::ModelsManagerConfig,
+) -> ModelInfo {
+    models_manager.get_model_info_owned(model, config).await
+}
+
+async fn get_state_db_owned(config: Config) -> Option<state_db::StateDbHandle> {
+    let sqlite_home = config.sqlite_home;
+    let model_provider_id = config.model_provider_id;
+    tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(state_db::get_state_db_owned(sqlite_home, model_provider_id))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn require_send_owned<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+{
+    Box::pin(future).await
+}
+
+async fn resolve_compatible_node_owned(config_path: Option<PathBuf>) -> Result<PathBuf, String> {
+    resolve_compatible_node(config_path.as_deref()).await
 }
 
 /// Context for an initialized model agent
@@ -1095,13 +1183,17 @@ fn local_time_context() -> (String, String) {
     }
 }
 
-async fn thread_title_from_state_db(
-    state_db: Option<&state_db::StateDbHandle>,
-    codex_home: &Path,
+async fn thread_title_from_state_db_owned(
+    state_db: Option<state_db::StateDbHandle>,
+    codex_home: PathBuf,
     conversation_id: ThreadId,
 ) -> Option<String> {
     if let Some(metadata) = state_db
-        && let Some(metadata) = metadata.get_thread(conversation_id).await.ok().flatten()
+        && let Some(metadata) = metadata
+            .get_thread_owned(conversation_id)
+            .await
+            .ok()
+            .flatten()
     {
         let title = metadata.title.trim();
         if !title.is_empty() && metadata.first_user_message.as_deref().map(str::trim) != Some(title)
@@ -1109,7 +1201,7 @@ async fn thread_title_from_state_db(
             return Some(title.to_string());
         }
     }
-    find_thread_name_by_id(codex_home, &conversation_id)
+    find_thread_name_by_id(&codex_home, &conversation_id)
         .await
         .ok()
         .flatten()
@@ -1281,6 +1373,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) app_server_client_version: Option<String>,
 }
 
+#[derive(Default)]
 pub(crate) struct AppServerClientMetadata {
     pub(crate) client_name: Option<String>,
     pub(crate) client_version: Option<String>,
@@ -1288,6 +1381,19 @@ pub(crate) struct AppServerClientMetadata {
 
 impl Session {
     pub(crate) async fn app_server_client_metadata(&self) -> AppServerClientMetadata {
+        let state = self.state.lock().await;
+        AppServerClientMetadata {
+            client_name: state.session_configuration.app_server_client_name.clone(),
+            client_version: state
+                .session_configuration
+                .app_server_client_version
+                .clone(),
+        }
+    }
+
+    pub(crate) async fn app_server_client_metadata_owned(
+        self: Arc<Self>,
+    ) -> AppServerClientMetadata {
         let state = self.state.lock().await;
         AppServerClientMetadata {
             client_name: state.session_configuration.app_server_client_name.clone(),
@@ -1901,13 +2007,18 @@ impl Session {
             default_shell.shell_snapshot = rx;
             tx
         };
-        let thread_name =
-            thread_title_from_state_db(state_db_ctx.as_ref(), &config.codex_home, conversation_id)
-                .instrument(info_span!(
-                    "session_init.thread_name_lookup",
-                    otel.name = "session_init.thread_name_lookup",
-                ))
-                .await;
+        let thread_name = require_send_owned(
+            thread_title_from_state_db_owned(
+                state_db_ctx.clone(),
+                config.codex_home.clone(),
+                conversation_id,
+            )
+            .instrument(info_span!(
+                "session_init.thread_name_lookup",
+                otel.name = "session_init.thread_name_lookup",
+            )),
+        )
+        .await;
         session_configuration.thread_name = thread_name.clone();
         let state = SessionState::new(session_configuration.clone());
         let managed_network_requirements_enabled = config.managed_network_requirements_enabled();
@@ -2074,8 +2185,12 @@ impl Session {
             next_internal_sub_id: AtomicU64::new(0),
         });
         if let Some(network_policy_decider_session) = network_policy_decider_session {
-            let mut guard = network_policy_decider_session.write().await;
-            *guard = Arc::downgrade(&sess);
+            let sess_for_decider = Arc::clone(&sess);
+            require_send_owned(async move {
+                let mut guard = network_policy_decider_session.write().await;
+                *guard = Arc::downgrade(&sess_for_decider);
+            })
+            .await;
         }
         // Dispatch the SessionConfiguredEvent first and then report any errors.
         // If resuming, include converted initial messages in the payload so UIs can render them immediately.
@@ -2103,7 +2218,11 @@ impl Session {
         })
         .chain(post_session_configured_events.into_iter());
         for event in events {
-            sess.send_event_raw(event).await;
+            let sess_for_event = Arc::clone(&sess);
+            require_send_owned(async move {
+                sess_for_event.send_event_raw(event).await;
+            })
+            .await;
         }
 
         // Start the watcher after SessionConfigured so it cannot emit earlier events.
@@ -2126,9 +2245,17 @@ impl Session {
         let required_mcp_server_count = required_mcp_servers.len();
         let tool_plugin_provenance = mcp_manager.tool_plugin_provenance(config.as_ref());
         {
-            let mut cancel_guard = sess.services.mcp_startup_cancellation_token.lock().await;
-            cancel_guard.cancel();
-            *cancel_guard = CancellationToken::new();
+            let sess_for_cancel = Arc::clone(&sess);
+            require_send_owned(async move {
+                let mut cancel_guard = sess_for_cancel
+                    .services
+                    .mcp_startup_cancellation_token
+                    .lock()
+                    .await;
+                cancel_guard.cancel();
+                *cancel_guard = CancellationToken::new();
+            })
+            .await;
         }
         let (mcp_connection_manager, cancel_token) = McpConnectionManager::new(
             &mcp_servers,
@@ -2150,15 +2277,31 @@ impl Session {
         ))
         .await;
         {
-            let mut manager_guard = sess.services.mcp_connection_manager.write().await;
-            *manager_guard = mcp_connection_manager;
+            let sess_for_manager = Arc::clone(&sess);
+            require_send_owned(async move {
+                let mut manager_guard = sess_for_manager
+                    .services
+                    .mcp_connection_manager
+                    .write()
+                    .await;
+                *manager_guard = mcp_connection_manager;
+            })
+            .await;
         }
         {
-            let mut cancel_guard = sess.services.mcp_startup_cancellation_token.lock().await;
-            if cancel_guard.is_cancelled() {
-                cancel_token.cancel();
-            }
-            *cancel_guard = cancel_token;
+            let sess_for_cancel = Arc::clone(&sess);
+            require_send_owned(async move {
+                let mut cancel_guard = sess_for_cancel
+                    .services
+                    .mcp_startup_cancellation_token
+                    .lock()
+                    .await;
+                if cancel_guard.is_cancelled() {
+                    cancel_token.cancel();
+                }
+                *cancel_guard = cancel_token;
+            })
+            .await;
         }
         if !required_mcp_servers.is_empty() {
             let failures = sess
@@ -2184,8 +2327,13 @@ impl Session {
                 ));
             }
         }
-        sess.schedule_startup_prewarm(session_configuration.base_instructions.clone())
-            .await;
+        let sess_for_prewarm = Arc::clone(&sess);
+        require_send_owned(async move {
+            sess_for_prewarm
+                .schedule_startup_prewarm(session_configuration.base_instructions.clone())
+                .await;
+        })
+        .await;
         let session_start_source = match &initial_history {
             InitialHistory::Resumed(_) => codex_hooks::SessionStartSource::Resume,
             InitialHistory::New | InitialHistory::Forked(_) => {
@@ -2194,10 +2342,20 @@ impl Session {
         };
 
         // record_initial_history can emit events. We record only after the SessionConfiguredEvent is emitted.
-        sess.record_initial_history(initial_history).await;
+        let sess_for_history = Arc::clone(&sess);
+        require_send_owned(async move {
+            sess_for_history
+                .record_initial_history(initial_history)
+                .await;
+        })
+        .await;
         {
-            let mut state = sess.state.lock().await;
-            state.set_pending_session_start_source(Some(session_start_source));
+            let sess_for_state = Arc::clone(&sess);
+            require_send_owned(async move {
+                let mut state = sess_for_state.state.lock().await;
+                state.set_pending_session_start_source(Some(session_start_source));
+            })
+            .await;
         }
 
         memories::start_memories_startup_task(
@@ -2230,6 +2388,18 @@ impl Session {
         }
     }
 
+    pub(crate) async fn flush_rollout_owned(self: Arc<Self>) {
+        let recorder = {
+            let guard = self.services.rollout.lock().await;
+            guard.clone()
+        };
+        if let Some(rec) = recorder
+            && let Err(e) = rec.flush_owned().await
+        {
+            warn!("failed to flush rollout recorder: {e}");
+        }
+    }
+
     pub(crate) async fn try_ensure_rollout_materialized(&self) -> std::io::Result<()> {
         let recorder = {
             let guard = self.services.rollout.lock().await;
@@ -2243,6 +2413,18 @@ impl Session {
 
     pub(crate) async fn ensure_rollout_materialized(&self) {
         if let Err(e) = self.try_ensure_rollout_materialized().await {
+            warn!("failed to materialize rollout recorder: {e}");
+        }
+    }
+
+    pub(crate) async fn ensure_rollout_materialized_owned(self: Arc<Self>) {
+        let recorder = {
+            let guard = self.services.rollout.lock().await;
+            guard.clone()
+        };
+        if let Some(rec) = recorder
+            && let Err(e) = rec.persist_owned().await
+        {
             warn!("failed to materialize rollout recorder: {e}");
         }
     }
@@ -2300,6 +2482,13 @@ impl Session {
         }
     }
 
+    pub(crate) async fn get_base_instructions_owned(self: Arc<Self>) -> BaseInstructions {
+        let state = self.state.lock().await;
+        BaseInstructions {
+            text: state.session_configuration.base_instructions.clone(),
+        }
+    }
+
     // Merges connector IDs into the session-level explicit connector selection.
     pub(crate) async fn merge_connector_selection(
         &self,
@@ -2309,8 +2498,21 @@ impl Session {
         state.merge_connector_selection(connector_ids)
     }
 
+    pub(crate) async fn merge_connector_selection_owned(
+        self: Arc<Self>,
+        connector_ids: HashSet<String>,
+    ) -> HashSet<String> {
+        let mut state = self.state.lock().await;
+        state.merge_connector_selection(connector_ids)
+    }
+
     // Returns the connector IDs currently selected for this session.
     pub(crate) async fn get_connector_selection(&self) -> HashSet<String> {
+        let state = self.state.lock().await;
+        state.get_connector_selection()
+    }
+
+    pub(crate) async fn get_connector_selection_owned(self: Arc<Self>) -> HashSet<String> {
         let state = self.state.lock().await;
         state.get_connector_selection()
     }
@@ -2436,6 +2638,14 @@ impl Session {
 
     pub(crate) async fn set_previous_turn_settings(
         &self,
+        previous_turn_settings: Option<PreviousTurnSettings>,
+    ) {
+        let mut state = self.state.lock().await;
+        state.set_previous_turn_settings(previous_turn_settings);
+    }
+
+    pub(crate) async fn set_previous_turn_settings_owned(
+        self: Arc<Self>,
         previous_turn_settings: Option<PreviousTurnSettings>,
     ) {
         let mut state = self.state.lock().await;
@@ -2596,11 +2806,9 @@ impl Session {
                 sandbox_cwd: per_turn_config.cwd.to_path_buf(),
                 use_legacy_landlock: per_turn_config.features.use_legacy_landlock(),
             };
-            if let Err(e) = self
-                .services
-                .mcp_connection_manager
-                .read()
-                .await
+            let mcp_connection_manager =
+                { self.services.mcp_connection_manager.read().await.clone() };
+            if let Err(e) = mcp_connection_manager
                 .notify_sandbox_state_change(&sandbox_state)
                 .await
             {
@@ -2748,6 +2956,50 @@ impl Session {
         self.services.plugins_manager.clear_cache();
     }
 
+    pub(crate) async fn reload_user_config_layer_owned(self: Arc<Self>) {
+        let config_toml_path = {
+            let state = self.state.lock().await;
+            state
+                .session_configuration
+                .codex_home
+                .join(CONFIG_TOML_FILE)
+        };
+
+        let user_config = match std::fs::read_to_string(&config_toml_path) {
+            Ok(contents) => match toml::from_str::<toml::Value>(&contents) {
+                Ok(config) => config,
+                Err(err) => {
+                    warn!("failed to parse user config while reloading layer: {err}");
+                    return;
+                }
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                toml::Value::Table(Default::default())
+            }
+            Err(err) => {
+                warn!("failed to read user config while reloading layer: {err}");
+                return;
+            }
+        };
+
+        let config_toml_path = match AbsolutePathBuf::try_from(config_toml_path) {
+            Ok(path) => path,
+            Err(err) => {
+                warn!("failed to resolve user config path while reloading layer: {err}");
+                return;
+            }
+        };
+
+        let mut state = self.state.lock().await;
+        let mut config = (*state.session_configuration.original_config_do_not_use).clone();
+        config.config_layer_stack = config
+            .config_layer_stack
+            .with_user_config(&config_toml_path, user_config);
+        state.session_configuration.original_config_do_not_use = Arc::new(config);
+        self.services.skills_manager.clear_cache();
+        self.services.plugins_manager.clear_cache();
+    }
+
     pub(crate) async fn new_default_turn_with_sub_id(&self, sub_id: String) -> Arc<TurnContext> {
         let session_configuration = {
             let state = self.state.lock().await;
@@ -2812,6 +3064,37 @@ impl Session {
         }
     }
 
+    pub(crate) async fn send_event_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        msg: EventMsg,
+    ) {
+        let legacy_source = msg.clone();
+        let event = Event {
+            id: turn_context.sub_id.clone(),
+            msg,
+        };
+        self.send_event_raw(event).await;
+        self.clone()
+            .maybe_notify_parent_of_terminal_turn_owned(turn_context.clone(), legacy_source.clone())
+            .await;
+        self.clone()
+            .maybe_mirror_event_text_to_realtime_owned(legacy_source.clone())
+            .await;
+        self.clone()
+            .maybe_clear_realtime_handoff_for_event_owned(legacy_source.clone())
+            .await;
+
+        let show_raw_agent_reasoning = self.show_raw_agent_reasoning();
+        for legacy in legacy_source.as_legacy_events(show_raw_agent_reasoning) {
+            let legacy_event = Event {
+                id: turn_context.sub_id.clone(),
+                msg: legacy,
+            };
+            self.send_event_raw(legacy_event).await;
+        }
+    }
+
     /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
     async fn maybe_notify_parent_of_terminal_turn(
         &self,
@@ -2842,6 +3125,44 @@ impl Session {
             return;
         }
 
+        self.forward_child_completion_to_parent(
+            *parent_thread_id,
+            child_agent_path.clone(),
+            status,
+        )
+        .await;
+    }
+
+    async fn maybe_notify_parent_of_terminal_turn_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        msg: EventMsg,
+    ) {
+        if !self.enabled(Feature::MultiAgentV2) {
+            return;
+        }
+
+        if !matches!(msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
+            return;
+        }
+
+        let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id,
+            agent_path: Some(child_agent_path),
+            ..
+        }) = &turn_context.session_source
+        else {
+            return;
+        };
+        let child_agent_path = child_agent_path.clone();
+
+        let Some(status) = agent_status_from_event(&msg) else {
+            return;
+        };
+        if !is_final(&status) {
+            return;
+        }
+
         self.forward_child_completion_to_parent(*parent_thread_id, child_agent_path, status)
             .await;
     }
@@ -2850,7 +3171,7 @@ impl Session {
     async fn forward_child_completion_to_parent(
         &self,
         parent_thread_id: ThreadId,
-        child_agent_path: &codex_protocol::AgentPath,
+        child_agent_path: codex_protocol::AgentPath,
         status: AgentStatus,
     ) {
         let Some(parent_agent_path) = child_agent_path
@@ -2893,7 +3214,31 @@ impl Session {
         }
     }
 
+    async fn maybe_mirror_event_text_to_realtime_owned(self: Arc<Self>, msg: EventMsg) {
+        let Some(text) = realtime_text_for_event(&msg) else {
+            return;
+        };
+        if self.conversation.running_state().await.is_none()
+            || self.conversation.active_handoff_id().await.is_none()
+        {
+            return;
+        }
+        if let Err(err) = self.conversation.handoff_out(text).await {
+            debug!("failed to mirror event text to realtime conversation: {err}");
+        }
+    }
+
     async fn maybe_clear_realtime_handoff_for_event(&self, msg: &EventMsg) {
+        if !matches!(msg, EventMsg::TurnComplete(_)) {
+            return;
+        }
+        if let Err(err) = self.conversation.handoff_complete().await {
+            debug!("failed to finalize realtime handoff output: {err}");
+        }
+        self.conversation.clear_active_handoff().await;
+    }
+
+    async fn maybe_clear_realtime_handoff_for_event_owned(self: Arc<Self>, msg: EventMsg) {
         if !matches!(msg, EventMsg::TurnComplete(_)) {
             return;
         }
@@ -3200,6 +3545,78 @@ impl Session {
         rx_approve.await.unwrap_or(ReviewDecision::Abort)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn request_command_approval_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        call_id: String,
+        approval_id: Option<String>,
+        command: Vec<String>,
+        cwd: PathBuf,
+        reason: Option<String>,
+        network_approval_context: Option<NetworkApprovalContext>,
+        proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
+        additional_permissions: Option<PermissionProfile>,
+        available_decisions: Option<Vec<ReviewDecision>>,
+    ) -> ReviewDecision {
+        let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
+        let (tx_approve, rx_approve) = oneshot::channel();
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            active.as_ref().map(|at| Arc::clone(&at.turn_state))
+        };
+        let prev_entry = {
+            match turn_state {
+                Some(turn_state) => {
+                    let mut ts = turn_state.lock().await;
+                    ts.insert_pending_approval(effective_approval_id.clone(), tx_approve)
+                }
+                None => None,
+            }
+        };
+        if prev_entry.is_some() {
+            warn!("Overwriting existing pending approval for call_id: {effective_approval_id}");
+        }
+
+        let parsed_cmd = parse_command(&command);
+        let proposed_network_policy_amendments = network_approval_context.as_ref().map(|context| {
+            vec![
+                NetworkPolicyAmendment {
+                    host: context.host.clone(),
+                    action: NetworkPolicyRuleAction::Allow,
+                },
+                NetworkPolicyAmendment {
+                    host: context.host.clone(),
+                    action: NetworkPolicyRuleAction::Deny,
+                },
+            ]
+        });
+        let available_decisions = available_decisions.unwrap_or_else(|| {
+            ExecApprovalRequestEvent::default_available_decisions(
+                network_approval_context.as_ref(),
+                proposed_execpolicy_amendment.as_ref(),
+                proposed_network_policy_amendments.as_deref(),
+                additional_permissions.as_ref(),
+            )
+        });
+        let event = EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
+            call_id,
+            approval_id,
+            turn_id: turn_context.sub_id.clone(),
+            command,
+            cwd,
+            reason,
+            network_approval_context,
+            proposed_execpolicy_amendment,
+            additional_permissions,
+            proposed_network_policy_amendments,
+            available_decisions: Some(available_decisions),
+            parsed_cmd,
+        });
+        self.clone().send_event_owned(turn_context, event).await;
+        rx_approve.await.unwrap_or(ReviewDecision::Abort)
+    }
+
     pub async fn request_patch_approval(
         &self,
         turn_context: &TurnContext,
@@ -3233,6 +3650,44 @@ impl Session {
             grant_root,
         });
         self.send_event(turn_context, event).await;
+        rx_approve
+    }
+
+    pub async fn request_patch_approval_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        call_id: String,
+        changes: HashMap<PathBuf, FileChange>,
+        reason: Option<String>,
+        grant_root: Option<PathBuf>,
+    ) -> oneshot::Receiver<ReviewDecision> {
+        let (tx_approve, rx_approve) = oneshot::channel();
+        let approval_id = call_id.clone();
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            active.as_ref().map(|at| Arc::clone(&at.turn_state))
+        };
+        let prev_entry = {
+            match turn_state {
+                Some(turn_state) => {
+                    let mut ts = turn_state.lock().await;
+                    ts.insert_pending_approval(approval_id.clone(), tx_approve)
+                }
+                None => None,
+            }
+        };
+        if prev_entry.is_some() {
+            warn!("Overwriting existing pending approval for call_id: {approval_id}");
+        }
+
+        let event = EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+            call_id,
+            turn_id: turn_context.sub_id.clone(),
+            changes,
+            reason,
+            grant_root,
+        });
+        self.clone().send_event_owned(turn_context, event).await;
         rx_approve
     }
 
@@ -3323,6 +3778,39 @@ impl Session {
         rx_response.await.ok()
     }
 
+    pub async fn request_user_input_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        call_id: String,
+        args: RequestUserInputArgs,
+    ) -> Option<RequestUserInputResponse> {
+        let sub_id = turn_context.sub_id.clone();
+        let (tx_response, rx_response) = oneshot::channel();
+        let event_id = sub_id.clone();
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            active.as_ref().map(|at| Arc::clone(&at.turn_state))
+        };
+        let prev_entry = match turn_state {
+            Some(turn_state) => {
+                let mut ts = turn_state.lock().await;
+                ts.insert_pending_user_input(sub_id, tx_response)
+            }
+            None => None,
+        };
+        if prev_entry.is_some() {
+            warn!("Overwriting existing pending user input for sub_id: {event_id}");
+        }
+
+        let event = EventMsg::RequestUserInput(RequestUserInputEvent {
+            call_id,
+            turn_id: turn_context.sub_id.clone(),
+            questions: args.questions,
+        });
+        self.clone().send_event_owned(turn_context, event).await;
+        rx_response.await.ok()
+    }
+
     pub async fn request_mcp_server_elicitation(
         &self,
         turn_context: &TurnContext,
@@ -3399,6 +3887,82 @@ impl Session {
             request,
         });
         self.send_event(turn_context, event).await;
+        rx_response.await.ok()
+    }
+
+    pub async fn request_mcp_server_elicitation_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        request_id: RequestId,
+        params: McpServerElicitationRequestParams,
+    ) -> Option<ElicitationResponse> {
+        let server_name = params.server_name.clone();
+        let request = match params.request {
+            McpServerElicitationRequest::Form {
+                meta,
+                message,
+                requested_schema,
+            } => {
+                let requested_schema = match serde_json::to_value(requested_schema) {
+                    Ok(requested_schema) => requested_schema,
+                    Err(err) => {
+                        warn!(
+                            "failed to serialize MCP elicitation schema for server_name: {server_name}, request_id: {request_id}: {err:#}"
+                        );
+                        return None;
+                    }
+                };
+                codex_protocol::approvals::ElicitationRequest::Form {
+                    meta,
+                    message,
+                    requested_schema,
+                }
+            }
+            McpServerElicitationRequest::Url {
+                meta,
+                message,
+                url,
+                elicitation_id,
+            } => codex_protocol::approvals::ElicitationRequest::Url {
+                meta,
+                message,
+                url,
+                elicitation_id,
+            },
+        };
+
+        let (tx_response, rx_response) = oneshot::channel();
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            active.as_ref().map(|at| Arc::clone(&at.turn_state))
+        };
+        let prev_entry = match turn_state {
+            Some(turn_state) => {
+                let mut ts = turn_state.lock().await;
+                ts.insert_pending_elicitation(server_name.clone(), request_id.clone(), tx_response)
+            }
+            None => None,
+        };
+        if prev_entry.is_some() {
+            warn!(
+                "Overwriting existing pending elicitation for server_name: {server_name}, request_id: {request_id}"
+            );
+        }
+        let id = match request_id {
+            rmcp::model::NumberOrString::String(value) => {
+                codex_protocol::mcp::RequestId::String(value.to_string())
+            }
+            rmcp::model::NumberOrString::Number(value) => {
+                codex_protocol::mcp::RequestId::Integer(value)
+            }
+        };
+        let event = EventMsg::ElicitationRequest(ElicitationRequestEvent {
+            turn_id: params.turn_id,
+            server_name,
+            id,
+            request,
+        });
+        self.clone().send_event_owned(turn_context, event).await;
         rx_response.await.ok()
     }
 
@@ -3565,11 +4129,33 @@ impl Session {
         self.send_raw_response_items(turn_context, items).await;
     }
 
+    pub(crate) async fn record_conversation_items_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        items: Vec<ResponseItem>,
+    ) {
+        self.clone()
+            .record_into_history_owned(items.clone(), turn_context.clone())
+            .await;
+        self.persist_rollout_response_items(items.as_slice()).await;
+        self.send_raw_response_items(turn_context.as_ref(), items.as_slice())
+            .await;
+    }
+
     /// Append ResponseItems to the in-memory conversation history only.
     pub(crate) async fn record_into_history(
         &self,
         items: &[ResponseItem],
         turn_context: &TurnContext,
+    ) {
+        let mut state = self.state.lock().await;
+        state.record_items(items.iter(), turn_context.truncation_policy);
+    }
+
+    pub(crate) async fn record_into_history_owned(
+        self: Arc<Self>,
+        items: Vec<ResponseItem>,
+        turn_context: Arc<TurnContext>,
     ) {
         let mut state = self.state.lock().await;
         state.record_items(items.iter(), turn_context.truncation_policy);
@@ -3900,6 +4486,18 @@ impl Session {
         }
     }
 
+    pub(crate) async fn persist_rollout_items_owned(self: Arc<Self>, items: Vec<RolloutItem>) {
+        let recorder = {
+            let guard = self.services.rollout.lock().await;
+            guard.clone()
+        };
+        if let Some(rec) = recorder
+            && let Err(e) = rec.record_items(items.as_slice()).await
+        {
+            error!("failed to record rollout items: {e:#}");
+        }
+    }
+
     pub(crate) async fn clone_history(&self) -> ContextManager {
         let state = self.state.lock().await;
         state.clone_history()
@@ -3956,6 +4554,15 @@ impl Session {
         // context items. This keeps later runtime diffing aligned with the current turn state.
         let mut state = self.state.lock().await;
         state.set_reference_context_item(Some(turn_context_item));
+    }
+
+    pub(crate) async fn record_context_updates_and_set_reference_context_item_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<UserInput>,
+    ) {
+        self.record_context_updates_and_set_reference_context_item(turn_context.as_ref(), &input)
+            .await;
     }
 
     pub(crate) async fn update_token_usage_info(
@@ -4043,6 +4650,11 @@ impl Session {
         state.set_server_reasoning_included(included);
     }
 
+    pub(crate) async fn set_server_reasoning_included_owned(self: Arc<Self>, included: bool) {
+        let mut state = self.state.lock().await;
+        state.set_server_reasoning_included(included);
+    }
+
     async fn send_token_count_event(&self, turn_context: &TurnContext) {
         let (info, rate_limits) = {
             let state = self.state.lock().await;
@@ -4076,6 +4688,23 @@ impl Session {
         }
     }
 
+    pub(crate) async fn record_response_item_and_emit_turn_item_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        response_item: ResponseItem,
+    ) {
+        self.clone()
+            .record_conversation_items_owned(turn_context.clone(), vec![response_item.clone()])
+            .await;
+
+        if let Some(item) = parse_turn_item(&response_item) {
+            self.emit_turn_item_started(turn_context.as_ref(), &item)
+                .await;
+            self.emit_turn_item_completed(turn_context.as_ref(), item)
+                .await;
+        }
+    }
+
     pub(crate) async fn record_user_prompt_and_emit_turn_item(
         &self,
         turn_context: &TurnContext,
@@ -4093,6 +4722,16 @@ impl Session {
         self.ensure_rollout_materialized().await;
     }
 
+    pub(crate) async fn record_user_prompt_and_emit_turn_item_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<UserInput>,
+        response_item: ResponseItem,
+    ) {
+        self.record_user_prompt_and_emit_turn_item(turn_context.as_ref(), &input, response_item)
+            .await;
+    }
+
     pub(crate) async fn notify_background_event(
         &self,
         turn_context: &TurnContext,
@@ -4102,6 +4741,17 @@ impl Session {
             message: message.into(),
         });
         self.send_event(turn_context, event).await;
+    }
+
+    pub(crate) async fn notify_background_event_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        message: impl Into<String>,
+    ) {
+        let event = EventMsg::BackgroundEvent(BackgroundEventEvent {
+            message: message.into(),
+        });
+        self.send_event_owned(turn_context, event).await;
     }
 
     pub(crate) async fn notify_stream_error(
@@ -4147,6 +4797,15 @@ impl Session {
                 Vec::new(),
                 cancellation_token,
             )
+            .await;
+    }
+
+    async fn maybe_start_ghost_snapshot_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        cancellation_token: CancellationToken,
+    ) {
+        self.maybe_start_ghost_snapshot(turn_context, cancellation_token)
             .await;
     }
 
@@ -4345,11 +5004,14 @@ impl Session {
     }
 
     pub async fn has_pending_input(&self) -> bool {
-        let (has_turn_pending_input, accepts_mailbox_delivery) = {
+        let turn_state = {
             let active = self.active_turn.lock().await;
-            match active.as_ref() {
-                Some(at) => {
-                    let ts = at.turn_state.lock().await;
+            active.as_ref().map(|at| Arc::clone(&at.turn_state))
+        };
+        let (has_turn_pending_input, accepts_mailbox_delivery) = {
+            match turn_state {
+                Some(turn_state) => {
+                    let ts = turn_state.lock().await;
                     (
                         ts.has_pending_input(),
                         ts.accepts_mailbox_delivery_for_current_turn(),
@@ -4357,6 +5019,30 @@ impl Session {
                 }
                 None => (false, true),
             }
+        };
+        if has_turn_pending_input {
+            return true;
+        }
+        if !accepts_mailbox_delivery {
+            return false;
+        }
+        self.mailbox_rx.lock().await.has_pending()
+    }
+
+    pub async fn has_pending_input_owned(self: Arc<Self>) -> bool {
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            active.as_ref().map(|at| Arc::clone(&at.turn_state))
+        };
+        let (has_turn_pending_input, accepts_mailbox_delivery) = match turn_state {
+            Some(turn_state) => {
+                let ts = turn_state.lock().await;
+                (
+                    ts.has_pending_input(),
+                    ts.accepts_mailbox_delivery_for_current_turn(),
+                )
+            }
+            None => (false, true),
         };
         if has_turn_pending_input {
             return true;
@@ -4418,6 +5104,21 @@ impl Session {
             .read()
             .await
             .call_tool(server, tool, arguments, meta)
+            .await
+    }
+
+    pub async fn call_tool_owned(
+        self: Arc<Self>,
+        server: String,
+        tool: String,
+        arguments: Option<serde_json::Value>,
+        meta: Option<serde_json::Value>,
+    ) -> anyhow::Result<CallToolResult> {
+        self.services
+            .mcp_connection_manager
+            .read()
+            .await
+            .call_tool(server.as_str(), tool.as_str(), arguments, meta)
             .await
     }
 
@@ -4572,6 +5273,16 @@ impl Session {
         store_mode: OAuthCredentialsStoreMode,
     ) {
         self.refresh_mcp_servers_inner(turn_context, mcp_servers, store_mode)
+            .await;
+    }
+
+    pub(crate) async fn refresh_mcp_servers_now_owned(
+        self: Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        mcp_servers: HashMap<String, McpServerConfig>,
+        store_mode: OAuthCredentialsStoreMode,
+    ) {
+        self.refresh_mcp_servers_inner(turn_context.as_ref(), mcp_servers, store_mode)
             .await;
     }
 
@@ -6058,7 +6769,7 @@ pub(crate) async fn run_turn(
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> Option<String> {
-    if input.is_empty() && !sess.has_pending_input().await {
+    if input.is_empty() && !sess.clone().has_pending_input_owned().await {
         return None;
     }
 
@@ -6080,9 +6791,13 @@ pub(crate) async fn run_turn(
         client_session.reset_websocket_session();
     }
 
-    let skills_outcome = Some(turn_context.turn_skills.outcome.as_ref());
+    let skills_outcome = Some(turn_context.turn_skills.outcome.clone());
 
-    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref(), &input)
+    sess.clone()
+        .record_context_updates_and_set_reference_context_item_owned(
+            turn_context.clone(),
+            input.clone(),
+        )
         .await;
 
     let loaded_plugins = sess
@@ -6142,14 +6857,19 @@ pub(crate) async fn run_turn(
         .enabled(Feature::SkillEnvVarDependencyPrompt)
     {
         let env_var_dependencies = collect_env_var_dependencies(&mentioned_skills);
-        resolve_skill_dependencies_for_turn(&sess, &turn_context, &env_var_dependencies).await;
+        resolve_skill_dependencies_for_turn_owned(
+            sess.clone(),
+            turn_context.clone(),
+            env_var_dependencies,
+        )
+        .await;
     }
 
-    maybe_prompt_and_install_mcp_dependencies(
-        sess.as_ref(),
-        turn_context.as_ref(),
-        &cancellation_token,
-        &mentioned_skills,
+    maybe_prompt_and_install_mcp_dependencies_owned(
+        sess.clone(),
+        turn_context.clone(),
+        cancellation_token.clone(),
+        mentioned_skills.clone(),
     )
     .await;
 
@@ -6204,7 +6924,7 @@ pub(crate) async fn run_turn(
         })
         .collect::<Vec<_>>();
 
-    if run_pending_session_start_hooks(&sess, &turn_context).await {
+    if run_pending_session_start_hooks_owned(sess.clone(), turn_context.clone()).await {
         return None;
     }
     let additional_contexts = if input.is_empty() {
@@ -6212,22 +6932,27 @@ pub(crate) async fn run_turn(
     } else {
         let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input.clone());
         let response_item: ResponseItem = initial_input_for_turn.clone().into();
-        let user_prompt_submit_outcome = run_user_prompt_submit_hooks(
-            &sess,
-            &turn_context,
+        let user_prompt_submit_outcome = run_user_prompt_submit_hooks_owned(
+            sess.clone(),
+            turn_context.clone(),
             UserMessageItem::new(&input).message(),
         )
         .await;
         if user_prompt_submit_outcome.should_stop {
-            record_additional_contexts(
-                &sess,
-                &turn_context,
+            record_additional_contexts_owned(
+                sess.clone(),
+                turn_context.clone(),
                 user_prompt_submit_outcome.additional_contexts,
             )
             .await;
             return None;
         }
-        sess.record_user_prompt_and_emit_turn_item(turn_context.as_ref(), &input, response_item)
+        sess.clone()
+            .record_user_prompt_and_emit_turn_item_owned(
+                turn_context.clone(),
+                input.clone(),
+                response_item,
+            )
             .await;
         user_prompt_submit_outcome.additional_contexts
     };
@@ -6239,18 +6964,20 @@ pub(crate) async fn run_turn(
             .analytics_events_client
             .track_plugin_used(tracking.clone(), plugin);
     }
-    sess.merge_connector_selection(explicitly_enabled_connectors.clone())
+    sess.clone()
+        .merge_connector_selection_owned(explicitly_enabled_connectors.clone())
         .await;
-    record_additional_contexts(&sess, &turn_context, additional_contexts).await;
+    record_additional_contexts_owned(sess.clone(), turn_context.clone(), additional_contexts).await;
     if !input.is_empty() {
         // Track the previous-turn baseline from the regular user-turn path only so
         // standalone tasks (compact/shell/review/undo) cannot suppress future
         // model/realtime injections.
-        sess.set_previous_turn_settings(Some(PreviousTurnSettings {
-            model: turn_context.model_info.slug.clone(),
-            realtime_active: Some(turn_context.realtime_active),
-        }))
-        .await;
+        sess.clone()
+            .set_previous_turn_settings_owned(Some(PreviousTurnSettings {
+                model: turn_context.model_info.slug.clone(),
+                realtime_active: Some(turn_context.realtime_active),
+            }))
+            .await;
     }
 
     if !skill_items.is_empty() {
@@ -6262,8 +6989,12 @@ pub(crate) async fn run_turn(
             .await;
     }
 
-    let skills_outcome = Some(turn_context.turn_skills.outcome.as_ref());
-    sess.maybe_start_ghost_snapshot(Arc::clone(&turn_context), cancellation_token.child_token())
+    let skills_outcome = Some(turn_context.turn_skills.outcome.clone());
+    sess.clone()
+        .maybe_start_ghost_snapshot_owned(
+            Arc::clone(&turn_context),
+            cancellation_token.child_token(),
+        )
         .await;
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;
@@ -6283,7 +7014,7 @@ pub(crate) async fn run_turn(
     let mut can_drain_pending_input = input.is_empty();
 
     loop {
-        if run_pending_session_start_hooks(&sess, &turn_context).await {
+        if run_pending_session_start_hooks_owned(sess.clone(), turn_context.clone()).await {
             break;
         }
 
@@ -6303,7 +7034,13 @@ pub(crate) async fn run_turn(
         if !pending_input.is_empty() {
             let mut pending_input_iter = pending_input.into_iter();
             while let Some(pending_input_item) = pending_input_iter.next() {
-                match inspect_pending_input(&sess, &turn_context, pending_input_item).await {
+                match inspect_pending_input_owned(
+                    sess.clone(),
+                    turn_context.clone(),
+                    pending_input_item,
+                )
+                .await
+                {
                     PendingInputHookDisposition::Accepted(pending_input) => {
                         accepted_pending_input.push(*pending_input);
                     }
@@ -6325,9 +7062,14 @@ pub(crate) async fn run_turn(
 
         let has_accepted_pending_input = !accepted_pending_input.is_empty();
         for pending_input in accepted_pending_input {
-            record_pending_input(&sess, &turn_context, pending_input).await;
+            record_pending_input_owned(sess.clone(), turn_context.clone(), pending_input).await;
         }
-        record_additional_contexts(&sess, &turn_context, blocked_pending_input_contexts).await;
+        record_additional_contexts_owned(
+            sess.clone(),
+            turn_context.clone(),
+            blocked_pending_input_contexts,
+        )
+        .await;
 
         if blocked_pending_input && !has_accepted_pending_input {
             if requeued_pending_input {
@@ -6359,8 +7101,8 @@ pub(crate) async fn run_turn(
             &mut client_session,
             turn_metadata_header.as_deref(),
             sampling_request_input,
-            &explicitly_enabled_connectors,
-            skills_outcome,
+            explicitly_enabled_connectors.clone(),
+            skills_outcome.clone(),
             &mut server_model_warning_emitted_for_turn,
             cancellation_token.child_token(),
         )
@@ -6830,18 +7572,18 @@ async fn run_sampling_request(
     client_session: &mut ModelClientSession,
     turn_metadata_header: Option<&str>,
     input: Vec<ResponseItem>,
-    explicitly_enabled_connectors: &HashSet<String>,
-    skills_outcome: Option<&SkillLoadOutcome>,
+    explicitly_enabled_connectors: HashSet<String>,
+    skills_outcome: Option<Arc<SkillLoadOutcome>>,
     server_model_warning_emitted_for_turn: &mut bool,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
     let router = built_tools(
-        sess.as_ref(),
-        turn_context.as_ref(),
+        sess.clone(),
+        turn_context.clone(),
         &input,
         explicitly_enabled_connectors,
         skills_outcome,
-        &cancellation_token,
+        cancellation_token.clone(),
     )
     .await?;
 
@@ -6863,8 +7605,8 @@ async fn run_sampling_request(
         .services
         .code_mode_service
         .start_turn_worker(
-            &sess,
-            &turn_context,
+            Arc::clone(&sess),
+            Arc::clone(&turn_context),
             Arc::clone(&router),
             Arc::clone(&turn_diff_tracker),
         )
@@ -6888,7 +7630,7 @@ async fn run_sampling_request(
                 return Ok(output);
             }
             Err(CodexErr::ContextWindowExceeded) => {
-                sess.set_total_tokens_full(&turn_context).await;
+                sess.set_total_tokens_full(turn_context.as_ref()).await;
                 return Err(CodexErr::ContextWindowExceeded);
             }
             Err(CodexErr::UsageLimitReached(e)) => {
@@ -6959,18 +7701,18 @@ async fn run_sampling_request(
 }
 
 pub(crate) async fn built_tools(
-    sess: &Session,
-    turn_context: &TurnContext,
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
     input: &[ResponseItem],
-    explicitly_enabled_connectors: &HashSet<String>,
-    skills_outcome: Option<&SkillLoadOutcome>,
-    cancellation_token: &CancellationToken,
+    explicitly_enabled_connectors: HashSet<String>,
+    skills_outcome: Option<Arc<SkillLoadOutcome>>,
+    cancellation_token: CancellationToken,
 ) -> CodexResult<Arc<ToolRouter>> {
     let mcp_connection_manager = sess.services.mcp_connection_manager.read().await;
     let has_mcp_servers = mcp_connection_manager.has_servers();
     let all_mcp_tools = mcp_connection_manager
         .list_all_tools()
-        .or_cancel(cancellation_token)
+        .or_cancel(&cancellation_token)
         .await?;
     drop(mcp_connection_manager);
     let loaded_plugins = sess
@@ -6978,7 +7720,7 @@ pub(crate) async fn built_tools(
         .plugins_manager
         .plugins_for_config(&turn_context.config);
 
-    let mut effective_explicitly_enabled_connectors = explicitly_enabled_connectors.clone();
+    let mut effective_explicitly_enabled_connectors = explicitly_enabled_connectors;
     effective_explicitly_enabled_connectors.extend(sess.get_connector_selection().await);
 
     let apps_enabled = turn_context.apps_enabled();

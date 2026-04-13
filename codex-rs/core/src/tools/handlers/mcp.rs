@@ -16,41 +16,50 @@ impl ToolHandler for McpHandler {
         ToolKind::Mcp
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
-        let ToolInvocation {
-            session,
-            turn,
-            call_id,
-            payload,
-            ..
-        } = invocation;
+    fn handle(
+        &self,
+        invocation: ToolInvocation,
+    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
+        async move { handle_mcp_invocation(invocation).await }
+    }
+}
 
-        let payload = match payload {
-            ToolPayload::Mcp {
-                server,
-                tool,
-                raw_arguments,
-            } => (server, tool, raw_arguments),
-            _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "mcp handler received unsupported payload".to_string(),
-                ));
-            }
-        };
+async fn handle_mcp_invocation(
+    invocation: ToolInvocation,
+) -> Result<CallToolResult, FunctionCallError> {
+    let ToolInvocation {
+        session,
+        turn,
+        call_id,
+        payload,
+        ..
+    } = invocation;
 
-        let (server, tool, raw_arguments) = payload;
-        let arguments_str = raw_arguments;
-
-        let output = handle_mcp_tool_call(
-            Arc::clone(&session),
-            &turn,
-            call_id.clone(),
+    let payload = match payload {
+        ToolPayload::Mcp {
             server,
             tool,
-            arguments_str,
-        )
-        .await;
+            raw_arguments,
+        } => (server, tool, raw_arguments),
+        _ => {
+            return Err(FunctionCallError::RespondToModel(
+                "mcp handler received unsupported payload".to_string(),
+            ));
+        }
+    };
 
-        Ok(output)
-    }
+    let (server, tool, raw_arguments) = payload;
+    let arguments_str = raw_arguments;
+
+    let output = handle_mcp_tool_call(
+        Arc::clone(&session),
+        turn,
+        call_id.clone(),
+        server,
+        tool,
+        arguments_str,
+    )
+    .await;
+
+    Ok(output)
 }

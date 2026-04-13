@@ -8,6 +8,7 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use codex_features::Feature;
+use codex_models_manager::manager::ModelsManager;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
@@ -25,6 +26,7 @@ use codex_protocol::user_input::UserInput;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Minimum wait timeout to prevent tight polling loops from burning CPU.
 pub(crate) const MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
@@ -134,11 +136,11 @@ pub(crate) fn collab_agent_error(agent_id: ThreadId, err: CodexErr) -> FunctionC
     }
 }
 
-pub(crate) fn thread_spawn_source(
+pub(crate) fn thread_spawn_source_owned(
     parent_thread_id: ThreadId,
-    parent_session_source: &SessionSource,
+    parent_session_source: SessionSource,
     depth: i32,
-    agent_role: Option<&str>,
+    agent_role: Option<String>,
     task_name: Option<String>,
 ) -> Result<SessionSource, FunctionCallError> {
     let agent_path = task_name
@@ -156,7 +158,7 @@ pub(crate) fn thread_spawn_source(
         depth,
         agent_path,
         agent_nickname: None,
-        agent_role: agent_role.map(str::to_string),
+        agent_role,
     }))
 }
 
@@ -201,6 +203,7 @@ pub(crate) fn parse_collab_input(
 /// approval policy, sandbox, and cwd. Role-specific overrides are layered after this step;
 /// skipping this helper and cloning stale config state directly can send the child agent out with
 /// the wrong provider or runtime policy.
+#[cfg(test)]
 pub(crate) fn build_agent_spawn_config(
     base_instructions: &BaseInstructions,
     turn: &TurnContext,
@@ -210,6 +213,16 @@ pub(crate) fn build_agent_spawn_config(
     Ok(config)
 }
 
+pub(crate) fn build_agent_spawn_config_owned(
+    base_instructions: BaseInstructions,
+    turn: Arc<TurnContext>,
+) -> Result<Config, FunctionCallError> {
+    let mut config = build_agent_shared_config_owned(turn)?;
+    config.base_instructions = Some(base_instructions.text);
+    Ok(config)
+}
+
+#[cfg(test)]
 pub(crate) fn build_agent_resume_config(
     turn: &TurnContext,
     child_depth: i32,
@@ -221,28 +234,42 @@ pub(crate) fn build_agent_resume_config(
     Ok(config)
 }
 
+pub(crate) fn build_agent_resume_config_owned(
+    turn: Arc<TurnContext>,
+    child_depth: i32,
+) -> Result<Config, FunctionCallError> {
+    let mut config = build_agent_shared_config_owned(turn)?;
+    apply_spawn_agent_overrides(&mut config, child_depth);
+    config.base_instructions = None;
+    Ok(config)
+}
+
 pub(crate) async fn build_spawn_agent_config_for_backend(
-    session: &Session,
-    turn: &TurnContext,
-    backend_id: Option<&str>,
-    requested_model: Option<&str>,
+    session: Arc<Session>,
+    turn: Arc<TurnContext>,
+    backend_id: Option<String>,
+    requested_model: Option<String>,
     requested_reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<(Config, ResolvedSpawnedAgentBackend), FunctionCallError> {
     let resolved_backend =
-        crate::agent::backend::resolve_spawned_agent_backend(&turn.config, backend_id)
+        crate::agent::backend::resolve_spawned_agent_backend(&turn.config, backend_id.as_deref())
             .map_err(FunctionCallError::RespondToModel)?;
 
-    let mut config = build_agent_spawn_config(&session.get_base_instructions().await, turn)?;
-    config.agent_backend_id = crate::agent::backend::normalize_backend_id(backend_id);
+    let base_instructions = session.clone().get_base_instructions_owned().await;
+    let current_model_slug = turn.model_info.slug.clone();
+    let current_supported_reasoning_levels = turn.model_info.supported_reasoning_levels.clone();
+    let mut config = build_agent_spawn_config_owned(base_instructions, turn.clone())?;
+    config.agent_backend_id = crate::agent::backend::normalize_backend_id(backend_id.as_deref());
 
     match resolved_backend.kind {
         crate::agent::backend::SpawnedAgentBackendKind::Codex => {
-            apply_requested_spawn_agent_model_overrides(
-                session,
-                turn,
-                &mut config,
-                requested_model,
+            config = apply_requested_spawn_agent_model_overrides(
+                session.clone(),
+                config,
+                requested_model.clone(),
                 requested_reasoning_effort,
+                current_model_slug,
+                current_supported_reasoning_levels,
             )
             .await?;
         }
@@ -250,7 +277,7 @@ pub(crate) async fn build_spawn_agent_config_for_backend(
         | crate::agent::backend::SpawnedAgentBackendKind::Command => {
             apply_requested_external_backend_overrides(
                 &mut config,
-                requested_model,
+                requested_model.as_deref(),
                 requested_reasoning_effort,
                 &resolved_backend,
             )?;
@@ -260,6 +287,7 @@ pub(crate) async fn build_spawn_agent_config_for_backend(
     Ok((config, resolved_backend))
 }
 
+#[cfg(test)]
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallError> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
@@ -274,13 +302,54 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallE
     Ok(config)
 }
 
+fn build_agent_shared_config_owned(turn: Arc<TurnContext>) -> Result<Config, FunctionCallError> {
+    let base_config = turn.config.clone();
+    let mut config = (*base_config).clone();
+    config.model = Some(turn.model_info.slug.clone());
+    config.model_provider = turn.provider.clone();
+    config.model_reasoning_effort = turn.reasoning_effort;
+    config.model_reasoning_summary = Some(turn.reasoning_summary);
+    config.developer_instructions = turn.developer_instructions.clone();
+    config.compact_prompt = turn.compact_prompt.clone();
+    apply_spawn_agent_runtime_overrides_owned(&mut config, turn)?;
+
+    Ok(config)
+}
+
 /// Copies runtime-only turn state onto a child config before it is handed to `AgentControl`.
 ///
 /// These values are chosen by the live turn rather than persisted config, so leaving them stale
 /// can make a child agent disagree with its parent about approval policy, cwd, or sandboxing.
+#[cfg(test)]
 pub(crate) fn apply_spawn_agent_runtime_overrides(
     config: &mut Config,
     turn: &TurnContext,
+) -> Result<(), FunctionCallError> {
+    config
+        .permissions
+        .approval_policy
+        .set(turn.approval_policy.value())
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("approval_policy is invalid: {err}"))
+        })?;
+    config.permissions.shell_environment_policy = turn.shell_environment_policy.clone();
+    config.codex_linux_sandbox_exe = turn.codex_linux_sandbox_exe.clone();
+    config.cwd = turn.cwd.clone();
+    config
+        .permissions
+        .sandbox_policy
+        .set(turn.sandbox_policy.get().clone())
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("sandbox_policy is invalid: {err}"))
+        })?;
+    config.permissions.file_system_sandbox_policy = turn.file_system_sandbox_policy.clone();
+    config.permissions.network_sandbox_policy = turn.network_sandbox_policy;
+    Ok(())
+}
+
+pub(crate) fn apply_spawn_agent_runtime_overrides_owned(
+    config: &mut Config,
+    turn: Arc<TurnContext>,
 ) -> Result<(), FunctionCallError> {
     config
         .permissions
@@ -312,28 +381,33 @@ pub(crate) fn apply_spawn_agent_overrides(config: &mut Config, child_depth: i32)
 }
 
 pub(crate) async fn apply_requested_spawn_agent_model_overrides(
-    session: &Session,
-    turn: &TurnContext,
-    config: &mut Config,
-    requested_model: Option<&str>,
+    session: Arc<Session>,
+    mut config: Config,
+    requested_model: Option<String>,
     requested_reasoning_effort: Option<ReasoningEffort>,
-) -> Result<(), FunctionCallError> {
+    current_model_slug: String,
+    current_supported_reasoning_levels: Vec<ReasoningEffortPreset>,
+) -> Result<Config, FunctionCallError> {
     if requested_model.is_none() && requested_reasoning_effort.is_none() {
-        return Ok(());
+        return Ok(config);
     }
 
     if let Some(requested_model) = requested_model {
-        let available_models = session
-            .services
-            .models_manager
-            .list_models(RefreshStrategy::Offline)
-            .await;
-        let selected_model_name = find_spawn_agent_model_name(&available_models, requested_model)?;
-        let selected_model_info = session
-            .services
-            .models_manager
-            .get_model_info(&selected_model_name, &config.to_models_manager_config())
-            .await;
+        let models_manager = Arc::clone(&session.services.models_manager);
+        let available_models = list_models_owned(models_manager.clone()).await;
+        let selected_model_name =
+            find_spawn_agent_model_name(&available_models, requested_model.as_str())?;
+        let selected_model_info = {
+            let models_manager = models_manager.clone();
+            let selected_model_name = selected_model_name.clone();
+            let models_manager_config = config.to_models_manager_config();
+            async move {
+                models_manager
+                    .get_model_info(selected_model_name.as_str(), &models_manager_config)
+                    .await
+            }
+            .await
+        };
 
         config.model = Some(selected_model_name.clone());
         if let Some(reasoning_effort) = requested_reasoning_effort {
@@ -347,19 +421,25 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             config.model_reasoning_effort = selected_model_info.default_reasoning_level;
         }
 
-        return Ok(());
+        return Ok(config);
     }
 
     if let Some(reasoning_effort) = requested_reasoning_effort {
         validate_spawn_agent_reasoning_effort(
-            &turn.model_info.slug,
-            &turn.model_info.supported_reasoning_levels,
+            &current_model_slug,
+            &current_supported_reasoning_levels,
             reasoning_effort,
         )?;
         config.model_reasoning_effort = Some(reasoning_effort);
     }
 
-    Ok(())
+    Ok(config)
+}
+
+async fn list_models_owned(
+    models_manager: Arc<ModelsManager>,
+) -> Vec<codex_protocol::openai_models::ModelPreset> {
+    models_manager.list_models(RefreshStrategy::Offline).await
 }
 
 pub(crate) fn apply_requested_external_backend_overrides(

@@ -53,16 +53,16 @@ pub(crate) fn skills_load_input_from_config(
     )
 }
 
-pub(crate) async fn resolve_skill_dependencies_for_turn(
-    sess: &Arc<Session>,
-    turn_context: &Arc<TurnContext>,
-    dependencies: &[SkillDependencyInfo],
+pub(crate) async fn resolve_skill_dependencies_for_turn_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    dependencies: Vec<SkillDependencyInfo>,
 ) {
     if dependencies.is_empty() {
         return;
     }
 
-    let existing_env = sess.dependency_env().await;
+    let existing_env = sess.clone().dependency_env().await;
     let mut loaded_values = HashMap::new();
     let mut missing = Vec::new();
     let mut seen_names = HashSet::new();
@@ -77,28 +77,28 @@ pub(crate) async fn resolve_skill_dependencies_for_turn(
                 loaded_values.insert(name.clone(), value);
             }
             Err(env::VarError::NotPresent) => {
-                missing.push(dependency.clone());
+                missing.push(dependency);
             }
             Err(err) => {
                 warn!("failed to read env var {name}: {err}");
-                missing.push(dependency.clone());
+                missing.push(dependency);
             }
         }
     }
 
     if !loaded_values.is_empty() {
-        sess.set_dependency_env(loaded_values).await;
+        sess.clone().set_dependency_env(loaded_values).await;
     }
 
     if !missing.is_empty() {
-        request_skill_dependencies(sess, turn_context, &missing).await;
+        request_skill_dependencies_owned(sess, turn_context, missing).await;
     }
 }
 
-async fn request_skill_dependencies(
-    sess: &Arc<Session>,
-    turn_context: &Arc<TurnContext>,
-    dependencies: &[SkillDependencyInfo],
+async fn request_skill_dependencies_owned(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    dependencies: Vec<SkillDependencyInfo>,
 ) {
     let questions = dependencies
         .iter()
@@ -134,9 +134,10 @@ async fn request_skill_dependencies(
     }
 
     let response = sess
-        .request_user_input(
+        .clone()
+        .request_user_input_owned(
             turn_context,
-            format!("skill-deps-{}", turn_context.sub_id),
+            format!("skill-deps-{}", dependencies[0].name),
             RequestUserInputArgs { questions },
         )
         .await

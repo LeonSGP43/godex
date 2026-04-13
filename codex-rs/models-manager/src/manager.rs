@@ -251,6 +251,19 @@ impl ModelsManager {
         self.build_available_models(remote_models)
     }
 
+    #[instrument(
+        level = "info",
+        skip(self),
+        fields(refresh_strategy = %refresh_strategy)
+    )]
+    pub async fn list_models_owned(self: Arc<Self>, refresh_strategy: RefreshStrategy) -> Vec<ModelPreset> {
+        if let Err(err) = self.refresh_available_models(refresh_strategy).await {
+            error!("failed to refresh available models: {err}");
+        }
+        let remote_models = self.get_remote_models().await;
+        self.build_available_models(remote_models)
+    }
+
     /// List collaboration mode presets.
     ///
     /// Returns a static set of presets seeded with the configured model.
@@ -307,12 +320,51 @@ impl ModelsManager {
             .unwrap_or_default()
     }
 
+    #[instrument(
+        level = "info",
+        skip(self, model),
+        fields(
+            model.provided = model.is_some(),
+            refresh_strategy = %refresh_strategy
+        )
+    )]
+    pub async fn get_default_model_owned(
+        self: Arc<Self>,
+        model: Option<String>,
+        refresh_strategy: RefreshStrategy,
+    ) -> String {
+        if let Some(model) = model {
+            return model;
+        }
+        if let Err(err) = self.refresh_available_models(refresh_strategy).await {
+            error!("failed to refresh available models: {err}");
+        }
+        let remote_models = self.get_remote_models().await;
+        let available = self.build_available_models(remote_models);
+        available
+            .iter()
+            .find(|model| model.is_default)
+            .or_else(|| available.first())
+            .map(|model| model.model.clone())
+            .unwrap_or_default()
+    }
+
     // todo(aibrahim): look if we can tighten it to pub(crate)
     /// Look up model metadata, applying remote overrides and config adjustments.
     #[instrument(level = "info", skip(self, config), fields(model = model))]
     pub async fn get_model_info(&self, model: &str, config: &ModelsManagerConfig) -> ModelInfo {
         let remote_models = self.get_remote_models().await;
         Self::construct_model_info_from_candidates(model, &remote_models, config)
+    }
+
+    #[instrument(level = "info", skip(self, config), fields(model = model))]
+    pub async fn get_model_info_owned(
+        self: Arc<Self>,
+        model: String,
+        config: ModelsManagerConfig,
+    ) -> ModelInfo {
+        let remote_models = self.get_remote_models().await;
+        Self::construct_model_info_from_candidates(model.as_str(), &remote_models, &config)
     }
 
     fn find_model_by_longest_prefix(model: &str, candidates: &[ModelInfo]) -> Option<ModelInfo> {
