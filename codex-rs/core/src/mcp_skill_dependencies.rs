@@ -95,7 +95,8 @@ pub(crate) async fn maybe_prompt_and_install_mcp_dependencies_owned(
     let installed = sess
         .services
         .mcp_manager
-        .configured_servers(config.as_ref());
+        .configured_servers(config.as_ref())
+        .await;
     let missing = collect_missing_mcp_dependencies(&mentioned_skills, &installed);
     if missing.is_empty() {
         return;
@@ -280,7 +281,7 @@ pub(crate) async fn maybe_install_mcp_dependencies_owned(
     }
 
     let codex_home = config.codex_home.clone();
-    let installed = sess.services.mcp_manager.configured_servers(&config);
+    let installed = sess.services.mcp_manager.configured_servers(&config).await;
     let missing = collect_missing_mcp_dependencies(&mentioned_skills, &installed);
     if missing.is_empty() {
         return;
@@ -391,7 +392,8 @@ pub(crate) async fn maybe_install_mcp_dependencies_owned(
     let mut refresh_servers = sess
         .services
         .mcp_manager
-        .effective_servers(&config, auth.as_ref());
+        .effective_servers(&config, auth.as_ref())
+        .await;
     for (name, server_config) in &servers {
         refresh_servers
             .entry(name.clone())

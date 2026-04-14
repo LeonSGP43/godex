@@ -1099,11 +1099,9 @@ impl ThreadManagerState {
         let models_manager = Arc::clone(&self.models_manager);
         let environment_manager = Arc::clone(&self.environment_manager);
         let mcp_manager = Arc::clone(&self.mcp_manager);
-        let watch_registration = skills_watcher.register_config(
-            &config,
-            skills_manager.as_ref(),
-            plugins_manager.as_ref(),
-        );
+        let watch_registration = skills_watcher
+            .register_config(&config, skills_manager.as_ref(), plugins_manager.as_ref())
+            .await;
         let analytics_events_client = self.analytics_events_client.clone();
         let CodexSpawnOk {
             codex, thread_id, ..
