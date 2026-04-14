@@ -196,7 +196,7 @@ This repository is synced through official upstream release `rust-v0.120.0` and 
 <!-- END GODEX UPSTREAM BASELINE -->
 
 - Daily-use local runtime channel: the published npm package `@leonsgp43/godex`.
-- Current fork release line in this repository: `0.2.20`.
+- Current fork release line in this repository: `0.2.21`.
 - GitHub Release: used as the fork's public release signal and release history.
 - Source install: keep it for maintainer validation, development, and release preparation, not as the normal daily-use distribution path.
 

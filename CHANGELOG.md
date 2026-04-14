@@ -4,6 +4,16 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-04-14
+
+### Fixed
+
+- What changed: fixed the TUI release-build regression in `codex-rs/tui/src/updates.rs` by converting the `codex_home.join("updates.json")` result back into a `PathBuf`, which matches the function contract after upstream typed `codex_home` as an absolute-path wrapper.
+- Why: the initial `0.2.20` release publication attempt exposed this mismatch only during the full release build, which blocked artifact packaging and npm publication even though earlier compile checks had passed.
+- Impact: the release pipeline can build `codex-tui` and `godex` cleanly again, so `0.2.21` becomes the first fully publishable version on top of the new `rust-v0.120.0` upstream baseline.
+- Verification: `cargo check -p codex-tui --manifest-path codex-rs/Cargo.toml`, `cargo check -p codex-cli --bin godex --manifest-path codex-rs/Cargo.toml`, `bash scripts/godex-maintain.sh release-preflight`
+- Files: `codex-rs/tui/src/updates.rs`, `VERSION`, `codex-rs/Cargo.toml`, `codex-rs/Cargo.lock`, `README.md`, `CHANGELOG.md`
+
 ## [0.2.20] - 2026-04-14
 
 ### Changed
