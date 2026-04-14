@@ -188,14 +188,15 @@ Detailed developer documentation:
 ## Current Install Status
 
 <!-- BEGIN GODEX UPSTREAM BASELINE -->
-This release line is now synced through official upstream `rust-v0.118.0`.
+This repository is synced through official upstream release `rust-v0.118.0` and merged upstream `main` commit `d9a385ac8c2ff91b3180cddd3c973095eafb2d88`.
 
-- Upstream baseline tag: `rust-v0.118.0`
-- Upstream baseline commit: `b630ce9a4e754d35a1f33e4366ba638d18626142`
+- Upstream release baseline tag: `rust-v0.118.0`
+- Upstream release baseline commit: `b630ce9a4e754d35a1f33e4366ba638d18626142`
+- Upstream merged main commit: `d9a385ac8c2ff91b3180cddd3c973095eafb2d88`
 <!-- END GODEX UPSTREAM BASELINE -->
 
 - Daily-use local runtime channel: the published npm package `@leonsgp43/godex`.
-- Current fork release line in this repository: `0.2.18`.
+- Current fork release line in this repository: `0.2.19`.
 - GitHub Release: used as the fork's public release signal and release history.
 - Source install: keep it for maintainer validation, development, and release preparation, not as the normal daily-use distribution path.
 
