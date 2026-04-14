@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- What changed: added committed upstream-baseline metadata files (`UPSTREAM_VERSION`, `UPSTREAM_COMMIT`), added machine-readable baseline blocks to the README and fork manifest, and taught the maintainer scripts to refresh and validate those values automatically.
+- Why: the fork needs a durable, machine-checkable record of which official Codex baseline it currently tracks so release/push decisions do not depend on human memory.
+- Impact: `release-preflight` now hard-fails when the recorded upstream tag/commit drift across repo metadata, `sync` refreshes the baseline automatically after merging upstream, and release automation refreshes the metadata before push.
+- Verification: `bash scripts/godex-maintain.sh refresh-upstream-metadata --dry-run`, `bash scripts/godex-maintain.sh release-preflight`, `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py status`
+- Files: `UPSTREAM_VERSION`, `UPSTREAM_COMMIT`, `README.md`, `docs/godex-fork-manifest.md`, `scripts/godex-maintain.sh`, `.codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`, `docs/godex-maintenance.md`, `docs/godex-fork-guidelines.md`
+
 ## [0.2.18] - 2026-04-13
 
 ### Changed

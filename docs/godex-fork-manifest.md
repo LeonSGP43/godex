@@ -13,6 +13,17 @@ Use it together with:
 Anything not listed here should be treated as upstream-owned behavior by
 default during sync and conflict resolution.
 
+## Current Upstream Baseline
+
+<!-- BEGIN GODEX UPSTREAM BASELINE -->
+- Upstream baseline tag: `rust-v0.118.0`
+- Upstream baseline commit: `b630ce9a4e754d35a1f33e4366ba638d18626142`
+<!-- END GODEX UPSTREAM BASELINE -->
+
+These values must stay aligned with the root-level `UPSTREAM_VERSION` and
+`UPSTREAM_COMMIT` files. `bash scripts/godex-maintain.sh release-preflight`
+blocks pushes when they drift.
+
 ## Lifecycle Classes
 
 - `durable`: intentional long-lived fork behavior we expect to keep unless

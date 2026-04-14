@@ -8,6 +8,12 @@ WORKSPACE_ROOT="$REPO_ROOT/codex-rs"
 UPSTREAM_REMOTE="upstream"
 UPSTREAM_BRANCH="main"
 TRACKING_BRANCH="upstream-main"
+UPSTREAM_VERSION_FILE="$REPO_ROOT/UPSTREAM_VERSION"
+UPSTREAM_COMMIT_FILE="$REPO_ROOT/UPSTREAM_COMMIT"
+README_FILE="$REPO_ROOT/README.md"
+FORK_MANIFEST_FILE="$REPO_ROOT/docs/godex-fork-manifest.md"
+BASELINE_BLOCK_START="<!-- BEGIN GODEX UPSTREAM BASELINE -->"
+BASELINE_BLOCK_END="<!-- END GODEX UPSTREAM BASELINE -->"
 
 CHECK_CMD=(cargo check -p codex-cli --bin godex --manifest-path "$WORKSPACE_ROOT/Cargo.toml")
 BUILD_CMD=(cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml")
@@ -21,9 +27,11 @@ Commands:
   status                Show fork maintenance status for this repo
   review-scope [range]  Show which fork patch groups and hot files a diff range touches
   sync [options]        Fetch official Codex, refresh upstream-main, merge into current branch, and rebuild
+  refresh-upstream-metadata
+                        Refresh committed upstream baseline metadata files and docs
   check                 Run cargo check for the godex CLI
   smoke                 Verify a runnable godex binary reports its version
-  release-preflight     Validate VERSION/CHANGELOG alignment and main push readiness
+  release-preflight     Validate VERSION/CHANGELOG and upstream baseline metadata
 
 Sync options:
   --dry-run             Print planned commands without executing them
@@ -398,6 +406,225 @@ ensure_clean_worktree() {
   fi
 }
 
+ensure_marker_present() {
+  local file="$1"
+  local marker="$2"
+  rg -Fq "$marker" "$file" || die "missing marker [$marker] in $file"
+}
+
+read_trimmed_file() {
+  local file="$1"
+  [[ -f "$file" ]] || die "missing file: $file"
+  tr -d '\n' < "$file"
+}
+
+set_file_content_if_changed() {
+  local file="$1"
+  local content="$2"
+  local existing=""
+  if [[ -f "$file" ]]; then
+    existing="$(cat "$file")"
+  fi
+  if [[ "$existing" == "$content" ]]; then
+    return
+  fi
+  printf '%s\n' "$content" > "$file"
+}
+
+extract_doc_baseline_value() {
+  local file="$1"
+  local label="$2"
+  awk -v label="$label" '
+    BEGIN {
+      tick = sprintf("%c", 96)
+      prefix = "- " label ": " tick
+    }
+    index($0, prefix) == 1 {
+      value = substr($0, length(prefix) + 1)
+      sub(tick "$", "", value)
+      print value
+      exit
+    }
+  ' "$file"
+}
+
+replace_marked_block() {
+  local file="$1"
+  local start_marker="$2"
+  local end_marker="$3"
+  local content="$4"
+  local tmp
+  tmp="$(mktemp)"
+  local inside=0
+  local saw_start=0
+  local saw_end=0
+  local line
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$start_marker" ]]; then
+      printf '%s\n' "$line" >> "$tmp"
+      printf '%s\n' "$content" >> "$tmp"
+      inside=1
+      saw_start=1
+      continue
+    fi
+    if [[ "$line" == "$end_marker" ]]; then
+      inside=0
+      saw_end=1
+      printf '%s\n' "$line" >> "$tmp"
+      continue
+    fi
+    if [[ "$inside" -eq 0 ]]; then
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+
+  if [[ "$saw_start" -ne 1 || "$saw_end" -ne 1 ]]; then
+    rm -f "$tmp"
+    die "failed to update marked block in $file"
+  fi
+  mv "$tmp" "$file"
+}
+
+resolve_upstream_baseline_tag() {
+  local merged_filter=()
+  if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"; then
+    merged_filter+=(--merged "refs/remotes/$UPSTREAM_REMOTE/$UPSTREAM_BRANCH")
+  fi
+
+  git -C "$REPO_ROOT" tag --merged HEAD "${merged_filter[@]}" --list 'rust-v*' --sort=-version:refname | head -n 1
+}
+
+resolve_upstream_baseline_commit() {
+  local tag="$1"
+  git -C "$REPO_ROOT" rev-list -n 1 "$tag"
+}
+
+render_readme_upstream_baseline_block() {
+  local tag="$1"
+  local commit="$2"
+  cat <<EOF
+This release line is now synced through official upstream \`$tag\`.
+
+- Upstream baseline tag: \`$tag\`
+- Upstream baseline commit: \`$commit\`
+EOF
+}
+
+render_manifest_upstream_baseline_block() {
+  local tag="$1"
+  local commit="$2"
+  cat <<EOF
+- Upstream baseline tag: \`$tag\`
+- Upstream baseline commit: \`$commit\`
+EOF
+}
+
+refresh_upstream_metadata() {
+  ensure_repo
+
+  local dry_run=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)
+        dry_run=1
+        ;;
+      *)
+        die "unknown refresh-upstream-metadata option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  ensure_marker_present "$README_FILE" "$BASELINE_BLOCK_START"
+  ensure_marker_present "$README_FILE" "$BASELINE_BLOCK_END"
+  ensure_marker_present "$FORK_MANIFEST_FILE" "$BASELINE_BLOCK_START"
+  ensure_marker_present "$FORK_MANIFEST_FILE" "$BASELINE_BLOCK_END"
+
+  local baseline_tag
+  baseline_tag="$(resolve_upstream_baseline_tag)"
+  [[ -n "$baseline_tag" ]] || die "failed to resolve upstream baseline tag from merged rust-v* tags"
+
+  local baseline_commit
+  baseline_commit="$(resolve_upstream_baseline_commit "$baseline_tag")"
+  [[ -n "$baseline_commit" ]] || die "failed to resolve commit for upstream baseline tag: $baseline_tag"
+
+  local readme_block manifest_block
+  readme_block="$(render_readme_upstream_baseline_block "$baseline_tag" "$baseline_commit")"
+  manifest_block="$(render_manifest_upstream_baseline_block "$baseline_tag" "$baseline_commit")"
+
+  step "Refreshing upstream baseline metadata"
+  printf 'upstream_version: %s\n' "$baseline_tag"
+  printf 'upstream_commit: %s\n' "$baseline_commit"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf 'would_write: %s\n' "$UPSTREAM_VERSION_FILE"
+    printf 'would_write: %s\n' "$UPSTREAM_COMMIT_FILE"
+    printf 'would_update: %s\n' "$README_FILE"
+    printf 'would_update: %s\n' "$FORK_MANIFEST_FILE"
+    return
+  fi
+
+  set_file_content_if_changed "$UPSTREAM_VERSION_FILE" "$baseline_tag"
+  set_file_content_if_changed "$UPSTREAM_COMMIT_FILE" "$baseline_commit"
+  replace_marked_block "$README_FILE" "$BASELINE_BLOCK_START" "$BASELINE_BLOCK_END" "$readme_block"
+  replace_marked_block "$FORK_MANIFEST_FILE" "$BASELINE_BLOCK_START" "$BASELINE_BLOCK_END" "$manifest_block"
+}
+
+validate_upstream_metadata_consistency() {
+  ensure_repo
+
+  [[ -f "$UPSTREAM_VERSION_FILE" ]] || die "missing UPSTREAM_VERSION"
+  [[ -f "$UPSTREAM_COMMIT_FILE" ]] || die "missing UPSTREAM_COMMIT"
+  [[ -f "$README_FILE" ]] || die "missing README.md"
+  [[ -f "$FORK_MANIFEST_FILE" ]] || die "missing docs/godex-fork-manifest.md"
+
+  local upstream_version upstream_commit
+  upstream_version="$(read_trimmed_file "$UPSTREAM_VERSION_FILE")"
+  upstream_commit="$(read_trimmed_file "$UPSTREAM_COMMIT_FILE")"
+
+  if ! printf '%s\n' "$upstream_version" | rg -qx 'rust-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?'; then
+    die "UPSTREAM_VERSION is not a rust-v* SemVer tag: $upstream_version"
+  fi
+  if ! printf '%s\n' "$upstream_commit" | rg -qx '[0-9a-f]{40}'; then
+    die "UPSTREAM_COMMIT is not a full git commit hash: $upstream_commit"
+  fi
+
+  local resolved_commit
+  resolved_commit="$(git -C "$REPO_ROOT" rev-parse "$upstream_version^{commit}" 2>/dev/null || true)"
+  [[ -n "$resolved_commit" ]] || die "UPSTREAM_VERSION does not resolve locally: $upstream_version"
+  if [[ "$resolved_commit" != "$upstream_commit" ]]; then
+    die "UPSTREAM_COMMIT ($upstream_commit) does not match $upstream_version ($resolved_commit)"
+  fi
+
+  local readme_version readme_commit manifest_version manifest_commit
+  readme_version="$(extract_doc_baseline_value "$README_FILE" 'Upstream baseline tag')"
+  readme_commit="$(extract_doc_baseline_value "$README_FILE" 'Upstream baseline commit')"
+  manifest_version="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream baseline tag')"
+  manifest_commit="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream baseline commit')"
+
+  [[ -n "$readme_version" ]] || die "README.md missing upstream baseline tag"
+  [[ -n "$readme_commit" ]] || die "README.md missing upstream baseline commit"
+  [[ -n "$manifest_version" ]] || die "docs/godex-fork-manifest.md missing upstream baseline tag"
+  [[ -n "$manifest_commit" ]] || die "docs/godex-fork-manifest.md missing upstream baseline commit"
+
+  if [[ "$readme_version" != "$upstream_version" ]]; then
+    die "README.md upstream baseline tag ($readme_version) does not match UPSTREAM_VERSION ($upstream_version)"
+  fi
+  if [[ "$readme_commit" != "$upstream_commit" ]]; then
+    die "README.md upstream baseline commit ($readme_commit) does not match UPSTREAM_COMMIT ($upstream_commit)"
+  fi
+  if [[ "$manifest_version" != "$upstream_version" ]]; then
+    die "docs/godex-fork-manifest.md upstream baseline tag ($manifest_version) does not match UPSTREAM_VERSION ($upstream_version)"
+  fi
+  if [[ "$manifest_commit" != "$upstream_commit" ]]; then
+    die "docs/godex-fork-manifest.md upstream baseline commit ($manifest_commit) does not match UPSTREAM_COMMIT ($upstream_commit)"
+  fi
+
+  rg -Fq "This release line is now synced through official upstream \`$upstream_version\`." "$README_FILE" \
+    || die "README.md summary line does not match UPSTREAM_VERSION ($upstream_version)"
+}
+
 ensure_tracking_branch() {
   local dry_run="$1"
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$TRACKING_BRANCH"; then
@@ -507,6 +734,14 @@ sync_upstream() {
   merge_cmd+=("$UPSTREAM_REMOTE/$UPSTREAM_BRANCH")
   run_or_print "$dry_run" "${merge_cmd[@]}"
 
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf '> '
+    printf '%q ' bash "$SCRIPT_DIR/godex-maintain.sh" refresh-upstream-metadata
+    printf '\n'
+  else
+    refresh_upstream_metadata
+  fi
+
   if [[ "$no_build" -eq 0 ]]; then
     run_or_print "$dry_run" "${BUILD_CMD[@]}"
   fi
@@ -546,6 +781,7 @@ run_release_preflight() {
 
   rg -q '^## \[Unreleased\]' "$REPO_ROOT/CHANGELOG.md" || die "CHANGELOG.md missing [Unreleased]"
   rg -q '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' "$REPO_ROOT/CHANGELOG.md" || die "CHANGELOG.md missing released version heading"
+  validate_upstream_metadata_consistency
 
   local workspace_version
   workspace_version="$(
@@ -601,6 +837,8 @@ run_release_preflight() {
 
   step "Release preflight passed"
   printf 'version: %s\n' "$version"
+  printf 'upstream_version: %s\n' "$(read_trimmed_file "$UPSTREAM_VERSION_FILE")"
+  printf 'upstream_commit: %s\n' "$(read_trimmed_file "$UPSTREAM_COMMIT_FILE")"
 }
 
 main() {
@@ -618,6 +856,9 @@ main() {
       ;;
     sync)
       sync_upstream "$@"
+      ;;
+    refresh-upstream-metadata)
+      refresh_upstream_metadata "$@"
       ;;
     check)
       run_check

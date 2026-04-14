@@ -150,9 +150,10 @@ After sync:
 
 1. run acceptance gates
 2. review the changed fork touchpoints
-3. update changelog if the fork behavior changed
-4. if `main` will be pushed, bump the fork version and promote release notes out of `Unreleased`
-5. merge back to `main` only after validation passes
+3. refresh `UPSTREAM_VERSION`, `UPSTREAM_COMMIT`, and the matching README/manifest baseline block
+4. update changelog if the fork behavior changed
+5. if `main` will be pushed, bump the fork version and promote release notes out of `Unreleased`
+6. merge back to `main` only after validation passes
 
 ## Acceptance Gates
 
@@ -172,6 +173,9 @@ Push rule for `main`:
 - `codex-rs/Cargo.toml` must match `VERSION`
 - `CHANGELOG.md` must contain `## [<version>]` for that version
 - `## [Unreleased]` must be empty for the release being pushed
+- `UPSTREAM_VERSION` and `UPSTREAM_COMMIT` must exist and match the README plus
+  fork-manifest baseline record
+- `UPSTREAM_VERSION` must resolve to the commit recorded in `UPSTREAM_COMMIT`
 
 Version cadence:
 

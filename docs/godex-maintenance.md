@@ -39,6 +39,9 @@ bash scripts/godex-maintain.sh sync --dry-run
 # Merge upstream/main into the current branch and rebuild godex
 bash scripts/godex-maintain.sh sync
 
+# Refresh the committed upstream baseline metadata without doing a merge
+bash scripts/godex-maintain.sh refresh-upstream-metadata
+
 # Require a fast-forward-only sync
 bash scripts/godex-maintain.sh sync --ff-only
 
@@ -59,6 +62,10 @@ If `main` is ahead of `origin/main`, it now requires all of the following:
 - `codex-rs/Cargo.toml` matches `VERSION`
 - `CHANGELOG.md` has a `## [<version>]` section for that version
 - `## [Unreleased]` no longer carries the release entries being pushed
+- `UPSTREAM_VERSION` and `UPSTREAM_COMMIT` both exist
+- `README.md`, `docs/godex-fork-manifest.md`, and the root upstream metadata
+  files all agree on the same upstream baseline tag and commit
+- `UPSTREAM_COMMIT` resolves to the commit pointed to by `UPSTREAM_VERSION`
 
 Recommended version cadence:
 
@@ -76,10 +83,12 @@ Recommended version cadence:
 5. Create `sync/<upstream-sha-or-date>` from `main`.
 6. Run `bash scripts/godex-maintain.sh sync --dry-run`.
 7. If the plan looks right, merge upstream on the sync branch.
-8. Run all acceptance gates from `docs/godex-fork-guidelines.md`.
-9. Reinstall with `bash scripts/install/install-godex-from-source.sh`.
-10. Merge back to `main` only after validation passes.
-11. Before pushing `main`, bump the version and pass `bash scripts/godex-maintain.sh release-preflight`.
+8. Run `bash scripts/godex-maintain.sh refresh-upstream-metadata` so the
+   committed baseline files and docs match the merged upstream tag.
+9. Run all acceptance gates from `docs/godex-fork-guidelines.md`.
+10. Reinstall with `bash scripts/install/install-godex-from-source.sh`.
+11. Merge back to `main` only after validation passes.
+12. Before pushing `main`, bump the version and pass `bash scripts/godex-maintain.sh release-preflight`.
 
 ## Policy Documents
 

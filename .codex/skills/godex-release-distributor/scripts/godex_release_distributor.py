@@ -91,6 +91,10 @@ def preflight(repo: Path) -> None:
     subprocess.run(["bash", "scripts/godex-maintain.sh", "release-preflight"], cwd=repo, check=True)
 
 
+def refresh_upstream_metadata(repo: Path) -> None:
+    subprocess.run(["bash", "scripts/godex-maintain.sh", "refresh-upstream-metadata"], cwd=repo, check=True)
+
+
 def preflight_result(repo: Path) -> tuple[bool, str]:
     completed = subprocess.run(
         ["bash", "scripts/godex-maintain.sh", "release-preflight"],
@@ -329,6 +333,8 @@ def cmd_publish(repo: Path, package_name: str, release_repo: str, skip_main_push
     current_version = version(repo)
     tag_name = release_tag_name(current_version)
     ensure_clean_main(repo)
+    refresh_upstream_metadata(repo)
+    ensure_clean_main(repo)
     preflight(repo)
 
     if not skip_main_push:
@@ -364,6 +370,8 @@ def cmd_local_publish(
 ) -> int:
     current_version = version(repo)
     tag_name = release_tag_name(current_version)
+    ensure_clean_main(repo)
+    refresh_upstream_metadata(repo)
     ensure_clean_main(repo)
     preflight(repo)
 
