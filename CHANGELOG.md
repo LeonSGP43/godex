@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- What changed: merged the next two official `upstream/main` commits after the initial `rust-v0.120.0` sync, resolved the single conflict in `codex-rs/core/src/codex.rs`, and refreshed the recorded merged-main baseline to `a6b03a22cc35b36d46065185c7982cd02bb82c4e`.
+- Why: after the release-baseline sync completed, upstream `main` advanced again, so the fork needed one more catch-up merge to stay truly current instead of stopping at the older fetched head.
+- Impact: the fork still tracks official release baseline `rust-v0.120.0`, but now also includes the latest fetched upstream `main` head at the time of sync, with README/manifest/metadata kept consistent for release gating.
+- Verification: `git merge-base --is-ancestor upstream/main HEAD`, `git rev-list --left-right --count HEAD...upstream/main`, `bash scripts/godex-maintain.sh refresh-upstream-metadata`, `bash scripts/godex-maintain.sh release-preflight`, `cargo check -p codex-cli --bin godex --manifest-path codex-rs/Cargo.toml`
+- Files: `codex-rs/core/src/codex.rs`, `UPSTREAM_HEAD_COMMIT`, `README.md`, `docs/godex-fork-manifest.md`, `CHANGELOG.md`
+
 ## [0.2.20] - 2026-04-14
 
 ### Changed
