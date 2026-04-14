@@ -1,4 +1,4 @@
-use codex_core::branding::APP_DISPLAY_NAME;
+use crate::legacy_core::branding::APP_DISPLAY_NAME;
 
 pub(crate) const OFFICIAL_CODEX_DOCS_LABEL: &str = "official Codex docs";
 pub(crate) const WELCOME_DESCRIPTION: &str = "your Codex-compatible command-line coding agent";

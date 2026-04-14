@@ -1,4 +1,4 @@
-use codex_core::branding::APP_DISPLAY_NAME;
+use crate::legacy_core::branding::APP_DISPLAY_NAME;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;

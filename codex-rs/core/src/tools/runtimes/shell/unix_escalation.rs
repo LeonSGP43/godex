@@ -4,6 +4,7 @@ use crate::exec::ExecExpiration;
 use crate::exec::is_likely_sandbox_denied;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::guardian_rejection_message;
+use crate::guardian::guardian_timeout_message;
 use crate::guardian::new_guardian_review_id;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
@@ -58,6 +59,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -125,6 +127,7 @@ pub(super) async fn try_run_zsh_fork(
         command,
         cwd: sandbox_cwd,
         env: sandbox_env,
+        exec_server_env_config: _,
         network: sandbox_network,
         expiration: _sandbox_expiration,
         capture_policy: _capture_policy,
@@ -293,6 +296,7 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
     }))
 }
 
+#[derive(Clone)]
 struct CoreShellActionProvider {
     policy: Arc<RwLock<Policy>>,
     session: Arc<crate::codex::Session>,
@@ -374,156 +378,149 @@ impl CoreShellActionProvider {
                 .unwrap_or(EscalationExecution::TurnDefault),
         }
     }
-}
 
-async fn prompt_for_execve_approval(
-    session: Arc<crate::codex::Session>,
-    turn: Arc<crate::codex::TurnContext>,
-    call_id: String,
-    source: GuardianCommandSource,
-    program: AbsolutePathBuf,
-    argv: Vec<String>,
-    workdir: AbsolutePathBuf,
-    stopwatch: Stopwatch,
-    additional_permissions: Option<PermissionProfile>,
-) -> anyhow::Result<PromptDecision> {
-    let command = join_program_and_argv(&program, &argv);
-    let approval_id = Some(Uuid::new_v4().to_string());
-    let guardian_review_id = routes_approval_to_guardian(&turn).then(new_guardian_review_id);
-    Ok(stopwatch
-        .pause_for(async move {
-            if let Some(review_id) = guardian_review_id.clone() {
-                let decision = review_approval_request(
-                    session.clone(),
-                    turn.clone(),
-                    review_id,
-                    GuardianApprovalRequest::Execve {
-                        id: call_id.clone(),
-                        source,
-                        program: program.to_string_lossy().into_owned(),
-                        argv,
-                        cwd: workdir.to_path_buf(),
+    async fn prompt(
+        &self,
+        program: &AbsolutePathBuf,
+        argv: &[String],
+        workdir: &AbsolutePathBuf,
+        stopwatch: &Stopwatch,
+        additional_permissions: Option<PermissionProfile>,
+    ) -> anyhow::Result<PromptDecision> {
+        let command = join_program_and_argv(program, argv);
+        let workdir = workdir.to_path_buf();
+        let session = self.session.clone();
+        let turn = self.turn.clone();
+        let call_id = self.call_id.clone();
+        let approval_id = Some(Uuid::new_v4().to_string());
+        let source = self.tool_name;
+        let guardian_review_id = routes_approval_to_guardian(&turn).then(new_guardian_review_id);
+        Ok(stopwatch
+            .pause_for(async move {
+                if let Some(review_id) = guardian_review_id.clone() {
+                    let decision = review_approval_request(
+                        &session,
+                        &turn,
+                        review_id,
+                        GuardianApprovalRequest::Execve {
+                            id: call_id.clone(),
+                            source,
+                            program: program.to_string_lossy().into_owned(),
+                            argv: argv.to_vec(),
+                            cwd: workdir,
+                            additional_permissions,
+                        },
+                        /*retry_reason*/ None,
+                    )
+                    .await;
+                    return PromptDecision {
+                        decision,
+                        guardian_review_id,
+                    };
+                }
+                let decision = session
+                    .request_command_approval(
+                        &turn,
+                        call_id,
+                        approval_id,
+                        command,
+                        workdir,
+                        /*reason*/ None,
+                        /*network_approval_context*/ None,
+                        /*proposed_execpolicy_amendment*/ None,
                         additional_permissions,
-                    },
-                    /*retry_reason*/ None,
-                )
-                .await;
-                return PromptDecision {
+                        Some(vec![ReviewDecision::Approved, ReviewDecision::Abort]),
+                    )
+                    .await;
+                PromptDecision {
                     decision,
-                    guardian_review_id,
-                };
-            }
-            let decision = session
-                .request_command_approval_owned(
-                    turn.clone(),
-                    call_id,
-                    approval_id,
-                    command,
-                    workdir.to_path_buf(),
-                    /*reason*/ None,
-                    /*network_approval_context*/ None,
-                    /*proposed_execpolicy_amendment*/ None,
-                    additional_permissions,
-                    Some(vec![ReviewDecision::Approved, ReviewDecision::Abort]),
-                )
-                .await;
-            PromptDecision {
-                decision,
-                guardian_review_id: None,
-            }
-        })
-        .await)
-}
+                    guardian_review_id: None,
+                }
+            })
+            .await)
+    }
 
-#[allow(clippy::too_many_arguments)]
-async fn process_execve_decision(
-    session: Arc<crate::codex::Session>,
-    turn: Arc<crate::codex::TurnContext>,
-    call_id: String,
-    source: GuardianCommandSource,
-    approval_policy: AskForApproval,
-    stopwatch: Stopwatch,
-    decision: Decision,
-    needs_escalation: bool,
-    program: AbsolutePathBuf,
-    argv: Vec<String>,
-    workdir: AbsolutePathBuf,
-    prompt_permissions: Option<PermissionProfile>,
-    escalation_execution: EscalationExecution,
-    decision_source: DecisionSource,
-) -> anyhow::Result<EscalationDecision> {
-    let action = match decision {
-        Decision::Forbidden => {
-            EscalationDecision::deny(Some("Execution forbidden by policy".to_string()))
-        }
-        Decision::Prompt => {
-            if execve_prompt_is_rejected_by_policy(approval_policy, &decision_source).is_some() {
+    #[allow(clippy::too_many_arguments)]
+    async fn process_decision(
+        &self,
+        decision: Decision,
+        needs_escalation: bool,
+        program: &AbsolutePathBuf,
+        argv: &[String],
+        workdir: &AbsolutePathBuf,
+        prompt_permissions: Option<PermissionProfile>,
+        escalation_execution: EscalationExecution,
+        decision_source: DecisionSource,
+    ) -> anyhow::Result<EscalationDecision> {
+        let action = match decision {
+            Decision::Forbidden => {
                 EscalationDecision::deny(Some("Execution forbidden by policy".to_string()))
-            } else {
-                let prompt_decision = prompt_for_execve_approval(
-                    Arc::clone(&session),
-                    turn,
-                    call_id,
-                    source,
-                    program.clone(),
-                    argv.clone(),
-                    workdir,
-                    stopwatch,
-                    prompt_permissions,
-                )
-                .await?;
-                match prompt_decision.decision {
-                    ReviewDecision::Approved
-                    | ReviewDecision::ApprovedForSession
-                    | ReviewDecision::ApprovedExecpolicyAmendment { .. } => {
-                        if needs_escalation {
-                            EscalationDecision::escalate(escalation_execution.clone())
-                        } else {
-                            EscalationDecision::run()
-                        }
-                    }
-                    ReviewDecision::NetworkPolicyAmendment {
-                        network_policy_amendment,
-                    } => match network_policy_amendment.action {
-                        NetworkPolicyRuleAction::Allow => {
+            }
+            Decision::Prompt => {
+                if execve_prompt_is_rejected_by_policy(self.approval_policy, &decision_source)
+                    .is_some()
+                {
+                    EscalationDecision::deny(Some("Execution forbidden by policy".to_string()))
+                } else {
+                    let prompt_decision = self
+                        .prompt(program, argv, workdir, &self.stopwatch, prompt_permissions)
+                        .await?;
+                    match prompt_decision.decision {
+                        ReviewDecision::Approved
+                        | ReviewDecision::ApprovedForSession
+                        | ReviewDecision::ApprovedExecpolicyAmendment { .. } => {
                             if needs_escalation {
                                 EscalationDecision::escalate(escalation_execution.clone())
                             } else {
                                 EscalationDecision::run()
                             }
                         }
-                        NetworkPolicyRuleAction::Deny => {
-                            EscalationDecision::deny(Some("User denied execution".to_string()))
+                        ReviewDecision::NetworkPolicyAmendment {
+                            network_policy_amendment,
+                        } => match network_policy_amendment.action {
+                            NetworkPolicyRuleAction::Allow => {
+                                if needs_escalation {
+                                    EscalationDecision::escalate(escalation_execution.clone())
+                                } else {
+                                    EscalationDecision::run()
+                                }
+                            }
+                            NetworkPolicyRuleAction::Deny => {
+                                EscalationDecision::deny(Some("User denied execution".to_string()))
+                            }
+                        },
+                        ReviewDecision::Denied => {
+                            let message = if let Some(review_id) =
+                                prompt_decision.guardian_review_id.as_deref()
+                            {
+                                guardian_rejection_message(self.session.as_ref(), review_id).await
+                            } else {
+                                "User denied execution".to_string()
+                            };
+                            EscalationDecision::deny(Some(message))
                         }
-                    },
-                    ReviewDecision::Denied => {
-                        let message = if let Some(review_id) =
-                            prompt_decision.guardian_review_id.as_deref()
-                        {
-                            guardian_rejection_message(session.as_ref(), review_id).await
-                        } else {
-                            "User denied execution".to_string()
-                        };
-                        EscalationDecision::deny(Some(message))
-                    }
-                    ReviewDecision::Abort => {
-                        EscalationDecision::deny(Some("User cancelled execution".to_string()))
+                        ReviewDecision::TimedOut => {
+                            EscalationDecision::deny(Some(guardian_timeout_message()))
+                        }
+                        ReviewDecision::Abort => {
+                            EscalationDecision::deny(Some("User cancelled execution".to_string()))
+                        }
                     }
                 }
             }
-        }
-        Decision::Allow => {
-            if needs_escalation {
-                EscalationDecision::escalate(escalation_execution)
-            } else {
-                EscalationDecision::run()
+            Decision::Allow => {
+                if needs_escalation {
+                    EscalationDecision::escalate(escalation_execution)
+                } else {
+                    EscalationDecision::run()
+                }
             }
-        }
-    };
-    tracing::debug!(
-        "Policy decision for command {program:?} is {decision:?}, leading to escalation action {action:?}",
-    );
-    Ok(action)
+        };
+        tracing::debug!(
+            "Policy decision for command {program:?} is {decision:?}, leading to escalation action {action:?}",
+        );
+        Ok(action)
+    }
 }
 
 // Shell-wrapper parsing is weaker than direct exec interception because it can
@@ -531,87 +528,6 @@ async fn process_execve_decision(
 // disabled by default so path-sensitive rules rely on the later authoritative
 // execve interception.
 const ENABLE_INTERCEPTED_EXEC_POLICY_SHELL_WRAPPER_PARSING: bool = false;
-
-#[allow(clippy::too_many_arguments)]
-async fn determine_action_owned(
-    policy: Arc<RwLock<Policy>>,
-    session: Arc<crate::codex::Session>,
-    turn: Arc<crate::codex::TurnContext>,
-    call_id: String,
-    source: GuardianCommandSource,
-    approval_policy: AskForApproval,
-    sandbox_policy: SandboxPolicy,
-    file_system_sandbox_policy: FileSystemSandboxPolicy,
-    network_sandbox_policy: NetworkSandboxPolicy,
-    sandbox_permissions: SandboxPermissions,
-    approval_sandbox_permissions: SandboxPermissions,
-    prompt_permissions: Option<PermissionProfile>,
-    stopwatch: Stopwatch,
-    program: AbsolutePathBuf,
-    argv: Vec<String>,
-    workdir: AbsolutePathBuf,
-) -> anyhow::Result<EscalationDecision> {
-    tracing::debug!(
-        "Determining escalation action for command {program:?} with args {argv:?} in {workdir:?}"
-    );
-
-    let evaluation = {
-        let policy = policy.read().await;
-        evaluate_intercepted_exec_policy(
-            &policy,
-            &program,
-            &argv,
-            InterceptedExecPolicyContext {
-                approval_policy,
-                sandbox_policy: &sandbox_policy,
-                file_system_sandbox_policy: &file_system_sandbox_policy,
-                sandbox_permissions: approval_sandbox_permissions,
-                enable_shell_wrapper_parsing: ENABLE_INTERCEPTED_EXEC_POLICY_SHELL_WRAPPER_PARSING,
-            },
-        )
-    };
-    let decision_driven_by_policy = CoreShellActionProvider::decision_driven_by_policy(
-        &evaluation.matched_rules,
-        evaluation.decision,
-    );
-    let needs_escalation =
-        sandbox_permissions.requires_escalated_permissions() || decision_driven_by_policy;
-
-    let decision_source = if decision_driven_by_policy {
-        DecisionSource::PrefixRule
-    } else {
-        DecisionSource::UnmatchedCommandFallback
-    };
-    let escalation_execution = match decision_source {
-        DecisionSource::PrefixRule => EscalationExecution::Unsandboxed,
-        DecisionSource::UnmatchedCommandFallback => {
-            CoreShellActionProvider::shell_request_escalation_execution(
-                sandbox_permissions,
-                &sandbox_policy,
-                &file_system_sandbox_policy,
-                network_sandbox_policy,
-                prompt_permissions.as_ref(),
-            )
-        }
-    };
-    process_execve_decision(
-        session,
-        turn,
-        call_id,
-        source,
-        approval_policy,
-        stopwatch,
-        evaluation.decision,
-        needs_escalation,
-        program,
-        argv,
-        workdir,
-        prompt_permissions,
-        escalation_execution,
-        decision_source,
-    )
-    .await
-}
 
 #[async_trait::async_trait]
 impl EscalationPolicy for CoreShellActionProvider {
@@ -621,44 +537,72 @@ impl EscalationPolicy for CoreShellActionProvider {
         argv: &[String],
         workdir: &AbsolutePathBuf,
     ) -> anyhow::Result<EscalationDecision> {
-        let policy = Arc::clone(&self.policy);
-        let session = Arc::clone(&self.session);
-        let turn = Arc::clone(&self.turn);
-        let call_id = self.call_id.clone();
-        let source = self.tool_name;
-        let approval_policy = self.approval_policy;
-        let sandbox_policy = self.sandbox_policy.clone();
-        let file_system_sandbox_policy = self.file_system_sandbox_policy.clone();
-        let network_sandbox_policy = self.network_sandbox_policy;
-        let sandbox_permissions = self.sandbox_permissions;
-        let approval_sandbox_permissions = self.approval_sandbox_permissions;
-        let prompt_permissions = self.prompt_permissions.clone();
-        let stopwatch = self.stopwatch.clone();
+        let provider = self.clone();
         let program = program.clone();
         let argv = argv.to_vec();
         let workdir = workdir.clone();
-        async move {
-            determine_action_owned(
-                policy,
-                session,
-                turn,
-                call_id,
-                source,
-                approval_policy,
-                sandbox_policy,
-                file_system_sandbox_policy,
-                network_sandbox_policy,
-                sandbox_permissions,
-                approval_sandbox_permissions,
-                prompt_permissions,
-                stopwatch,
-                program,
-                argv,
-                workdir,
-            )
-            .await
-        }
+
+        tokio::task::spawn_blocking(move || {
+            let handle = Handle::current();
+            handle.block_on(async move {
+                tracing::debug!(
+                    "Determining escalation action for command {program:?} with args {argv:?} in {workdir:?}"
+                );
+
+                let evaluation = {
+                    let policy = provider.policy.read().await;
+                    evaluate_intercepted_exec_policy(
+                        &policy,
+                        &program,
+                        &argv,
+                        InterceptedExecPolicyContext {
+                            approval_policy: provider.approval_policy,
+                            sandbox_policy: &provider.sandbox_policy,
+                            file_system_sandbox_policy: &provider.file_system_sandbox_policy,
+                            sandbox_permissions: provider.approval_sandbox_permissions,
+                            enable_shell_wrapper_parsing:
+                                ENABLE_INTERCEPTED_EXEC_POLICY_SHELL_WRAPPER_PARSING,
+                        },
+                    )
+                };
+                let decision_driven_by_policy =
+                    Self::decision_driven_by_policy(&evaluation.matched_rules, evaluation.decision);
+                let needs_escalation = provider.sandbox_permissions.requires_escalated_permissions()
+                    || decision_driven_by_policy;
+
+                let decision_source = if decision_driven_by_policy {
+                    DecisionSource::PrefixRule
+                } else {
+                    DecisionSource::UnmatchedCommandFallback
+                };
+                let escalation_execution = match decision_source {
+                    DecisionSource::PrefixRule => EscalationExecution::Unsandboxed,
+                    DecisionSource::UnmatchedCommandFallback => {
+                        Self::shell_request_escalation_execution(
+                            provider.sandbox_permissions,
+                            &provider.sandbox_policy,
+                            &provider.file_system_sandbox_policy,
+                            provider.network_sandbox_policy,
+                            provider.prompt_permissions.as_ref(),
+                        )
+                    }
+                };
+                provider
+                    .process_decision(
+                        evaluation.decision,
+                        needs_escalation,
+                        &program,
+                        &argv,
+                        &workdir,
+                        provider.prompt_permissions.clone(),
+                        escalation_execution,
+                        decision_source,
+                    )
+                    .await
+            })
+        })
         .await
+        .map_err(|err| anyhow::anyhow!("failed to join escalation policy task: {err}"))?
     }
 }
 
@@ -806,6 +750,7 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                 command: self.command.clone(),
                 cwd: self.cwd.clone(),
                 env: exec_env,
+                exec_server_env_config: None,
                 network: self.network.clone(),
                 expiration: ExecExpiration::Cancellation(cancel_rx),
                 capture_policy: ExecCapturePolicy::ShellTool,

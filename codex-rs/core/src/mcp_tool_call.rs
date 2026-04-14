@@ -24,7 +24,8 @@ use crate::connectors;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::GuardianMcpAnnotations;
 use crate::guardian::guardian_approval_request_to_json;
-use crate::guardian::guardian_rejection_message_owned;
+use crate::guardian::guardian_rejection_message;
+use crate::guardian::guardian_timeout_message;
 use crate::guardian::new_guardian_review_id;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
@@ -864,15 +865,23 @@ async fn maybe_request_mcp_tool_approval(
 
     if routes_approval_to_guardian(turn_context.as_ref()) {
         let review_id = new_guardian_review_id();
-        let decision = require_send_owned(run_guardian_mcp_tool_approval_flow_on_dedicated_thread(
-            sess.clone(),
-            turn_context.clone(),
+        let decision = review_approval_request(
+            &sess,
+            &turn_context,
             review_id.clone(),
             build_guardian_mcp_tool_review_request(&call_id, &invocation, metadata.as_ref()),
             monitor_reason.clone(),
+        )
+        .await;
+        let decision =
+            mcp_tool_approval_decision_from_guardian(sess.as_ref(), &review_id, decision).await;
+        apply_mcp_tool_approval_decision(
+            sess,
+            turn_context,
+            decision.clone(),
             session_approval_key,
             persistent_approval_key,
-        ))
+        )
         .await;
         return Some(decision);
     }
@@ -1064,8 +1073,8 @@ pub(crate) fn build_guardian_mcp_tool_review_request(
 }
 
 async fn mcp_tool_approval_decision_from_guardian(
-    sess: Arc<Session>,
-    review_id: String,
+    sess: &Session,
+    review_id: &str,
     decision: ReviewDecision,
 ) -> McpToolApprovalDecision {
     match decision {
@@ -1074,7 +1083,10 @@ async fn mcp_tool_approval_decision_from_guardian(
         | ReviewDecision::NetworkPolicyAmendment { .. } => McpToolApprovalDecision::Accept,
         ReviewDecision::ApprovedForSession => McpToolApprovalDecision::AcceptForSession,
         ReviewDecision::Denied => McpToolApprovalDecision::Decline {
-            message: Some(guardian_rejection_message_owned(sess, review_id).await),
+            message: Some(guardian_rejection_message(sess, review_id).await),
+        },
+        ReviewDecision::TimedOut => McpToolApprovalDecision::Decline {
+            message: Some(guardian_timeout_message()),
         },
         ReviewDecision::Abort => McpToolApprovalDecision::Decline { message: None },
     }
@@ -1101,16 +1113,16 @@ async fn run_guardian_mcp_tool_approval_flow_on_dedicated_thread(
                     runtime.block_on(async move {
                         let approval_turn_context = turn_context.clone();
                         let review_decision = review_approval_request(
-                            sess.clone(),
-                            turn_context,
+                            &sess,
+                            &turn_context,
                             review_id.clone(),
                             request,
                             monitor_reason,
                         )
                         .await;
                         let decision = mcp_tool_approval_decision_from_guardian(
-                            sess.clone(),
-                            review_id,
+                            sess.as_ref(),
+                            &review_id,
                             review_decision,
                         )
                         .await;
@@ -1686,7 +1698,7 @@ async fn maybe_persist_mcp_tool_approval(
             return;
         };
         persist_codex_app_tool_approval(
-            turn_context.config.codex_home.clone(),
+            turn_context.config.codex_home.to_path_buf(),
             connector_id,
             tool_name.clone(),
         )
@@ -1749,7 +1761,7 @@ async fn persist_custom_mcp_tool_approval(
         if !servers.contains_key(server.as_str()) {
             anyhow::bail!("MCP server `{server}` is not configured in config.toml");
         }
-        config.codex_home.clone()
+        config.codex_home.to_path_buf()
     };
 
     ConfigEditsBuilder::new(&config_folder)

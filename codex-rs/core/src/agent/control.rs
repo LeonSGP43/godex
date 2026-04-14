@@ -640,6 +640,7 @@ impl AgentControl {
                     .analytics_events_client,
                 client_metadata,
                 new_thread.thread_id,
+                /*parent_thread_id*/ None,
                 thread_config,
                 subagent_source,
             );
@@ -833,9 +834,10 @@ impl AgentControl {
                     .codex
                     .session
                     .services
-                    .analytics_events_client,
+                .analytics_events_client,
                 client_metadata,
                 new_thread.thread_id,
+                Some(parent_thread_id),
                 thread_config,
                 subagent_source,
             );
@@ -924,14 +926,17 @@ impl AgentControl {
         if let Some(parent_thread) = parent_thread {
             // `record_conversation_items` only queues rollout writes asynchronously.
             // Flush/materialize the live parent before snapshotting JSONL for a fork.
-            let parent_session = parent_thread.codex.session.clone();
-            parent_session.ensure_rollout_materialized().await;
-            parent_session.flush_rollout().await;
+            parent_thread
+                .codex
+                .session
+                .ensure_rollout_materialized()
+                .await;
+            parent_thread.codex.session.flush_rollout().await?;
         }
 
         let rollout_path = live_rollout_path
             .or(find_thread_path_by_id_owned(
-                config.codex_home.clone(),
+                config.codex_home.to_path_buf(),
                 parent_thread_id.to_string(),
             )
             .await?)
@@ -1006,7 +1011,7 @@ impl AgentControl {
 
         let rollout_path = live_rollout_path
             .or(find_thread_path_by_id_owned(
-                config.codex_home.clone(),
+                config.codex_home.to_path_buf(),
                 parent_thread_id.to_string(),
             )
             .await?)
@@ -1256,12 +1261,15 @@ impl AgentControl {
             .inherited_exec_policy_for_source(&state, Some(&session_source), &config)
             .await;
         let rollout_path =
-            match find_thread_path_by_id_owned(config.codex_home.clone(), thread_id.to_string())
+            match find_thread_path_by_id_owned(
+                config.codex_home.to_path_buf(),
+                thread_id.to_string(),
+            )
                 .await?
             {
                 Some(rollout_path) => rollout_path,
                 None => find_archived_thread_path_by_id_owned(
-                    config.codex_home.clone(),
+                    config.codex_home.to_path_buf(),
                     thread_id.to_string(),
                 )
                 .await?
@@ -1376,12 +1384,15 @@ impl AgentControl {
         )
         .await;
         let rollout_path =
-            match find_thread_path_by_id_owned(config.codex_home.clone(), thread_id.to_string())
+            match find_thread_path_by_id_owned(
+                config.codex_home.to_path_buf(),
+                thread_id.to_string(),
+            )
                 .await?
             {
                 Some(rollout_path) => rollout_path,
                 None => find_archived_thread_path_by_id_owned(
-                    config.codex_home.clone(),
+                    config.codex_home.to_path_buf(),
                     thread_id.to_string(),
                 )
                 .await?
@@ -1622,11 +1633,8 @@ impl AgentControl {
         }
         let result = if let Ok(thread) = state.get_thread(agent_id).await {
             thread.codex.session.ensure_rollout_materialized().await;
-            thread.codex.session.flush_rollout().await;
-            if matches!(
-                thread.clone().agent_status_owned().await,
-                AgentStatus::Shutdown
-            ) {
+            thread.codex.session.flush_rollout().await?;
+            if matches!(thread.agent_status().await, AgentStatus::Shutdown) {
                 Ok(String::new())
             } else {
                 state.send_op(agent_id, Op::Shutdown {}).await

@@ -8,8 +8,9 @@ use crate::command_canonicalization::canonicalize_command_for_approval;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
 use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::review_approval_request;
+use crate::guardian::review_approval_request_owned;
 use crate::sandboxing::ExecOptions;
+use crate::sandboxing::ExecServerEnvConfig;
 use crate::sandboxing::SandboxPermissions;
 use crate::shell::ShellType;
 use crate::tools::network_approval::NetworkApprovalMode;
@@ -32,7 +33,6 @@ use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcess;
 use crate::unified_exec::UnifiedExecProcessManager;
 use codex_network_proxy::NetworkProxy;
-use codex_protocol::approvals::ExecPolicyAmendment;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::SandboxErr;
 use codex_protocol::models::PermissionProfile;
@@ -43,7 +43,7 @@ use codex_tools::UnifiedExecShellMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
-use std::sync::Arc;
+use tokio::runtime::Handle;
 
 /// Request payload used by the unified-exec runtime after approvals and
 /// sandbox preferences have been resolved for the current turn.
@@ -53,6 +53,7 @@ pub struct UnifiedExecRequest {
     pub process_id: i32,
     pub cwd: AbsolutePathBuf,
     pub env: HashMap<String, String>,
+    pub exec_server_env_config: Option<ExecServerEnvConfig>,
     pub explicit_env_overrides: HashMap<String, String>,
     pub network: Option<NetworkProxy>,
     pub tty: bool,
@@ -90,134 +91,6 @@ impl<'a> UnifiedExecRuntime<'a> {
             shell_mode,
         }
     }
-
-    async fn review_request_owned(
-        session: Arc<crate::codex::Session>,
-        turn: Arc<crate::codex::TurnContext>,
-        review_id: String,
-        request: GuardianApprovalRequest,
-        retry_reason: Option<String>,
-    ) -> ReviewDecision {
-        review_approval_request(session, turn, review_id, request, retry_reason).await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn request_command_approval_owned(
-        session: Arc<crate::codex::Session>,
-        turn: Arc<crate::codex::TurnContext>,
-        call_id: String,
-        command: Vec<String>,
-        cwd: std::path::PathBuf,
-        reason: Option<String>,
-        network_approval_context: Option<codex_protocol::approvals::NetworkApprovalContext>,
-        proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
-        additional_permissions: Option<PermissionProfile>,
-        available_decisions: Option<Vec<ReviewDecision>>,
-    ) -> ReviewDecision {
-        session
-            .request_command_approval_owned(
-                turn,
-                call_id,
-                /*approval_id*/ None,
-                command,
-                cwd,
-                reason,
-                network_approval_context,
-                proposed_execpolicy_amendment,
-                additional_permissions,
-                available_decisions,
-            )
-            .await
-    }
-
-    async fn already_approved_owned(
-        session: Arc<crate::codex::Session>,
-        keys: Vec<UnifiedExecApprovalKey>,
-    ) -> bool {
-        let store = session.services.tool_approvals.lock().await;
-        keys.iter()
-            .all(|key| matches!(store.get(key), Some(ReviewDecision::ApprovedForSession)))
-    }
-
-    async fn remember_approval_keys_owned(
-        session: Arc<crate::codex::Session>,
-        keys: Vec<UnifiedExecApprovalKey>,
-    ) {
-        let mut store = session.services.tool_approvals.lock().await;
-        for key in keys {
-            store.put(key, ReviewDecision::ApprovedForSession);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn start_approval_owned(
-        session: Arc<crate::codex::Session>,
-        turn: Arc<crate::codex::TurnContext>,
-        keys: Vec<UnifiedExecApprovalKey>,
-        call_id: String,
-        command: Vec<String>,
-        cwd: std::path::PathBuf,
-        retry_reason: Option<String>,
-        reason: Option<String>,
-        guardian_review_id: Option<String>,
-        network_approval_context: Option<codex_protocol::approvals::NetworkApprovalContext>,
-        sandbox_permissions: SandboxPermissions,
-        additional_permissions: Option<PermissionProfile>,
-        justification: Option<String>,
-        tty: bool,
-        proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
-    ) -> ReviewDecision {
-        if let Some(review_id) = guardian_review_id {
-            return UnifiedExecRuntime::review_request_owned(
-                session,
-                turn,
-                review_id,
-                GuardianApprovalRequest::ExecCommand {
-                    id: call_id,
-                    command,
-                    cwd,
-                    sandbox_permissions,
-                    additional_permissions: additional_permissions.clone(),
-                    justification,
-                    tty,
-                },
-                retry_reason,
-            )
-            .await;
-        }
-        let already_approved =
-            UnifiedExecRuntime::already_approved_owned(session.clone(), keys.clone()).await;
-        if already_approved {
-            return ReviewDecision::ApprovedForSession;
-        }
-
-        let available_decisions = None;
-        let decision = UnifiedExecRuntime::request_command_approval_owned(
-            session.clone(),
-            turn,
-            call_id,
-            command,
-            cwd,
-            reason,
-            network_approval_context,
-            proposed_execpolicy_amendment,
-            additional_permissions,
-            available_decisions,
-        )
-        .await;
-        session.services.session_telemetry.counter(
-            "codex.approval.requested",
-            /*inc*/ 1,
-            &[
-                ("tool", "unified_exec"),
-                ("approved", decision.to_opaque_string()),
-            ],
-        );
-        if matches!(decision, ReviewDecision::ApprovedForSession) {
-            UnifiedExecRuntime::remember_approval_keys_owned(session, keys).await;
-        }
-        decision
-    }
 }
 
 impl Sandboxable for UnifiedExecRuntime<'_> {
@@ -249,8 +122,8 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
         ctx: ApprovalCtx<'b>,
     ) -> BoxFuture<'b, ReviewDecision> {
         let keys = self.approval_keys(req);
-        let session = Arc::clone(ctx.session);
-        let turn = Arc::clone(ctx.turn);
+        let session = std::sync::Arc::clone(ctx.session);
+        let turn = std::sync::Arc::clone(ctx.turn);
         let call_id = ctx.call_id.to_string();
         let command = req.command.clone();
         let cwd = req.cwd.to_path_buf();
@@ -267,24 +140,68 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
             .proposed_execpolicy_amendment()
             .cloned();
         Box::pin(async move {
-            UnifiedExecRuntime::start_approval_owned(
-                session,
-                turn,
-                keys,
-                call_id,
-                command,
-                cwd,
-                retry_reason,
-                reason,
-                guardian_review_id,
-                network_approval_context,
-                sandbox_permissions,
-                additional_permissions,
-                justification,
-                tty,
-                proposed_execpolicy_amendment,
-            )
+            tokio::task::spawn_blocking(move || {
+                let handle = Handle::current();
+                handle.block_on(async move {
+                    if let Some(review_id) = guardian_review_id {
+                        return review_approval_request_owned(
+                            session.clone(),
+                            turn.clone(),
+                            review_id,
+                            GuardianApprovalRequest::ExecCommand {
+                                id: call_id,
+                                command,
+                                cwd,
+                                sandbox_permissions,
+                                additional_permissions,
+                                justification,
+                                tty,
+                            },
+                            retry_reason,
+                        )
+                        .await;
+                    }
+                    let already_approved = {
+                        let store = session.services.tool_approvals.lock().await;
+                        keys.iter().all(|key| {
+                            matches!(store.get(key), Some(ReviewDecision::ApprovedForSession))
+                        })
+                    };
+                    if already_approved {
+                        return ReviewDecision::ApprovedForSession;
+                    }
+                    let available_decisions = None;
+                    let decision = session
+                        .clone()
+                        .request_command_approval_owned(
+                            turn,
+                            call_id,
+                            /*approval_id*/ None,
+                            command,
+                            cwd,
+                            reason,
+                            network_approval_context,
+                            proposed_execpolicy_amendment,
+                            additional_permissions,
+                            available_decisions,
+                        )
+                        .await;
+                    session.services.session_telemetry.counter(
+                        "codex.approval.requested",
+                        /*inc*/ 1,
+                        &[("tool", "unified_exec"), ("approved", decision.to_opaque_string())],
+                    );
+                    if matches!(decision, ReviewDecision::ApprovedForSession) {
+                        let mut store = session.services.tool_approvals.lock().await;
+                        for key in keys {
+                            store.put(key, ReviewDecision::ApprovedForSession);
+                        }
+                    }
+                    decision
+                })
+            })
             .await
+            .unwrap_or(ReviewDecision::Abort)
         })
     }
 
@@ -355,9 +272,10 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                 expiration: ExecExpiration::DefaultTimeout,
                 capture_policy: ExecCapturePolicy::ShellTool,
             };
-            let exec_env = attempt
+            let mut exec_env = attempt
                 .env_for(command, options, req.network.as_ref())
                 .map_err(|err| ToolError::Codex(err.into()))?;
+            exec_env.exec_server_env_config = req.exec_server_env_config.clone();
             match zsh_fork_backend::maybe_prepare_unified_exec(
                 req,
                 attempt,
@@ -412,9 +330,10 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
             expiration: ExecExpiration::DefaultTimeout,
             capture_policy: ExecCapturePolicy::ShellTool,
         };
-        let exec_env = attempt
+        let mut exec_env = attempt
             .env_for(command, options, req.network.as_ref())
             .map_err(|err| ToolError::Codex(err.into()))?;
+        exec_env.exec_server_env_config = req.exec_server_env_config.clone();
         let Some(environment) = ctx.turn.environment.as_ref() else {
             return Err(ToolError::Rejected(
                 "exec_command is unavailable in this session".to_string(),

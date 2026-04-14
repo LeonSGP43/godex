@@ -15,6 +15,7 @@ use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ReviewOutputEvent;
 use codex_protocol::protocol::SubAgentSource;
 use codex_utils_template::Template;
+use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
 use crate::codex::Session;
@@ -111,17 +112,21 @@ impl SessionTask for ReviewTask {
         "session_task.review"
     }
 
-    fn run(
+    async fn run(
         self: Arc<Self>,
         session: Arc<SessionTaskContext>,
         ctx: Arc<TurnContext>,
         input: Vec<UserInput>,
         cancellation_token: CancellationToken,
-    ) -> impl std::future::Future<Output = Option<String>> + Send {
-        async move {
-            let _ = self;
-            review_task_run(session, ctx, input, cancellation_token).await
-        }
+    ) -> Option<String> {
+        let _ = self;
+        tokio::task::spawn_blocking(move || {
+            let handle = Handle::current();
+            handle.block_on(review_task_run(session, ctx, input, cancellation_token))
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     async fn abort(&self, session: Arc<SessionTaskContext>, ctx: Arc<TurnContext>) {

@@ -108,7 +108,6 @@ async fn build_consolidation_prompt_points_to_extensions_without_inlining_them()
     assert!(!prompt.contains("source-specific instructions"));
     assert!(!prompt.contains("source-specific resource"));
 }
-
 #[tokio::test]
 async fn build_memory_tool_developer_instructions_renders_embedded_template() {
     let temp = tempdir().unwrap();

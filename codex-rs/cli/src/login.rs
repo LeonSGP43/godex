@@ -130,7 +130,7 @@ fn build_server_options(
     client_id: Option<String>,
 ) -> ServerOptions {
     let mut opts = ServerOptions::new(
-        config.codex_home.clone(),
+        config.codex_home.to_path_buf(),
         client_id.unwrap_or(CLIENT_ID.to_string()),
         config.forced_chatgpt_workspace_id.clone(),
         config.cli_auth_credentials_store_mode,
@@ -183,7 +183,7 @@ pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) ->
     let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
     exit_login_result(
         login_with_chatgpt(
-            config.codex_home,
+            config.codex_home.to_path_buf(),
             forced_chatgpt_workspace_id,
             config.cli_auth_credentials_store_mode,
         )

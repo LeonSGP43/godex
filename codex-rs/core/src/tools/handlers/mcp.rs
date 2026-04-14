@@ -1,65 +1,66 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
 use crate::mcp_tool_call::handle_mcp_tool_call;
+use crate::tools::context::McpToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
-use codex_protocol::mcp::CallToolResult;
+use tokio::runtime::Handle;
 
 pub struct McpHandler;
 impl ToolHandler for McpHandler {
-    type Output = CallToolResult;
+    type Output = McpToolOutput;
 
     fn kind(&self) -> ToolKind {
         ToolKind::Mcp
     }
 
-    fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
-        async move { handle_mcp_invocation(invocation).await }
+    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+        let ToolInvocation {
+            session,
+            turn,
+            call_id,
+            payload,
+            ..
+        } = invocation;
+
+        let payload = match payload {
+            ToolPayload::Mcp {
+                server,
+                tool,
+                raw_arguments,
+            } => (server, tool, raw_arguments),
+            _ => {
+                return Err(FunctionCallError::RespondToModel(
+                    "mcp handler received unsupported payload".to_string(),
+                ));
+            }
+        };
+
+        let (server, tool, raw_arguments) = payload;
+        let arguments_str = raw_arguments;
+
+        let started = Instant::now();
+        let result = tokio::task::spawn_blocking(move || {
+            let handle = Handle::current();
+            handle.block_on(handle_mcp_tool_call(
+                Arc::clone(&session),
+                turn,
+                call_id.clone(),
+                server,
+                tool,
+                arguments_str,
+            ))
+        })
+        .await
+        .map_err(|err| FunctionCallError::RespondToModel(format!("mcp tool task join failed: {err}")))?;
+
+        Ok(McpToolOutput {
+            result,
+            wall_time: started.elapsed(),
+        })
     }
-}
-
-async fn handle_mcp_invocation(
-    invocation: ToolInvocation,
-) -> Result<CallToolResult, FunctionCallError> {
-    let ToolInvocation {
-        session,
-        turn,
-        call_id,
-        payload,
-        ..
-    } = invocation;
-
-    let payload = match payload {
-        ToolPayload::Mcp {
-            server,
-            tool,
-            raw_arguments,
-        } => (server, tool, raw_arguments),
-        _ => {
-            return Err(FunctionCallError::RespondToModel(
-                "mcp handler received unsupported payload".to_string(),
-            ));
-        }
-    };
-
-    let (server, tool, raw_arguments) = payload;
-    let arguments_str = raw_arguments;
-
-    let output = handle_mcp_tool_call(
-        Arc::clone(&session),
-        turn,
-        call_id.clone(),
-        server,
-        tool,
-        arguments_str,
-    )
-    .await;
-
-    Ok(output)
 }
