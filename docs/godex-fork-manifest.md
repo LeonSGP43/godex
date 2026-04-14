@@ -16,9 +16,9 @@ default during sync and conflict resolution.
 ## Current Upstream Baseline
 
 <!-- BEGIN GODEX UPSTREAM BASELINE -->
-- Upstream release baseline tag: `rust-v0.118.0`
-- Upstream release baseline commit: `b630ce9a4e754d35a1f33e4366ba638d18626142`
-- Upstream merged main commit: `3b24a9a53264f96e7caeea0577b994b0d10a8c6f`
+- Upstream release baseline tag: `rust-v0.120.0`
+- Upstream release baseline commit: `65319eb1400cbd2890c43d572263dabd25f18ba9`
+- Upstream merged main commit: `a6b03a22cc35b36d46065185c7982cd02bb82c4e`
 <!-- END GODEX UPSTREAM BASELINE -->
 
 These values must stay aligned with the root-level `UPSTREAM_VERSION` and
