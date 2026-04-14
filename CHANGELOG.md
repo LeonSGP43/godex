@@ -8,11 +8,11 @@ All notable changes to this fork are documented in this file.
 
 ### Changed
 
-- What changed: merged the current official `upstream/main` snapshot through commit `d9a385ac8c2ff91b3180cddd3c973095eafb2d88`, resolved the post-merge TUI and CLI compile boundary mismatches, and restored a green `cargo check -p codex-cli --bin godex`.
+- What changed: merged the current official `upstream/main` snapshot through commit `3b24a9a53264f96e7caeea0577b994b0d10a8c6f`, resolved the post-merge TUI and CLI compile boundary mismatches plus the follow-up async API drift in thread spawn and MCP dependency refresh, and restored a green `cargo check -p codex-cli --bin godex`.
 - Why: the fork needs to stay caught up with the latest official Codex code while keeping the fork-owned backend, memory, namespace, and branding seams intact.
 - Impact: this sync branch now fully contains the latest fetched official upstream `main`, `godex` compiles again on top of that code, and the remaining drift is fork-owned divergence rather than an incomplete upstream merge.
 - Verification: `git merge-base --is-ancestor upstream/main HEAD`, `git rev-list --left-right --count HEAD...upstream/main`, `cargo check -p codex-cli --bin godex --manifest-path codex-rs/Cargo.toml`
-- Files: `codex-rs/core/src/thread_manager.rs`, `codex-rs/core/src/tools/runtimes/shell.rs`, `codex-rs/core/src/tools/network_approval.rs`, `codex-rs/app-server/src/codex_message_processor.rs`, `codex-rs/tui/src/lib.rs`, `codex-rs/cli/src/mcp_cmd.rs`, `codex-rs/app-server-client/src/lib.rs`
+- Files: `codex-rs/core/src/thread_manager.rs`, `codex-rs/core/src/mcp_skill_dependencies.rs`, `codex-rs/core/src/tools/runtimes/shell.rs`, `codex-rs/core/src/tools/network_approval.rs`, `codex-rs/app-server/src/codex_message_processor.rs`, `codex-rs/tui/src/lib.rs`, `codex-rs/cli/src/mcp_cmd.rs`, `codex-rs/app-server-client/src/lib.rs`
 
 ### Changed
 

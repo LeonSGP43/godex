@@ -188,11 +188,11 @@ Detailed developer documentation:
 ## Current Install Status
 
 <!-- BEGIN GODEX UPSTREAM BASELINE -->
-This repository is synced through official upstream release `rust-v0.118.0` and merged upstream `main` commit `d9a385ac8c2ff91b3180cddd3c973095eafb2d88`.
+This repository is synced through official upstream release `rust-v0.118.0` and merged upstream `main` commit `3b24a9a53264f96e7caeea0577b994b0d10a8c6f`.
 
 - Upstream release baseline tag: `rust-v0.118.0`
 - Upstream release baseline commit: `b630ce9a4e754d35a1f33e4366ba638d18626142`
-- Upstream merged main commit: `d9a385ac8c2ff91b3180cddd3c973095eafb2d88`
+- Upstream merged main commit: `3b24a9a53264f96e7caeea0577b994b0d10a8c6f`
 <!-- END GODEX UPSTREAM BASELINE -->
 
 - Daily-use local runtime channel: the published npm package `@leonsgp43/godex`.
