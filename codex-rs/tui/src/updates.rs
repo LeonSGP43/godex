@@ -131,7 +131,7 @@ struct ReleaseInfo {
 }
 
 fn updates_filepath(config: &Config) -> PathBuf {
-    config.codex_home.join(UPDATES_FILENAME)
+    config.codex_home.join(UPDATES_FILENAME).to_path_buf()
 }
 
 fn read_updates_state(updates_file: &Path) -> anyhow::Result<UpdatesState> {
