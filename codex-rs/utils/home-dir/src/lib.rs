@@ -1,3 +1,4 @@
+use codex_utils_absolute_path::AbsolutePathBuf;
 use dirs::home_dir;
 use std::path::PathBuf;
 
@@ -32,8 +33,8 @@ impl ConfigNamespace {
 ///   value will be canonicalized and this function will Err otherwise.
 /// - If `CODEX_HOME` is not set, this function does not verify that the
 ///   directory exists.
-pub fn find_codex_home() -> std::io::Result<PathBuf> {
-    find_home(ConfigNamespace::CodexCompatible)
+pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
+    AbsolutePathBuf::from_absolute_path(find_home(ConfigNamespace::CodexCompatible)?)
 }
 
 pub fn find_home(namespace: ConfigNamespace) -> std::io::Result<PathBuf> {
@@ -69,12 +70,13 @@ fn find_home_from_env(
                     format!("{env_var_name} points to {val:?}, but that path is not a directory"),
                 ))
             } else {
-                path.canonicalize().map_err(|err| {
+                let canonical = path.canonicalize().map_err(|err| {
                     std::io::Error::new(
                         err.kind(),
                         format!("failed to canonicalize {env_var_name} {val:?}: {err}"),
                     )
-                })
+                })?;
+                Ok(canonical)
             }
         }
         None => {
@@ -94,6 +96,7 @@ fn find_home_from_env(
 mod tests {
     use super::ConfigNamespace;
     use super::find_home_from_env;
+    use codex_utils_absolute_path::AbsolutePathBuf;
     use dirs::home_dir;
     use pretty_assertions::assert_eq;
     use std::fs;

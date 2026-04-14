@@ -100,7 +100,7 @@ async fn load_role_layer_toml_owned(
             .map(str::to_owned)
             .ok_or(anyhow!("No corresponding config content"))?;
         let role_config_toml: TomlValue = toml::from_str(&role_config_contents)?;
-        (role_config_toml, config.codex_home.clone())
+        (role_config_toml, config.codex_home.to_path_buf())
     } else {
         let role_config_contents = tokio::fs::read_to_string(&config_file).await?;
         let role_config_base = config_file

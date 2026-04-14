@@ -24,7 +24,7 @@ use crate::updates::GodexUpdateNotice;
 #[cfg(not(debug_assertions))]
 use crate::updates::UpstreamReleaseGapNotice;
 use crate::version::CODEX_CLI_VERSION;
-use codex_core::config::edit::ConfigEditsBuilder;
+use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use color_eyre::eyre::Result;
 use ratatui::text::Line;
 
@@ -172,7 +172,7 @@ impl App {
 
     pub(super) async fn apply_status_line_setup(&mut self, items: Vec<StatusLineItem>) {
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let edit = codex_core::config::edit::status_line_items_edit(&ids);
+        let edit = crate::legacy_core::config::edit::status_line_items_edit(&ids);
         let apply_result = ConfigEditsBuilder::new(&self.config.codex_home)
             .with_edits([edit])
             .apply()
@@ -195,7 +195,7 @@ impl App {
 
     pub(super) async fn apply_terminal_title_setup(&mut self, items: Vec<TerminalTitleItem>) {
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let edit = codex_core::config::edit::terminal_title_items_edit(&ids);
+        let edit = crate::legacy_core::config::edit::terminal_title_items_edit(&ids);
         let apply_result = ConfigEditsBuilder::new(&self.config.codex_home)
             .with_edits([edit])
             .apply()

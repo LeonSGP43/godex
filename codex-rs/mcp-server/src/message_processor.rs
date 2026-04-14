@@ -29,6 +29,7 @@ use rmcp::model::RequestId;
 use rmcp::model::ServerCapabilities;
 use rmcp::model::ToolsCapability;
 use serde_json::json;
+use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 use tokio::task;
 
@@ -70,6 +71,7 @@ impl MessageProcessor {
                     .enabled(Feature::DefaultModeRequestUserInput),
             },
             environment_manager,
+            /*analytics_events_client*/ None,
         ));
         Self {
             outgoing,
@@ -410,15 +412,17 @@ impl MessageProcessor {
         // Spawn an async task to handle the Codex session so that we do not
         // block the synchronous message-processing loop.
         task::spawn(async move {
-            // Run the Codex session and stream events back to the client.
-            crate::codex_tool_runner::run_codex_tool_session(
-                id,
-                initial_prompt,
-                config,
-                outgoing,
-                thread_manager,
-                running_requests_id_to_codex_uuid,
-            )
+            let _ = task::spawn_blocking(move || {
+                let handle = Handle::current();
+                handle.block_on(crate::codex_tool_runner::run_codex_tool_session(
+                    id,
+                    initial_prompt,
+                    config,
+                    outgoing,
+                    thread_manager,
+                    running_requests_id_to_codex_uuid,
+                ))
+            })
             .await;
         });
     }

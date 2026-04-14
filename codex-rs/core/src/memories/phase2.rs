@@ -2,7 +2,6 @@ use crate::agent::AgentStatus;
 use crate::agent::status::is_final as is_final_agent_status;
 use crate::codex::Session;
 use crate::codex::emit_subagent_session_started;
-use crate::codex_thread::ThreadConfigSnapshot;
 use crate::config::Config;
 use crate::memories::metrics;
 use crate::memories::phase_two;
@@ -202,20 +201,6 @@ pub(super) async fn run(session: Arc<Session>, config: Arc<Config>) {
     // 5. Spawn the agent
     let prompt = agent::get_prompt(&root, &selection);
     let source = SessionSource::SubAgent(SubAgentSource::MemoryConsolidation);
-    let analytics_thread_config = ThreadConfigSnapshot {
-        agent_backend_id: agent_config.agent_backend_id.clone(),
-        model: agent_config.model.clone().unwrap_or_default(),
-        model_provider_id: agent_config.model_provider_id.clone(),
-        service_tier: agent_config.service_tier,
-        approval_policy: agent_config.permissions.approval_policy.value(),
-        approvals_reviewer: agent_config.approvals_reviewer,
-        sandbox_policy: agent_config.permissions.sandbox_policy.get().clone(),
-        cwd: agent_config.cwd.to_path_buf(),
-        ephemeral: agent_config.ephemeral,
-        reasoning_effort: agent_config.model_reasoning_effort,
-        personality: agent_config.personality,
-        session_source: source.clone(),
-    };
     let agent_control = session.services.agent_control.clone();
     let thread_id = match require_send(agent_control.clone().spawn_agent_owned(
         agent_config,
@@ -238,14 +223,25 @@ pub(super) async fn run(session: Arc<Session>, config: Arc<Config>) {
         }
     };
 
-    if session.enabled(Feature::GeneralAnalytics) {
-        emit_subagent_session_started(
-            &session.services.analytics_events_client,
-            crate::codex::AppServerClientMetadata::default(),
-            thread_id,
-            analytics_thread_config,
-            SubAgentSource::MemoryConsolidation,
-        );
+    if let Some(thread_config) = session
+        .services
+        .agent_control
+        .get_agent_config_snapshot(thread_id)
+        .await
+    {
+        if session.enabled(Feature::GeneralAnalytics) {
+            let client_metadata = session.app_server_client_metadata().await;
+            emit_subagent_session_started(
+                &session.services.analytics_events_client,
+                client_metadata,
+                thread_id,
+                /*parent_thread_id*/ None,
+                thread_config,
+                SubAgentSource::MemoryConsolidation,
+            );
+        }
+    } else {
+        warn!("failed to load memory consolidation thread config for analytics: {thread_id}");
     }
 
     // 6. Spawn the agent handler.

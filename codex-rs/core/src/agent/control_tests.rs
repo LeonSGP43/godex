@@ -173,7 +173,7 @@ impl AgentControlHarness {
         let manager = ThreadManager::with_models_provider_and_home_for_tests(
             CodexAuth::from_api_key("dummy"),
             config.model_provider.clone(),
-            config.codex_home.clone(),
+            config.codex_home.to_path_buf(),
             std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
                 /*exec_server_url*/ None,
             )),
@@ -276,7 +276,12 @@ async fn persist_thread_for_tree_resume(thread: &Arc<CodexThread>, message: &str
         .inject_user_message_without_turn(message.to_string())
         .await;
     thread.codex.session.ensure_rollout_materialized().await;
-    thread.codex.session.flush_rollout().await;
+    thread
+        .codex
+        .session
+        .flush_rollout()
+        .await
+        .expect("test thread rollout should flush");
 }
 
 async fn wait_for_live_thread_spawn_children(
@@ -710,7 +715,12 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
         .session
         .ensure_rollout_materialized()
         .await;
-    parent_thread.codex.session.flush_rollout().await;
+    parent_thread
+        .codex
+        .session
+        .flush_rollout()
+        .await
+        .expect("parent rollout should flush");
 
     let child_thread_id = harness
         .control
@@ -907,7 +917,12 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
         .session
         .ensure_rollout_materialized()
         .await;
-    parent_thread.codex.session.flush_rollout().await;
+    parent_thread
+        .codex
+        .session
+        .flush_rollout()
+        .await
+        .expect("parent rollout should flush");
 
     let child_thread_id = harness
         .control
@@ -976,7 +991,7 @@ async fn spawn_agent_respects_max_threads_limit() {
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
-        config.codex_home.clone(),
+        config.codex_home.to_path_buf(),
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,
         )),
@@ -1030,7 +1045,7 @@ async fn spawn_agent_releases_slot_after_shutdown() {
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
-        config.codex_home.clone(),
+        config.codex_home.to_path_buf(),
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,
         )),
@@ -1075,7 +1090,7 @@ async fn spawn_agent_limit_shared_across_clones() {
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
-        config.codex_home.clone(),
+        config.codex_home.to_path_buf(),
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,
         )),
@@ -1111,67 +1126,63 @@ async fn spawn_agent_limit_shared_across_clones() {
         .expect("shutdown agent");
 }
 
-#[test]
-fn resume_agent_respects_max_threads_limit() {
-    run_async_test_with_large_tokio_worker_stack(
-        "resume_agent_respects_max_threads_limit",
-        || async move {
-            let max_threads = 1usize;
-            let (_home, config) = test_config_with_cli_overrides(vec![(
-                "agents.max_threads".to_string(),
-                TomlValue::Integer(max_threads as i64),
-            )])
-            .await;
-            let manager = ThreadManager::with_models_provider_and_home_for_tests(
-                CodexAuth::from_api_key("dummy"),
-                config.model_provider.clone(),
-                config.codex_home.clone(),
-                std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
-                    /*exec_server_url*/ None,
-                )),
-            );
-            let control = manager.agent_control();
-
-            let resumable_id = control
-                .spawn_agent(
-                    config.clone(),
-                    text_input("hello"),
-                    /*session_source*/ None,
-                )
-                .await
-                .expect("spawn_agent should succeed");
-            let _ = control
-                .shutdown_live_agent(resumable_id)
-                .await
-                .expect("shutdown resumable thread");
-
-            let active_id = control
-                .spawn_agent(
-                    config.clone(),
-                    text_input("occupy"),
-                    /*session_source*/ None,
-                )
-                .await
-                .expect("spawn_agent should succeed for active slot");
-
-            let err = control
-                .resume_agent_from_rollout(config, resumable_id, SessionSource::Exec)
-                .await
-                .expect_err("resume should respect max threads");
-            let CodexErr::AgentLimitReached {
-                max_threads: seen_max_threads,
-            } = err
-            else {
-                panic!("expected CodexErr::AgentLimitReached");
-            };
-            assert_eq!(seen_max_threads, max_threads);
-
-            let _ = control
-                .shutdown_live_agent(active_id)
-                .await
-                .expect("shutdown active thread");
-        },
+#[tokio::test]
+async fn resume_agent_respects_max_threads_limit() {
+    let max_threads = 1usize;
+    let (_home, config) = test_config_with_cli_overrides(vec![(
+        "agents.max_threads".to_string(),
+        TomlValue::Integer(max_threads as i64),
+    )])
+    .await;
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
+            /*exec_server_url*/ None,
+        )),
     );
+
+    let control = manager.agent_control();
+
+    let resumable_id = control
+        .spawn_agent(
+            config.clone(),
+            text_input("hello"),
+            /*session_source*/ None,
+        )
+        .await
+        .expect("spawn_agent should succeed");
+    let _ = control
+        .shutdown_live_agent(resumable_id)
+        .await
+        .expect("shutdown resumable thread");
+
+    let active_id = control
+        .spawn_agent(
+            config.clone(),
+            text_input("occupy"),
+            /*session_source*/ None,
+        )
+        .await
+        .expect("spawn_agent should succeed for active slot");
+
+    let err = control
+        .resume_agent_from_rollout(config, resumable_id, SessionSource::Exec)
+        .await
+        .expect_err("resume should respect max threads");
+    let CodexErr::AgentLimitReached {
+        max_threads: seen_max_threads,
+    } = err
+    else {
+        panic!("expected CodexErr::AgentLimitReached");
+    };
+    assert_eq!(seen_max_threads, max_threads);
+
+    let _ = control
+        .shutdown_live_agent(active_id)
+        .await
+        .expect("shutdown active thread");
 }
 
 #[tokio::test]
@@ -1185,7 +1196,7 @@ async fn resume_agent_releases_slot_after_resume_failure() {
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
-        config.codex_home.clone(),
+        config.codex_home.to_path_buf(),
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,
         )),
@@ -1582,7 +1593,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
-        config.codex_home.clone(),
+        config.codex_home.to_path_buf(),
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,
         )),

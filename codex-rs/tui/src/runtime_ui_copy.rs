@@ -5,7 +5,7 @@ use ratatui::style::Stylize;
 pub(crate) fn branded_title_line(indent: &str, version: &str) -> Line<'static> {
     Line::from(vec![
         Span::from(format!("{indent}>_ ")).dim(),
-        Span::from(codex_core::branding::APP_DISPLAY_NAME).bold(),
+        Span::from(crate::legacy_core::branding::APP_DISPLAY_NAME).bold(),
         Span::from(" ").dim(),
         Span::from(format!("(v{version})")).dim(),
     ])

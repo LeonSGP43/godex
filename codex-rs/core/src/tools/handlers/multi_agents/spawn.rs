@@ -4,7 +4,6 @@ use crate::agent::control::SpawnAgentOptions;
 use crate::agent::control::render_input_preview;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config_by_value_owned;
-
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
 
@@ -21,11 +20,8 @@ impl ToolHandler for Handler {
         matches!(payload, ToolPayload::Function { .. })
     }
 
-    fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send {
-        async move { handle_spawn_agent(invocation).await }
+    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+        handle_spawn_agent(invocation).await
     }
 }
 

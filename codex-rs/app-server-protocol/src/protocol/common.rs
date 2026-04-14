@@ -284,6 +284,11 @@ client_request_definitions! {
         params: v2::ThreadMetadataUpdateParams,
         response: v2::ThreadMetadataUpdateResponse,
     },
+    #[experimental("thread/memoryMode/set")]
+    ThreadMemoryModeSet => "thread/memoryMode/set" {
+        params: v2::ThreadMemoryModeSetParams,
+        response: v2::ThreadMemoryModeSetResponse,
+    },
     ThreadUnarchive => "thread/unarchive" {
         params: v2::ThreadUnarchiveParams,
         response: v2::ThreadUnarchiveResponse,
@@ -295,10 +300,6 @@ client_request_definitions! {
     ThreadShellCommand => "thread/shellCommand" {
         params: v2::ThreadShellCommandParams,
         response: v2::ThreadShellCommandResponse,
-    },
-    ThreadAddCreditsNudgeEmail => "thread/addCreditsNudgeEmail" {
-        params: v2::ThreadAddCreditsNudgeEmailParams,
-        response: v2::ThreadAddCreditsNudgeEmailResponse,
     },
     #[experimental("thread/backgroundTerminals/clean")]
     ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean" {
@@ -321,9 +322,18 @@ client_request_definitions! {
         params: v2::ThreadReadParams,
         response: v2::ThreadReadResponse,
     },
+    /// Append raw Responses API items to the thread history without starting a user turn.
+    ThreadInjectItems => "thread/inject_items" {
+        params: v2::ThreadInjectItemsParams,
+        response: v2::ThreadInjectItemsResponse,
+    },
     SkillsList => "skills/list" {
         params: v2::SkillsListParams,
         response: v2::SkillsListResponse,
+    },
+    MarketplaceAdd => "marketplace/add" {
+        params: v2::MarketplaceAddParams,
+        response: v2::MarketplaceAddResponse,
     },
     PluginList => "plugin/list" {
         params: v2::PluginListParams,
@@ -472,6 +482,11 @@ client_request_definitions! {
     McpResourceRead => "mcpServer/resource/read" {
         params: v2::McpResourceReadParams,
         response: v2::McpResourceReadResponse,
+    },
+
+    McpServerToolCall => "mcpServer/tool/call" {
+        params: v2::McpServerToolCallParams,
+        response: v2::McpServerToolCallResponse,
     },
 
     WindowsSandboxSetupStart => "windowsSandbox/setupStart" {
@@ -995,7 +1010,6 @@ server_notification_definitions! {
     McpServerStatusUpdated => "mcpServer/startupStatus/updated" (v2::McpServerStatusUpdatedNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
     AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
-    AddCreditsNudgeEmailCompleted => "account/addCreditsNudgeEmail/completed" (v2::AddCreditsNudgeEmailNotification),
     AppListUpdated => "app/list/updated" (v2::AppListUpdatedNotification),
     FsChanged => "fs/changed" (v2::FsChangedNotification),
     ReasoningSummaryTextDelta => "item/reasoning/summaryTextDelta" (v2::ReasoningSummaryTextDeltaNotification),
@@ -1405,6 +1419,7 @@ mod tests {
                 model_provider: "openai".to_string(),
                 service_tier: None,
                 cwd: PathBuf::from("/tmp"),
+                instruction_sources: vec![PathBuf::from("/tmp/AGENTS.md")],
                 approval_policy: v2::AskForApproval::OnFailure,
                 approvals_reviewer: v2::ApprovalsReviewer::User,
                 sandbox: v2::SandboxPolicy::DangerFullAccess,
@@ -1444,6 +1459,7 @@ mod tests {
                     "modelProvider": "openai",
                     "serviceTier": null,
                     "cwd": "/tmp",
+                    "instructionSources": ["/tmp/AGENTS.md"],
                     "approvalPolicy": "on-failure",
                     "approvalsReviewer": "user",
                     "sandbox": {

@@ -62,10 +62,11 @@ If `main` is ahead of `origin/main`, it now requires all of the following:
 - `codex-rs/Cargo.toml` matches `VERSION`
 - `CHANGELOG.md` has a `## [<version>]` section for that version
 - `## [Unreleased]` no longer carries the release entries being pushed
-- `UPSTREAM_VERSION` and `UPSTREAM_COMMIT` both exist
+- `UPSTREAM_VERSION`, `UPSTREAM_COMMIT`, and `UPSTREAM_HEAD_COMMIT` all exist
 - `README.md`, `docs/godex-fork-manifest.md`, and the root upstream metadata
   files all agree on the same upstream baseline tag and commit
 - `UPSTREAM_COMMIT` resolves to the commit pointed to by `UPSTREAM_VERSION`
+- `UPSTREAM_HEAD_COMMIT` resolves to the locally fetched `upstream/main` head and is already merged into `HEAD`
 
 Recommended version cadence:
 

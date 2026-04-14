@@ -3,8 +3,6 @@
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
-use codex_core::branding;
-use codex_core::config::Config;
 use codex_login::default_client::create_client;
 use serde::Deserialize;
 use serde::Serialize;
@@ -12,6 +10,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::legacy_core::branding;
+use crate::legacy_core::config::Config;
 use crate::version::CODEX_CLI_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

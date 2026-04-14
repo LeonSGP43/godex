@@ -11,7 +11,7 @@ pub(crate) mod zsh_fork_backend;
 use crate::command_canonicalization::canonicalize_command_for_approval;
 use crate::exec::ExecCapturePolicy;
 use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::review_approval_request;
+use crate::guardian::review_approval_request_owned;
 use crate::sandboxing::ExecOptions;
 use crate::sandboxing::SandboxPermissions;
 use crate::sandboxing::execute_env;
@@ -31,7 +31,6 @@ use crate::tools::sandboxing::ToolError;
 use crate::tools::sandboxing::ToolRuntime;
 use crate::tools::sandboxing::sandbox_override_for_first_attempt;
 use codex_network_proxy::NetworkProxy;
-use codex_protocol::approvals::ExecPolicyAmendment;
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::ReviewDecision;
@@ -40,7 +39,7 @@ use codex_shell_command::powershell::prefix_powershell_script_with_utf8;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
-use std::sync::Arc;
+use tokio::runtime::Handle;
 
 #[derive(Clone, Debug)]
 pub struct ShellRequest {
@@ -116,129 +115,6 @@ impl ShellRuntime {
             tx_event: ctx.session.get_tx_event(),
         })
     }
-
-    async fn review_request_owned(
-        session: Arc<crate::codex::Session>,
-        turn: Arc<crate::codex::TurnContext>,
-        review_id: String,
-        request: GuardianApprovalRequest,
-        retry_reason: Option<String>,
-    ) -> ReviewDecision {
-        review_approval_request(session, turn, review_id, request, retry_reason).await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn request_command_approval_owned(
-        session: Arc<crate::codex::Session>,
-        turn: Arc<crate::codex::TurnContext>,
-        call_id: String,
-        command: Vec<String>,
-        cwd: std::path::PathBuf,
-        reason: Option<String>,
-        network_approval_context: Option<codex_protocol::approvals::NetworkApprovalContext>,
-        proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
-        additional_permissions: Option<PermissionProfile>,
-        available_decisions: Option<Vec<ReviewDecision>>,
-    ) -> ReviewDecision {
-        session
-            .request_command_approval_owned(
-                turn,
-                call_id,
-                /*approval_id*/ None,
-                command,
-                cwd,
-                reason,
-                network_approval_context,
-                proposed_execpolicy_amendment,
-                additional_permissions,
-                available_decisions,
-            )
-            .await
-    }
-
-    async fn already_approved_owned(
-        session: Arc<crate::codex::Session>,
-        keys: Vec<ApprovalKey>,
-    ) -> bool {
-        let store = session.services.tool_approvals.lock().await;
-        keys.iter()
-            .all(|key| matches!(store.get(key), Some(ReviewDecision::ApprovedForSession)))
-    }
-
-    async fn remember_approval_keys_owned(
-        session: Arc<crate::codex::Session>,
-        keys: Vec<ApprovalKey>,
-    ) {
-        let mut store = session.services.tool_approvals.lock().await;
-        for key in keys {
-            store.put(key, ReviewDecision::ApprovedForSession);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn start_approval_owned(
-        session: Arc<crate::codex::Session>,
-        turn: Arc<crate::codex::TurnContext>,
-        keys: Vec<ApprovalKey>,
-        call_id: String,
-        command: Vec<String>,
-        cwd: std::path::PathBuf,
-        retry_reason: Option<String>,
-        reason: Option<String>,
-        guardian_review_id: Option<String>,
-        network_approval_context: Option<codex_protocol::approvals::NetworkApprovalContext>,
-        sandbox_permissions: SandboxPermissions,
-        additional_permissions: Option<PermissionProfile>,
-        justification: Option<String>,
-        proposed_execpolicy_amendment: Option<ExecPolicyAmendment>,
-    ) -> ReviewDecision {
-        if let Some(review_id) = guardian_review_id {
-            return ShellRuntime::review_request_owned(
-                session,
-                turn,
-                review_id,
-                GuardianApprovalRequest::Shell {
-                    id: call_id,
-                    command,
-                    cwd,
-                    sandbox_permissions,
-                    additional_permissions: additional_permissions.clone(),
-                    justification,
-                },
-                retry_reason,
-            )
-            .await;
-        }
-        let already_approved =
-            ShellRuntime::already_approved_owned(session.clone(), keys.clone()).await;
-        if already_approved {
-            return ReviewDecision::ApprovedForSession;
-        }
-
-        let available_decisions = None;
-        let decision = ShellRuntime::request_command_approval_owned(
-            session.clone(),
-            turn,
-            call_id,
-            command,
-            cwd,
-            reason,
-            network_approval_context,
-            proposed_execpolicy_amendment,
-            additional_permissions,
-            available_decisions,
-        )
-        .await;
-        session.services.session_telemetry.counter(
-            "codex.approval.requested",
-            /*inc*/ 1,
-            &[("tool", "shell"), ("approved", decision.to_opaque_string())],
-        );
-        if matches!(decision, ReviewDecision::ApprovedForSession) {
-            ShellRuntime::remember_approval_keys_owned(session, keys).await;
-        }
-        decision
-    }
 }
 
 impl Sandboxable for ShellRuntime {
@@ -272,8 +148,8 @@ impl Approvable<ShellRequest> for ShellRuntime {
         let cwd = req.cwd.to_path_buf();
         let retry_reason = ctx.retry_reason.clone();
         let reason = retry_reason.clone().or_else(|| req.justification.clone());
-        let session = Arc::clone(ctx.session);
-        let turn = Arc::clone(ctx.turn);
+        let session = std::sync::Arc::clone(ctx.session);
+        let turn = std::sync::Arc::clone(ctx.turn);
         let call_id = ctx.call_id.to_string();
         let guardian_review_id = ctx.guardian_review_id.clone();
         let network_approval_context = ctx.network_approval_context.clone();
@@ -285,23 +161,67 @@ impl Approvable<ShellRequest> for ShellRuntime {
             .proposed_execpolicy_amendment()
             .cloned();
         Box::pin(async move {
-            ShellRuntime::start_approval_owned(
-                session,
-                turn,
-                keys,
-                call_id,
-                command,
-                cwd,
-                retry_reason,
-                reason,
-                guardian_review_id,
-                network_approval_context,
-                sandbox_permissions,
-                additional_permissions,
-                justification,
-                proposed_execpolicy_amendment,
-            )
+            tokio::task::spawn_blocking(move || {
+                let handle = Handle::current();
+                handle.block_on(async move {
+                    if let Some(review_id) = guardian_review_id {
+                        return review_approval_request_owned(
+                            session.clone(),
+                            turn.clone(),
+                            review_id,
+                            GuardianApprovalRequest::Shell {
+                                id: call_id,
+                                command,
+                                cwd,
+                                sandbox_permissions,
+                                additional_permissions,
+                                justification,
+                            },
+                            retry_reason,
+                        )
+                        .await;
+                    }
+                    let already_approved = {
+                        let store = session.services.tool_approvals.lock().await;
+                        keys.iter().all(|key| {
+                            matches!(store.get(key), Some(ReviewDecision::ApprovedForSession))
+                        })
+                    };
+                    if already_approved {
+                        return ReviewDecision::ApprovedForSession;
+                    }
+                    let available_decisions = None;
+                    let decision = session
+                        .clone()
+                        .request_command_approval_owned(
+                            turn,
+                            call_id,
+                            /*approval_id*/ None,
+                            command,
+                            cwd,
+                            reason,
+                            network_approval_context,
+                            proposed_execpolicy_amendment,
+                            additional_permissions,
+                            available_decisions,
+                        )
+                        .await;
+                    session.services.session_telemetry.counter(
+                        "codex.approval.requested",
+                        /*inc*/ 1,
+                        &[("tool", "shell"), ("approved", decision.to_opaque_string())],
+                    );
+                    if matches!(decision, ReviewDecision::ApprovedForSession) {
+                        let mut store = session.services.tool_approvals.lock().await;
+                        for key in keys {
+                            store.put(key, ReviewDecision::ApprovedForSession);
+                        }
+                    }
+                    decision
+                })
+            })
             .await
+            .unwrap_or(ReviewDecision::Abort)
         })
     }
 

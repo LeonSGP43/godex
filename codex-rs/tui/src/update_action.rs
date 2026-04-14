@@ -1,5 +1,5 @@
 #[cfg(not(debug_assertions))]
-use codex_core::config::Config;
+use crate::legacy_core::config::Config;
 
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +23,7 @@ impl UpdateAction {
                 &[
                     "install",
                     "-g",
-                    codex_core::branding::APP_PACKAGE_INSTALL_SPEC,
+                    crate::legacy_core::branding::APP_PACKAGE_INSTALL_SPEC,
                 ],
             ),
             UpdateAction::BunGlobalLatest => (
@@ -31,7 +31,7 @@ impl UpdateAction {
                 &[
                     "install",
                     "-g",
-                    codex_core::branding::APP_PACKAGE_INSTALL_SPEC,
+                    crate::legacy_core::branding::APP_PACKAGE_INSTALL_SPEC,
                 ],
             ),
             UpdateAction::BrewUpgrade => (
@@ -39,11 +39,11 @@ impl UpdateAction {
                 &[
                     "upgrade",
                     "--cask",
-                    codex_core::branding::APP_BREW_PACKAGE_NAME,
+                    crate::legacy_core::branding::APP_BREW_PACKAGE_NAME,
                 ],
             ),
             UpdateAction::SourceRepoSync => (
-                codex_core::branding::APP_EXECUTABLE_NAME,
+                crate::legacy_core::branding::APP_EXECUTABLE_NAME,
                 &["sync-upstream"],
             ),
         }

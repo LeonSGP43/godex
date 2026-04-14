@@ -203,7 +203,6 @@ pub(crate) fn parse_collab_input(
 /// approval policy, sandbox, and cwd. Role-specific overrides are layered after this step;
 /// skipping this helper and cloning stale config state directly can send the child agent out with
 /// the wrong provider or runtime policy.
-#[cfg(test)]
 pub(crate) fn build_agent_spawn_config(
     base_instructions: &BaseInstructions,
     turn: &TurnContext,
@@ -287,13 +286,14 @@ pub(crate) async fn build_spawn_agent_config_for_backend(
     Ok((config, resolved_backend))
 }
 
-#[cfg(test)]
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallError> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
     config.model = Some(turn.model_info.slug.clone());
     config.model_provider = turn.provider.clone();
-    config.model_reasoning_effort = turn.reasoning_effort;
+    config.model_reasoning_effort = turn
+        .reasoning_effort
+        .or(turn.model_info.default_reasoning_level);
     config.model_reasoning_summary = Some(turn.reasoning_summary);
     config.developer_instructions = turn.developer_instructions.clone();
     config.compact_prompt = turn.compact_prompt.clone();
@@ -316,11 +316,23 @@ fn build_agent_shared_config_owned(turn: Arc<TurnContext>) -> Result<Config, Fun
     Ok(config)
 }
 
+pub(crate) fn reject_full_fork_spawn_overrides(
+    agent_type: Option<&str>,
+    model: Option<&str>,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> Result<(), FunctionCallError> {
+    if agent_type.is_some() || model.is_some() || reasoning_effort.is_some() {
+        return Err(FunctionCallError::RespondToModel(
+            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without fork_context/fork_turns=all.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Copies runtime-only turn state onto a child config before it is handed to `AgentControl`.
 ///
 /// These values are chosen by the live turn rather than persisted config, so leaving them stale
 /// can make a child agent disagree with its parent about approval policy, cwd, or sandboxing.
-#[cfg(test)]
 pub(crate) fn apply_spawn_agent_runtime_overrides(
     config: &mut Config,
     turn: &TurnContext,

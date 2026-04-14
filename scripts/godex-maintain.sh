@@ -10,6 +10,7 @@ UPSTREAM_BRANCH="main"
 TRACKING_BRANCH="upstream-main"
 UPSTREAM_VERSION_FILE="$REPO_ROOT/UPSTREAM_VERSION"
 UPSTREAM_COMMIT_FILE="$REPO_ROOT/UPSTREAM_COMMIT"
+UPSTREAM_HEAD_COMMIT_FILE="$REPO_ROOT/UPSTREAM_HEAD_COMMIT"
 README_FILE="$REPO_ROOT/README.md"
 FORK_MANIFEST_FILE="$REPO_ROOT/docs/godex-fork-manifest.md"
 BASELINE_BLOCK_START="<!-- BEGIN GODEX UPSTREAM BASELINE -->"
@@ -503,21 +504,29 @@ resolve_upstream_baseline_commit() {
 render_readme_upstream_baseline_block() {
   local tag="$1"
   local commit="$2"
+  local head_commit="$3"
   cat <<EOF
-This release line is now synced through official upstream \`$tag\`.
+This repository is synced through official upstream release \`$tag\` and merged upstream \`main\` commit \`$head_commit\`.
 
-- Upstream baseline tag: \`$tag\`
-- Upstream baseline commit: \`$commit\`
+- Upstream release baseline tag: \`$tag\`
+- Upstream release baseline commit: \`$commit\`
+- Upstream merged main commit: \`$head_commit\`
 EOF
 }
 
 render_manifest_upstream_baseline_block() {
   local tag="$1"
   local commit="$2"
+  local head_commit="$3"
   cat <<EOF
-- Upstream baseline tag: \`$tag\`
-- Upstream baseline commit: \`$commit\`
+- Upstream release baseline tag: \`$tag\`
+- Upstream release baseline commit: \`$commit\`
+- Upstream merged main commit: \`$head_commit\`
 EOF
+}
+
+resolve_upstream_head_commit() {
+  git -C "$REPO_ROOT" rev-parse "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH^{commit}"
 }
 
 refresh_upstream_metadata() {
@@ -549,17 +558,23 @@ refresh_upstream_metadata() {
   baseline_commit="$(resolve_upstream_baseline_commit "$baseline_tag")"
   [[ -n "$baseline_commit" ]] || die "failed to resolve commit for upstream baseline tag: $baseline_tag"
 
+  local upstream_head_commit
+  upstream_head_commit="$(resolve_upstream_head_commit)"
+  [[ -n "$upstream_head_commit" ]] || die "failed to resolve upstream head commit for $UPSTREAM_REMOTE/$UPSTREAM_BRANCH"
+
   local readme_block manifest_block
-  readme_block="$(render_readme_upstream_baseline_block "$baseline_tag" "$baseline_commit")"
-  manifest_block="$(render_manifest_upstream_baseline_block "$baseline_tag" "$baseline_commit")"
+  readme_block="$(render_readme_upstream_baseline_block "$baseline_tag" "$baseline_commit" "$upstream_head_commit")"
+  manifest_block="$(render_manifest_upstream_baseline_block "$baseline_tag" "$baseline_commit" "$upstream_head_commit")"
 
   step "Refreshing upstream baseline metadata"
   printf 'upstream_version: %s\n' "$baseline_tag"
   printf 'upstream_commit: %s\n' "$baseline_commit"
+  printf 'upstream_head_commit: %s\n' "$upstream_head_commit"
 
   if [[ "$dry_run" -eq 1 ]]; then
     printf 'would_write: %s\n' "$UPSTREAM_VERSION_FILE"
     printf 'would_write: %s\n' "$UPSTREAM_COMMIT_FILE"
+    printf 'would_write: %s\n' "$UPSTREAM_HEAD_COMMIT_FILE"
     printf 'would_update: %s\n' "$README_FILE"
     printf 'would_update: %s\n' "$FORK_MANIFEST_FILE"
     return
@@ -567,6 +582,7 @@ refresh_upstream_metadata() {
 
   set_file_content_if_changed "$UPSTREAM_VERSION_FILE" "$baseline_tag"
   set_file_content_if_changed "$UPSTREAM_COMMIT_FILE" "$baseline_commit"
+  set_file_content_if_changed "$UPSTREAM_HEAD_COMMIT_FILE" "$upstream_head_commit"
   replace_marked_block "$README_FILE" "$BASELINE_BLOCK_START" "$BASELINE_BLOCK_END" "$readme_block"
   replace_marked_block "$FORK_MANIFEST_FILE" "$BASELINE_BLOCK_START" "$BASELINE_BLOCK_END" "$manifest_block"
 }
@@ -576,12 +592,14 @@ validate_upstream_metadata_consistency() {
 
   [[ -f "$UPSTREAM_VERSION_FILE" ]] || die "missing UPSTREAM_VERSION"
   [[ -f "$UPSTREAM_COMMIT_FILE" ]] || die "missing UPSTREAM_COMMIT"
+  [[ -f "$UPSTREAM_HEAD_COMMIT_FILE" ]] || die "missing UPSTREAM_HEAD_COMMIT"
   [[ -f "$README_FILE" ]] || die "missing README.md"
   [[ -f "$FORK_MANIFEST_FILE" ]] || die "missing docs/godex-fork-manifest.md"
 
-  local upstream_version upstream_commit
+  local upstream_version upstream_commit upstream_head_commit
   upstream_version="$(read_trimmed_file "$UPSTREAM_VERSION_FILE")"
   upstream_commit="$(read_trimmed_file "$UPSTREAM_COMMIT_FILE")"
+  upstream_head_commit="$(read_trimmed_file "$UPSTREAM_HEAD_COMMIT_FILE")"
 
   if ! printf '%s\n' "$upstream_version" | rg -qx 'rust-v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?'; then
     die "UPSTREAM_VERSION is not a rust-v* SemVer tag: $upstream_version"
@@ -597,16 +615,34 @@ validate_upstream_metadata_consistency() {
     die "UPSTREAM_COMMIT ($upstream_commit) does not match $upstream_version ($resolved_commit)"
   fi
 
-  local readme_version readme_commit manifest_version manifest_commit
-  readme_version="$(extract_doc_baseline_value "$README_FILE" 'Upstream baseline tag')"
-  readme_commit="$(extract_doc_baseline_value "$README_FILE" 'Upstream baseline commit')"
-  manifest_version="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream baseline tag')"
-  manifest_commit="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream baseline commit')"
+  if ! printf '%s\n' "$upstream_head_commit" | rg -qx '[0-9a-f]{40}'; then
+    die "UPSTREAM_HEAD_COMMIT is not a full git commit hash: $upstream_head_commit"
+  fi
+
+  local resolved_head_commit
+  resolved_head_commit="$(git -C "$REPO_ROOT" rev-parse "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH^{commit}" 2>/dev/null || true)"
+  [[ -n "$resolved_head_commit" ]] || die "failed to resolve $UPSTREAM_REMOTE/$UPSTREAM_BRANCH locally"
+  if [[ "$resolved_head_commit" != "$upstream_head_commit" ]]; then
+    die "UPSTREAM_HEAD_COMMIT ($upstream_head_commit) does not match $UPSTREAM_REMOTE/$UPSTREAM_BRANCH ($resolved_head_commit)"
+  fi
+  if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$upstream_head_commit" HEAD; then
+    die "UPSTREAM_HEAD_COMMIT ($upstream_head_commit) is not merged into HEAD"
+  fi
+
+  local readme_version readme_commit readme_head_commit manifest_version manifest_commit manifest_head_commit
+  readme_version="$(extract_doc_baseline_value "$README_FILE" 'Upstream release baseline tag')"
+  readme_commit="$(extract_doc_baseline_value "$README_FILE" 'Upstream release baseline commit')"
+  readme_head_commit="$(extract_doc_baseline_value "$README_FILE" 'Upstream merged main commit')"
+  manifest_version="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream release baseline tag')"
+  manifest_commit="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream release baseline commit')"
+  manifest_head_commit="$(extract_doc_baseline_value "$FORK_MANIFEST_FILE" 'Upstream merged main commit')"
 
   [[ -n "$readme_version" ]] || die "README.md missing upstream baseline tag"
   [[ -n "$readme_commit" ]] || die "README.md missing upstream baseline commit"
+  [[ -n "$readme_head_commit" ]] || die "README.md missing upstream merged main commit"
   [[ -n "$manifest_version" ]] || die "docs/godex-fork-manifest.md missing upstream baseline tag"
   [[ -n "$manifest_commit" ]] || die "docs/godex-fork-manifest.md missing upstream baseline commit"
+  [[ -n "$manifest_head_commit" ]] || die "docs/godex-fork-manifest.md missing upstream merged main commit"
 
   if [[ "$readme_version" != "$upstream_version" ]]; then
     die "README.md upstream baseline tag ($readme_version) does not match UPSTREAM_VERSION ($upstream_version)"
@@ -614,15 +650,21 @@ validate_upstream_metadata_consistency() {
   if [[ "$readme_commit" != "$upstream_commit" ]]; then
     die "README.md upstream baseline commit ($readme_commit) does not match UPSTREAM_COMMIT ($upstream_commit)"
   fi
+  if [[ "$readme_head_commit" != "$upstream_head_commit" ]]; then
+    die "README.md upstream merged main commit ($readme_head_commit) does not match UPSTREAM_HEAD_COMMIT ($upstream_head_commit)"
+  fi
   if [[ "$manifest_version" != "$upstream_version" ]]; then
     die "docs/godex-fork-manifest.md upstream baseline tag ($manifest_version) does not match UPSTREAM_VERSION ($upstream_version)"
   fi
   if [[ "$manifest_commit" != "$upstream_commit" ]]; then
     die "docs/godex-fork-manifest.md upstream baseline commit ($manifest_commit) does not match UPSTREAM_COMMIT ($upstream_commit)"
   fi
+  if [[ "$manifest_head_commit" != "$upstream_head_commit" ]]; then
+    die "docs/godex-fork-manifest.md upstream merged main commit ($manifest_head_commit) does not match UPSTREAM_HEAD_COMMIT ($upstream_head_commit)"
+  fi
 
-  rg -Fq "This release line is now synced through official upstream \`$upstream_version\`." "$README_FILE" \
-    || die "README.md summary line does not match UPSTREAM_VERSION ($upstream_version)"
+  rg -Fq "This repository is synced through official upstream release \`$upstream_version\` and merged upstream \`main\` commit \`$upstream_head_commit\`." "$README_FILE" \
+    || die "README.md summary line does not match UPSTREAM_VERSION/UPSTREAM_HEAD_COMMIT"
 }
 
 ensure_tracking_branch() {
@@ -839,6 +881,7 @@ run_release_preflight() {
   printf 'version: %s\n' "$version"
   printf 'upstream_version: %s\n' "$(read_trimmed_file "$UPSTREAM_VERSION_FILE")"
   printf 'upstream_commit: %s\n' "$(read_trimmed_file "$UPSTREAM_COMMIT_FILE")"
+  printf 'upstream_head_commit: %s\n' "$(read_trimmed_file "$UPSTREAM_HEAD_COMMIT_FILE")"
 }
 
 main() {

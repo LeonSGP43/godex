@@ -4,13 +4,23 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-04-14
+
 ### Changed
 
-- What changed: added committed upstream-baseline metadata files (`UPSTREAM_VERSION`, `UPSTREAM_COMMIT`), added machine-readable baseline blocks to the README and fork manifest, and taught the maintainer scripts to refresh and validate those values automatically.
-- Why: the fork needs a durable, machine-checkable record of which official Codex baseline it currently tracks so release/push decisions do not depend on human memory.
-- Impact: `release-preflight` now hard-fails when the recorded upstream tag/commit drift across repo metadata, `sync` refreshes the baseline automatically after merging upstream, and release automation refreshes the metadata before push.
-- Verification: `bash scripts/godex-maintain.sh refresh-upstream-metadata --dry-run`, `bash scripts/godex-maintain.sh release-preflight`, `python3 .codex/skills/godex-release-distributor/scripts/godex_release_distributor.py status`
-- Files: `UPSTREAM_VERSION`, `UPSTREAM_COMMIT`, `README.md`, `docs/godex-fork-manifest.md`, `scripts/godex-maintain.sh`, `.codex/skills/godex-release-distributor/scripts/godex_release_distributor.py`, `docs/godex-maintenance.md`, `docs/godex-fork-guidelines.md`
+- What changed: merged the current official `upstream/main` snapshot through commit `3b24a9a53264f96e7caeea0577b994b0d10a8c6f`, resolved the post-merge TUI and CLI compile boundary mismatches plus the follow-up async API drift in thread spawn and MCP dependency refresh, and restored a green `cargo check -p codex-cli --bin godex`.
+- Why: the fork needs to stay caught up with the latest official Codex code while keeping the fork-owned backend, memory, namespace, and branding seams intact.
+- Impact: this sync branch now fully contains the latest fetched official upstream `main`, `godex` compiles again on top of that code, and the remaining drift is fork-owned divergence rather than an incomplete upstream merge.
+- Verification: `git merge-base --is-ancestor upstream/main HEAD`, `git rev-list --left-right --count HEAD...upstream/main`, `cargo check -p codex-cli --bin godex --manifest-path codex-rs/Cargo.toml`
+- Files: `codex-rs/core/src/thread_manager.rs`, `codex-rs/core/src/mcp_skill_dependencies.rs`, `codex-rs/core/src/tools/runtimes/shell.rs`, `codex-rs/core/src/tools/network_approval.rs`, `codex-rs/app-server/src/codex_message_processor.rs`, `codex-rs/tui/src/lib.rs`, `codex-rs/cli/src/mcp_cmd.rs`, `codex-rs/app-server-client/src/lib.rs`
+
+### Changed
+
+- What changed: expanded the machine-readable upstream tracking metadata so the fork now records both the latest merged official release tag (`UPSTREAM_VERSION` and `UPSTREAM_COMMIT`) and the exact merged `upstream/main` head (`UPSTREAM_HEAD_COMMIT`), and updated the maintainer scripts plus baseline docs to validate both views together.
+- Why: recording only the latest release tag was no longer sufficient once the fork started syncing beyond stable release tags onto newer upstream `main` commits.
+- Impact: maintainers can now tell at a glance both which official release line the fork includes and which exact upstream `main` commit has been merged, while `release-preflight` blocks stale or misleading metadata.
+- Verification: `bash scripts/godex-maintain.sh refresh-upstream-metadata --dry-run`, `bash scripts/godex-maintain.sh release-preflight`
+- Files: `UPSTREAM_VERSION`, `UPSTREAM_COMMIT`, `UPSTREAM_HEAD_COMMIT`, `README.md`, `docs/godex-fork-manifest.md`, `scripts/godex-maintain.sh`, `docs/godex-maintenance.md`, `docs/godex-fork-guidelines.md`
 
 ## [0.2.18] - 2026-04-13
 
