@@ -6,6 +6,12 @@ All notable changes to this fork are documented in this file.
 
 ### Fixed
 
+- What changed: added `--fast-release` to `scripts/install/install-godex-from-source.sh` so local source installs can stay on the `release` path while overriding Cargo's default `fat LTO` profile with faster local build settings (`lto=off`, `codegen-units=16`) and skipping the macOS Homebrew-LLVM/Rust-LLD compatibility wrapper in favor of the native linker. Documented the flag in the install guide.
+- Why: on this machine the native-linker release build no longer failed outright, but the final `godex` release link under the upstream `fat LTO` profile remained impractically slow for day-to-day local installation.
+- Impact: developer machines now have an explicit release-mode install path that is much faster for local use, without changing the repository's default release profile or published artifact settings.
+- Verification: `bash scripts/install/install-godex-from-source.sh --fast-release`, `~/.local/bin/godex --version`
+- Files: `scripts/install/install-godex-from-source.sh`, `docs/install.md`, `CHANGELOG.md`
+
 - What changed: taught `scripts/install/install-godex-from-source.sh` to retry the release build with the native macOS linker when the Homebrew `clang` plus Rust `ld64.lld` compatibility path fails with the known `libwebrtc_sys` versus `libv8` duplicate-symbol conflict, and to remove a pre-existing `godex` symlink in the install dir before copy-install so the installer does not follow an old Homebrew/npm link target. Documented the linker fallback in the install guide.
 - Why: on this machine the source installer could repeatedly fail near the end of the `godex` release build, leaving the old npm-managed `0.2.13` binary on `PATH` even though the repo itself had already advanced to `0.2.21`. The existing install path was also a symlink, which made direct copy-install unsafe.
 - Impact: source installs on macOS keep the faster compatibility linker when it works, but no longer hard-fail on this upstream dependency collision; they automatically retry with the native linker so `godex` can still be built and installed, and they safely replace a symlinked install path with a real copied binary.

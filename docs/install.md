@@ -85,12 +85,20 @@ bash scripts/install/install-godex-from-source.sh --dry-run
 # Install a debug build for local development
 bash scripts/install/install-godex-from-source.sh --debug
 
+# Install a faster local release build when the default fat-LTO link is too slow
+bash scripts/install/install-godex-from-source.sh --fast-release
+
 # Install into a specific directory
 bash scripts/install/install-godex-from-source.sh --install-dir ~/bin
 
 # Use a symlink instead of copying the binary
 bash scripts/install/install-godex-from-source.sh --symlink
 ```
+
+`--fast-release` keeps the install on the `release` path but applies local-only
+Cargo overrides (`lto=off`, `codegen-units=16`) and uses the native macOS
+linker so developer installs finish faster. Use the default release path when
+you need artifact parity with the repository's official release profile.
 
 For the maintenance workflow after upstream merges, rebuild and reinstall with the same script.
 

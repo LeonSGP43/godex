@@ -10,6 +10,7 @@ BUILD_PROFILE="release"
 LINK_MODE="copy"
 DRY_RUN=0
 UPDATE_PATH=1
+FAST_RELEASE=0
 TEMP_FILES=()
 
 cleanup() {
@@ -33,6 +34,7 @@ Options:
   --repo PATH         Override the godex repository root.
   --install-dir PATH  Install into PATH instead of auto-selecting a user bin dir.
   --debug             Build/install the debug binary instead of release.
+  --fast-release      Keep release mode but use faster local build overrides.
   --symlink           Install via symlink instead of copying the binary.
   --copy              Install via copy. This is the default.
   --no-path           Do not append the install dir to the shell profile.
@@ -99,6 +101,11 @@ prepare_release_build_prefix() {
     return
   fi
 
+  if [[ "$FAST_RELEASE" -eq 1 ]]; then
+    step "Using native macOS linker for fast local release builds"
+    return
+  fi
+
   local llvm_clang="/opt/homebrew/opt/llvm/bin/clang"
   if [[ ! -x "$llvm_clang" ]]; then
     return
@@ -141,6 +148,20 @@ EOF
   RELEASE_BUILD_PREFIX=(env "$cargo_target_env=$wrapper")
 }
 
+prepare_release_build_overrides() {
+  RELEASE_BUILD_OVERRIDES=()
+
+  if [[ "$BUILD_PROFILE" != "release" ]] || [[ "$FAST_RELEASE" -eq 0 ]]; then
+    return
+  fi
+
+  step "Using fast local release overrides (lto=off, codegen-units=16)"
+  RELEASE_BUILD_OVERRIDES=(
+    --config 'profile.release.lto="off"'
+    --config 'profile.release.codegen-units=16'
+  )
+}
+
 run_logged_command() {
   local log_file="$1"
   shift
@@ -167,7 +188,9 @@ is_lld_duplicate_symbol_conflict() {
 
 build_release_binary() {
   local cargo_cmd=(
-    cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
+    cargo build -p codex-cli --bin godex --release
+    "${RELEASE_BUILD_OVERRIDES[@]}"
+    --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
   )
 
   if [[ "${#RELEASE_BUILD_PREFIX[@]}" -eq 0 ]]; then
@@ -240,6 +263,10 @@ while [[ $# -gt 0 ]]; do
       BUILD_PROFILE="debug"
       shift
       ;;
+    --fast-release)
+      FAST_RELEASE=1
+      shift
+      ;;
     --symlink)
       LINK_MODE="symlink"
       shift
@@ -273,6 +300,7 @@ PROFILE_FILE="$(resolve_profile)"
 
 ensure_repo
 prepare_release_build_prefix
+prepare_release_build_overrides
 
 SOURCE_BIN="$WORKSPACE_ROOT/target/$BUILD_PROFILE/godex"
 TARGET_BIN="$INSTALL_DIR/godex"
