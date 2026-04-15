@@ -141,6 +141,56 @@ EOF
   RELEASE_BUILD_PREFIX=(env "$cargo_target_env=$wrapper")
 }
 
+run_logged_command() {
+  local log_file="$1"
+  shift
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    run "$@"
+    return 0
+  fi
+
+  local status=0
+  set +e
+  "$@" 2>&1 | tee "$log_file"
+  status=${PIPESTATUS[0]}
+  set -e
+  return "$status"
+}
+
+is_lld_duplicate_symbol_conflict() {
+  local log_file="$1"
+  grep -q "duplicate symbol" "$log_file" &&
+    grep -q "libwebrtc_sys" "$log_file" &&
+    grep -q "libv8" "$log_file"
+}
+
+build_release_binary() {
+  local cargo_cmd=(
+    cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
+  )
+
+  if [[ "${#RELEASE_BUILD_PREFIX[@]}" -eq 0 ]]; then
+    run "${cargo_cmd[@]}"
+    return
+  fi
+
+  local log_file
+  log_file="$(mktemp -t godex-release-build)"
+  TEMP_FILES+=("$log_file")
+
+  if run_logged_command "$log_file" "${RELEASE_BUILD_PREFIX[@]}" "${cargo_cmd[@]}"; then
+    return
+  fi
+
+  if ! is_lld_duplicate_symbol_conflict "$log_file"; then
+    return 1
+  fi
+
+  step "Rust ld64.lld hit duplicate libwebrtc/v8 symbols; retrying with the native macOS linker"
+  run "${cargo_cmd[@]}"
+}
+
 add_to_path() {
   local profile="$1"
   local dir="$2"
@@ -241,15 +291,16 @@ step "Install mode: $LINK_MODE"
 step "Official codex stays untouched because only $TARGET_BIN is managed"
 
 if [[ "$BUILD_PROFILE" == "release" ]]; then
-  if [[ "${#RELEASE_BUILD_PREFIX[@]}" -gt 0 ]]; then
-    run "${RELEASE_BUILD_PREFIX[@]}" cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
-  else
-    run cargo build -p codex-cli --bin godex --release --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
-  fi
+  build_release_binary
 else
   run cargo build -p codex-cli --bin godex --manifest-path "$WORKSPACE_ROOT/Cargo.toml"
 fi
 run mkdir -p "$INSTALL_DIR"
+
+if [[ -L "$TARGET_BIN" ]]; then
+  step "Removing existing symlink at $TARGET_BIN before install"
+  run rm -f "$TARGET_BIN"
+fi
 
 if [[ "$LINK_MODE" == "symlink" ]]; then
   run ln -sfn "$SOURCE_BIN" "$TARGET_BIN"

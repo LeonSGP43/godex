@@ -4,6 +4,14 @@ All notable changes to this fork are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- What changed: taught `scripts/install/install-godex-from-source.sh` to retry the release build with the native macOS linker when the Homebrew `clang` plus Rust `ld64.lld` compatibility path fails with the known `libwebrtc_sys` versus `libv8` duplicate-symbol conflict, and to remove a pre-existing `godex` symlink in the install dir before copy-install so the installer does not follow an old Homebrew/npm link target. Documented the linker fallback in the install guide.
+- Why: on this machine the source installer could repeatedly fail near the end of the `godex` release build, leaving the old npm-managed `0.2.13` binary on `PATH` even though the repo itself had already advanced to `0.2.21`. The existing install path was also a symlink, which made direct copy-install unsafe.
+- Impact: source installs on macOS keep the faster compatibility linker when it works, but no longer hard-fail on this upstream dependency collision; they automatically retry with the native linker so `godex` can still be built and installed, and they safely replace a symlinked install path with a real copied binary.
+- Verification: `bash scripts/install/install-godex-from-source.sh`, `godex --version`, `godex4 --version`
+- Files: `scripts/install/install-godex-from-source.sh`, `docs/install.md`, `CHANGELOG.md`
+
 ## [0.2.21] - 2026-04-14
 
 ### Fixed
