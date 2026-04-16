@@ -6,6 +6,12 @@ All notable changes to this fork are documented in this file.
 
 ### Fixed
 
+- What changed: exposed the `spawn_agent.backend` tool parameter to the model-facing schema and compressed the backend guidance down to one sentence so the agent knows a backend runtime exists without expanding concrete backend inventory into prompt context.
+- Why: the fork already supports real external spawned-agent backends at runtime, but the model-visible tool description was too implicit, and the first draft of the guidance was more specific than needed for routine turns.
+- Impact: spawned-agent prompting now stays lightweight while still teaching the model to use `backend` for runtime selection and inspect current config or runtime state when it needs exact available backend ids.
+- Verification: `cargo test -p codex-tools --lib spawn_agent_tool_v2_requires_task_name_and_lists_visible_models --manifest-path codex-rs/Cargo.toml`, `cargo check -p codex-core --lib --manifest-path codex-rs/Cargo.toml`
+- Files: `codex-rs/core/src/agent/role.rs`, `codex-rs/core/src/agent/role_tests.rs`, `codex-rs/tools/src/agent_tool.rs`, `codex-rs/tools/src/agent_tool_tests.rs`, `CHANGELOG.md`
+
 - What changed: added `--fast-release` to `scripts/install/install-godex-from-source.sh` so local source installs can stay on the `release` path while overriding Cargo's default `fat LTO` profile with faster local build settings (`lto=off`, `codegen-units=16`) and skipping the macOS Homebrew-LLVM/Rust-LLD compatibility wrapper in favor of the native linker. Documented the flag in the install guide.
 - Why: on this machine the native-linker release build no longer failed outright, but the final `godex` release link under the upstream `fat LTO` profile remained impractically slow for day-to-day local installation.
 - Impact: developer machines now have an explicit release-mode install path that is much faster for local use, without changing the repository's default release profile or published artifact settings.
