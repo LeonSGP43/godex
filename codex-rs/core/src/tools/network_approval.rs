@@ -587,7 +587,8 @@ pub(crate) fn build_network_policy_decider(
             };
             match tokio::task::spawn_blocking(move || {
                 let handle = Handle::current();
-                handle.block_on(network_approval.handle_inline_policy_request_owned(session, request))
+                handle
+                    .block_on(network_approval.handle_inline_policy_request_owned(session, request))
             })
             .await
             {

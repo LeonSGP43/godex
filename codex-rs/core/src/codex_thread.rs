@@ -233,10 +233,7 @@ impl CodexThread {
         if self.codex.session.reference_context_item().await.is_none() {
             self.codex
                 .session
-                .record_context_updates_and_set_reference_context_item(
-                    turn_context.as_ref(),
-                    &[],
-                )
+                .record_context_updates_and_set_reference_context_item(turn_context.as_ref(), &[])
                 .await;
         }
         self.codex

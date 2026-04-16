@@ -13,6 +13,7 @@ use crate::history_cell;
 use crate::history_cell::HistoryCell;
 #[cfg(not(debug_assertions))]
 use crate::history_cell::UpdateAvailableHistoryCell;
+use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use crate::runtime_ui_copy::browser_open_failed_message;
 use crate::runtime_ui_copy::browser_opened_message;
 use crate::runtime_ui_copy::permissions_updated_message;
@@ -24,7 +25,6 @@ use crate::updates::GodexUpdateNotice;
 #[cfg(not(debug_assertions))]
 use crate::updates::UpstreamReleaseGapNotice;
 use crate::version::CODEX_CLI_VERSION;
-use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use color_eyre::eyre::Result;
 use ratatui::text::Line;
 

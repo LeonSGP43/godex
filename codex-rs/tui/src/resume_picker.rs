@@ -334,7 +334,10 @@ fn spawn_rollout_page_loader(
     })
 }
 
-async fn load_rollout_page(config: Config, request: PageLoadRequest) -> std::io::Result<PickerPage> {
+async fn load_rollout_page(
+    config: Config,
+    request: PageLoadRequest,
+) -> std::io::Result<PickerPage> {
     let default_provider = match request.provider_filter {
         ProviderFilter::Any => None,
         ProviderFilter::MatchDefault(default_provider) => Some(default_provider),

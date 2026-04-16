@@ -120,7 +120,9 @@ impl EnvironmentManager {
             .map(std::option::Option::<&Arc<Environment>>::cloned)
     }
 
-    pub async fn current_owned(self: Arc<Self>) -> Result<Option<Arc<Environment>>, ExecServerError> {
+    pub async fn current_owned(
+        self: Arc<Self>,
+    ) -> Result<Option<Arc<Environment>>, ExecServerError> {
         if let Some(environment) = self.current_environment.get() {
             return Ok(environment.clone());
         }
@@ -128,7 +130,9 @@ impl EnvironmentManager {
             let _ = self.current_environment.set(None);
             return Ok(None);
         }
-        let environment = Some(Arc::new(Environment::create(self.exec_server_url.clone()).await?));
+        let environment = Some(Arc::new(
+            Environment::create(self.exec_server_url.clone()).await?,
+        ));
         let _ = self.current_environment.set(environment.clone());
         Ok(self
             .current_environment

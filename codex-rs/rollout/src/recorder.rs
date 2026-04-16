@@ -660,8 +660,7 @@ impl RolloutRecorder {
             .await
             .map_err(|e| IoError::other(format!("failed to queue rollout flush: {e}")))?;
         rx.await
-            .map_err(|e| IoError::other(format!("failed waiting for rollout flush: {e}")))
-            ?
+            .map_err(|e| IoError::other(format!("failed waiting for rollout flush: {e}")))?
     }
 
     pub async fn load_rollout_items(

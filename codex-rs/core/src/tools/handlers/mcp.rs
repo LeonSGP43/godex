@@ -56,7 +56,9 @@ impl ToolHandler for McpHandler {
             ))
         })
         .await
-        .map_err(|err| FunctionCallError::RespondToModel(format!("mcp tool task join failed: {err}")))?;
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("mcp tool task join failed: {err}"))
+        })?;
 
         Ok(McpToolOutput {
             result,

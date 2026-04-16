@@ -191,18 +191,17 @@ impl Approvable<ApplyPatchRequest> for ApplyPatchRuntime {
                     let rx_approve = session
                         .clone()
                         .request_patch_approval_owned(
-                            turn,
-                            call_id,
-                            changes,
-                            /*reason*/ None,
-                            /*grant_root*/ None,
+                            turn, call_id, changes, /*reason*/ None, /*grant_root*/ None,
                         )
                         .await;
                     let decision = rx_approve.await.unwrap_or_default();
                     session.services.session_telemetry.counter(
                         "codex.approval.requested",
                         /*inc*/ 1,
-                        &[("tool", "apply_patch"), ("approved", decision.to_opaque_string())],
+                        &[
+                            ("tool", "apply_patch"),
+                            ("approved", decision.to_opaque_string()),
+                        ],
                     );
                     if matches!(decision, ReviewDecision::ApprovedForSession) {
                         let mut store = session.services.tool_approvals.lock().await;

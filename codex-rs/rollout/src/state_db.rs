@@ -82,7 +82,10 @@ pub async fn get_state_db_owned(
     model_provider_id: String,
 ) -> Option<StateDbHandle> {
     let state_path = codex_state::state_db_path(&sqlite_home);
-    if !tokio::fs::try_exists(state_path.clone()).await.unwrap_or(false) {
+    if !tokio::fs::try_exists(state_path.clone())
+        .await
+        .unwrap_or(false)
+    {
         return None;
     }
     let runtime = codex_state::StateRuntime::init(sqlite_home.clone(), model_provider_id)
@@ -111,7 +114,10 @@ pub async fn open_if_present_owned(
     default_provider: String,
 ) -> Option<StateDbHandle> {
     let db_path = codex_state::state_db_path(&codex_home);
-    if !tokio::fs::try_exists(db_path.clone()).await.unwrap_or(false) {
+    if !tokio::fs::try_exists(db_path.clone())
+        .await
+        .unwrap_or(false)
+    {
         return None;
     }
     let runtime = codex_state::StateRuntime::init(codex_home.clone(), default_provider)

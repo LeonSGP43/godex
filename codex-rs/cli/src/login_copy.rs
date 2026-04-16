@@ -7,8 +7,7 @@ pub(crate) const API_KEY_LOGIN_DISABLED_MESSAGE: &str =
 pub(crate) const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
 pub const WITH_API_KEY_HELP: &str =
     "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | godex login --with-api-key`)";
-pub const API_KEY_FLAG_DEPRECATED_HELP: &str =
-    "(deprecated) Previously accepted the API key directly; now exits with guidance to use --with-api-key";
+pub const API_KEY_FLAG_DEPRECATED_HELP: &str = "(deprecated) Previously accepted the API key directly; now exits with guidance to use --with-api-key";
 
 pub(crate) fn login_server_start_message(actual_port: u16, auth_url: &str) -> String {
     format!(

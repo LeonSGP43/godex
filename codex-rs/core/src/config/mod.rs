@@ -729,9 +729,10 @@ impl ConfigBuilder {
             cloud_requirements,
             fallback_cwd,
         } = self;
-        let codex_home = AbsolutePathBuf::from_absolute_path(
-            home_policy::resolve_config_home(codex_home, config_namespace)?,
-        )?;
+        let codex_home = AbsolutePathBuf::from_absolute_path(home_policy::resolve_config_home(
+            codex_home,
+            config_namespace,
+        )?)?;
         let cli_overrides = cli_overrides.unwrap_or_default();
         let mut harness_overrides = harness_overrides.unwrap_or_default();
         let loader_overrides = loader_overrides.unwrap_or_default();

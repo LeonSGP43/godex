@@ -256,7 +256,10 @@ impl ModelsManager {
         skip(self),
         fields(refresh_strategy = %refresh_strategy)
     )]
-    pub async fn list_models_owned(self: Arc<Self>, refresh_strategy: RefreshStrategy) -> Vec<ModelPreset> {
+    pub async fn list_models_owned(
+        self: Arc<Self>,
+        refresh_strategy: RefreshStrategy,
+    ) -> Vec<ModelPreset> {
         if let Err(err) = self.refresh_available_models(refresh_strategy).await {
             error!("failed to refresh available models: {err}");
         }

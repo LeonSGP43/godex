@@ -3463,7 +3463,8 @@ fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtrees_cl
                 ))
                 .await
                 .expect("grandchild spawn should succeed");
-            let (grandchild_content, grandchild_success) = expect_text_output(grandchild_spawn_output);
+            let (grandchild_content, grandchild_success) =
+                expect_text_output(grandchild_spawn_output);
             let grandchild_result: serde_json::Value = serde_json::from_str(&grandchild_content)
                 .expect("grandchild spawn result should be json");
             let grandchild_thread_id = parse_agent_id(
@@ -3509,7 +3510,8 @@ fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtrees_cl
                 ))
                 .await
                 .expect("resume_agent should reopen the child subtree");
-            let (child_resume_content, child_resume_success) = expect_text_output(child_resume_output);
+            let (child_resume_content, child_resume_success) =
+                expect_text_output(child_resume_output);
             let child_resume_result: resume_agent::ResumeAgentResult =
                 serde_json::from_str(&child_resume_content).expect("resume result should be json");
             assert_ne!(child_resume_result.status, AgentStatus::NotFound);
@@ -3577,7 +3579,8 @@ fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtrees_cl
                 ))
                 .await
                 .expect("resume_agent should reopen the parent thread");
-            let (parent_resume_content, parent_resume_success) = expect_text_output(parent_resume_output);
+            let (parent_resume_content, parent_resume_success) =
+                expect_text_output(parent_resume_output);
             let parent_resume_result: resume_agent::ResumeAgentResult =
                 serde_json::from_str(&parent_resume_content)
                     .expect("parent resume result should be json");

@@ -4,10 +4,10 @@ pub mod auth_env_telemetry;
 pub mod provider_auth;
 pub mod token_data;
 
+mod copy;
 mod device_code_auth;
 mod pkce;
 mod server;
-mod copy;
 
 pub use codex_client::BuildCustomCaTransportError as BuildLoginHttpClientError;
 pub use codex_config::types::AuthCredentialsStoreMode;

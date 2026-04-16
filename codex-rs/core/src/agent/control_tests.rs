@@ -584,57 +584,57 @@ fn append_message_records_assistant_message() {
     run_async_test_with_large_tokio_worker_stack(
         "append_message_records_assistant_message",
         || async move {
-        let harness = AgentControlHarness::new().await;
-        let (thread_id, thread) = harness.start_thread().await;
-        let message = "author: /root\nrecipient: /root/worker\nother_recipients: []\nContent: hello from tests";
+            let harness = AgentControlHarness::new().await;
+            let (thread_id, thread) = harness.start_thread().await;
+            let message = "author: /root\nrecipient: /root/worker\nother_recipients: []\nContent: hello from tests";
 
-        let submission_id = harness
-            .control
-            .append_message(
-                thread_id,
-                ResponseItem::Message {
-                    id: None,
-                    role: "assistant".to_string(),
-                    content: vec![ContentItem::InputText {
-                        text: message.to_string(),
-                    }],
-                    end_turn: None,
-                    phase: None,
-                },
-            )
-            .await
-            .expect("append_message should succeed");
-        assert!(!submission_id.is_empty());
+            let submission_id = harness
+                .control
+                .append_message(
+                    thread_id,
+                    ResponseItem::Message {
+                        id: None,
+                        role: "assistant".to_string(),
+                        content: vec![ContentItem::InputText {
+                            text: message.to_string(),
+                        }],
+                        end_turn: None,
+                        phase: None,
+                    },
+                )
+                .await
+                .expect("append_message should succeed");
+            assert!(!submission_id.is_empty());
 
-        timeout(Duration::from_secs(5), async {
-            loop {
-                let history_items = thread
-                    .codex
-                    .session
-                    .clone_history()
-                    .await
-                    .raw_items()
-                    .to_vec();
-                let recorded = history_items.iter().any(|item| {
-                    matches!(
-                        item,
-                        ResponseItem::Message { role, content, .. }
-                            if role == "assistant"
-                                && content.iter().any(|content_item| matches!(
-                                    content_item,
-                                    ContentItem::InputText { text } if text == message
-                                ))
-                    )
-                });
-                if recorded {
-                    break;
+            timeout(Duration::from_secs(5), async {
+                loop {
+                    let history_items = thread
+                        .codex
+                        .session
+                        .clone_history()
+                        .await
+                        .raw_items()
+                        .to_vec();
+                    let recorded = history_items.iter().any(|item| {
+                        matches!(
+                            item,
+                            ResponseItem::Message { role, content, .. }
+                                if role == "assistant"
+                                    && content.iter().any(|content_item| matches!(
+                                        content_item,
+                                        ContentItem::InputText { text } if text == message
+                                    ))
+                        )
+                    });
+                    if recorded {
+                        break;
+                    }
+                    sleep(Duration::from_millis(10)).await;
                 }
-                sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("assistant message should be recorded");
-    },
+            })
+            .await
+            .expect("assistant message should be recorded");
+        },
     );
 }
 

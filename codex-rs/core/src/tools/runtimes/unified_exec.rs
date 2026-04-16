@@ -189,7 +189,10 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
                     session.services.session_telemetry.counter(
                         "codex.approval.requested",
                         /*inc*/ 1,
-                        &[("tool", "unified_exec"), ("approved", decision.to_opaque_string())],
+                        &[
+                            ("tool", "unified_exec"),
+                            ("approved", decision.to_opaque_string()),
+                        ],
                     );
                     if matches!(decision, ReviewDecision::ApprovedForSession) {
                         let mut store = session.services.tool_approvals.lock().await;

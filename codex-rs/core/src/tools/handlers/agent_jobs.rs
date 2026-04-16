@@ -214,7 +214,9 @@ impl ToolHandler for BatchJobHandler {
                     "spawn_agents_on_csv" => {
                         spawn_agents_on_csv::handle(session, turn, arguments).await
                     }
-                    "report_agent_job_result" => report_agent_job_result::handle(session, arguments).await,
+                    "report_agent_job_result" => {
+                        report_agent_job_result::handle(session, arguments).await
+                    }
                     other => Err(FunctionCallError::RespondToModel(format!(
                         "unsupported agent job tool {other}"
                     ))),
@@ -222,7 +224,9 @@ impl ToolHandler for BatchJobHandler {
             })
         })
         .await
-        .map_err(|err| FunctionCallError::RespondToModel(format!("agent job task join failed: {err}")))?
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("agent job task join failed: {err}"))
+        })?
     }
 }
 

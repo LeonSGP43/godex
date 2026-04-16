@@ -2,10 +2,10 @@ use super::*;
 use crate::agent::control::SpawnAgentForkMode;
 use crate::agent::control::SpawnAgentOptions;
 use crate::agent::control::render_input_preview;
-use crate::agent::role::DEFAULT_ROLE_NAME;
-use crate::agent::role::apply_role_to_config_by_value_owned;
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
+use crate::agent::role::DEFAULT_ROLE_NAME;
+use crate::agent::role::apply_role_to_config_by_value_owned;
 
 pub(crate) struct Handler;
 

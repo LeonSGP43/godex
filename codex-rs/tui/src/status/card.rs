@@ -551,7 +551,10 @@ impl StatusHistoryCell {
 impl HistoryCell for StatusHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(branded_title_line(FieldFormatter::INDENT, CODEX_CLI_VERSION));
+        lines.push(branded_title_line(
+            FieldFormatter::INDENT,
+            CODEX_CLI_VERSION,
+        ));
         lines.push(Line::from(Vec::<Span<'static>>::new()));
 
         let available_inner_width = usize::from(width.saturating_sub(4));
