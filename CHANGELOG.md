@@ -6,6 +6,12 @@ All notable changes to this fork are documented in this file.
 
 ### Fixed
 
+- What changed: normalized the pending Rust formatting-only drift across CLI, core, exec-server, login, rollout, models-manager, and TUI modules without introducing new behavior changes.
+- Why: these files were left in a dirty state by formatting and import-order noise, which made the worktree look functionally divergent even though the actual pending change was presentation-only.
+- Impact: the fork is easier to inspect and sync because this formatting residue is now tracked as an explicit housekeeping change instead of lingering as uncommitted noise.
+- Verification: `git diff -w --stat`, `git status --short --branch`
+- Files: `codex-rs/cli/src/login_copy.rs`, `codex-rs/cli/src/mcp_copy.rs`, `codex-rs/core/src/agent/control.rs`, `codex-rs/core/src/agent/control_tests.rs`, `codex-rs/core/src/codex_thread.rs`, `codex-rs/core/src/config/mod.rs`, `codex-rs/core/src/tools/handlers/agent_jobs.rs`, `codex-rs/core/src/tools/handlers/mcp.rs`, `codex-rs/core/src/tools/handlers/multi_agents/spawn.rs`, `codex-rs/core/src/tools/handlers/multi_agents_tests.rs`, `codex-rs/core/src/tools/network_approval.rs`, `codex-rs/core/src/tools/runtimes/apply_patch.rs`, `codex-rs/core/src/tools/runtimes/unified_exec.rs`, `codex-rs/exec-server/src/environment.rs`, `codex-rs/login/src/lib.rs`, `codex-rs/models-manager/src/manager.rs`, `codex-rs/rollout/src/recorder.rs`, `codex-rs/rollout/src/state_db.rs`, `codex-rs/tui/src/app/runtime_ui.rs`, `codex-rs/tui/src/resume_picker.rs`, `codex-rs/tui/src/status/card.rs`, `CHANGELOG.md`
+
 - What changed: exposed the `spawn_agent.backend` tool parameter to the model-facing schema and compressed the backend guidance down to one sentence so the agent knows a backend runtime exists without expanding concrete backend inventory into prompt context.
 - Why: the fork already supports real external spawned-agent backends at runtime, but the model-visible tool description was too implicit, and the first draft of the guidance was more specific than needed for routine turns.
 - Impact: spawned-agent prompting now stays lightweight while still teaching the model to use `backend` for runtime selection and inspect current config or runtime state when it needs exact available backend ids.
