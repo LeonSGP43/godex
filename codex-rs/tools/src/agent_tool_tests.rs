@@ -65,12 +65,21 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
     assert!(!description.contains("hidden display (`hidden-model`)"));
     assert!(properties.contains_key("task_name"));
     assert!(properties.contains_key("message"));
+    assert!(properties.contains_key("backend"));
     assert!(properties.contains_key("fork_turns"));
     assert!(!properties.contains_key("items"));
     assert!(!properties.contains_key("fork_context"));
     assert_eq!(
         properties.get("agent_type"),
         Some(&JsonSchema::string(Some("role help".to_string())))
+    );
+    assert_eq!(
+        properties
+            .get("backend")
+            .and_then(|schema| schema.description.as_deref()),
+        Some(
+            "Optional runtime backend id for the new agent; inspect the active config or runtime state if you need the current available backend ids."
+        )
     );
     assert_eq!(
         parameters.required.as_ref(),
@@ -105,6 +114,7 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
         .expect("spawn_agent should use object params");
 
     assert!(properties.contains_key("fork_context"));
+    assert!(properties.contains_key("backend"));
     assert!(!properties.contains_key("fork_turns"));
 }
 

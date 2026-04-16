@@ -305,7 +305,7 @@ pub(crate) mod spawn_tool_spec {
         }
 
         format!(
-            "Optional type name for the new agent. If omitted, `{DEFAULT_ROLE_NAME}` is used.\nAvailable roles:\n{}",
+            "Optional type name for the new agent. If omitted, `{DEFAULT_ROLE_NAME}` is used.\n`agent_type` chooses the agent's behavior, instructions, and any locked model settings; use `backend` to choose the runtime host, and inspect the active config or runtime state if you need the current available backend ids.\nAvailable roles:\n{}",
             formatted_roles.join("\n"),
         )
     }

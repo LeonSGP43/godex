@@ -51,6 +51,17 @@ fn session_flags_layer_count(config: &Config) -> usize {
         .count()
 }
 
+#[test]
+fn spawn_tool_spec_mentions_backend_runtime_and_lookup_guidance() {
+    let description = spawn_tool_spec::build(&BTreeMap::new());
+
+    assert!(
+        description.contains(
+            "`agent_type` chooses the agent's behavior, instructions, and any locked model settings; use `backend` to choose the runtime host, and inspect the active config or runtime state if you need the current available backend ids."
+        )
+    );
+}
+
 #[tokio::test]
 async fn apply_role_defaults_to_default_and_leaves_config_unchanged() {
     let (_home, mut config) = test_config_with_cli_overrides(Vec::new()).await;

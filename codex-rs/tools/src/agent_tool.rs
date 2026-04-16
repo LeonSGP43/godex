@@ -22,6 +22,8 @@ pub struct WaitAgentTimeoutOptions {
     pub max_timeout_ms: i64,
 }
 
+const SPAWN_AGENT_BACKEND_DESCRIPTION: &str = "Optional runtime backend id for the new agent; inspect the active config or runtime state if you need the current available backend ids.";
+
 pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
     let available_models_description = (!options.hide_agent_type_model_reasoning)
         .then(|| spawn_agent_models_description(options.available_models));
@@ -518,6 +520,10 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
             JsonSchema::string(Some(agent_type_description.to_string())),
         ),
         (
+            "backend".to_string(),
+            JsonSchema::string(Some(SPAWN_AGENT_BACKEND_DESCRIPTION.to_string())),
+        ),
+        (
             "fork_context".to_string(),
             JsonSchema::boolean(Some(
                 "When true, fork the current thread history into the new agent before sending the initial prompt. This must be used when you want the new agent to have exactly the same context as you."
@@ -550,6 +556,10 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
         (
             "agent_type".to_string(),
             JsonSchema::string(Some(agent_type_description.to_string())),
+        ),
+        (
+            "backend".to_string(),
+            JsonSchema::string(Some(SPAWN_AGENT_BACKEND_DESCRIPTION.to_string())),
         ),
         (
             "fork_turns".to_string(),
